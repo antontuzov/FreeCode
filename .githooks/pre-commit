@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Opt in once per clone:  git config core.hooksPath .githooks
+# It runs the same gate CI runs, so a red rust-tauri-precommit-gate cannot be pushed by surprise.
+exec "$(dirname "$0")/../scripts/verify-precommit.sh"

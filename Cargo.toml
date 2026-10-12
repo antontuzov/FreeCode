@@ -6,6 +6,7 @@ members = [
   "crates/smollm-llama",
   "crates/smollm-tools",
   "crates/smollm-core",
+  "apps/desktop/src-tauri",
 ]
 
 [workspace.package]

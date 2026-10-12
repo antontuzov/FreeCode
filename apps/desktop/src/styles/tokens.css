@@ -1,0 +1,124 @@
+/* Design tokens — the only file allowed to state a color.
+ *
+ * Three orthogonal axes, all of which the Appearance page drives:
+ *   data-theme-mode = light | dark
+ *   data-accent     = forest | mint | bee | parchment
+ *   data-surface    = glass | solid   (glass degrades to solid when blur is unavailable)
+ * Every screen must render correctly in all 2 x 4 x 2 combinations, so components consume these
+ * variables exclusively and never mix a color literal with them.
+ */
+
+:root {
+  /* Geometry and type, independent of the palette. */
+  --font-ui: 14px;
+  --font-code: 12px;
+  --font-family-ui: ui-sans-serif, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+  --font-family-code: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --sidebar-width: 264px;
+  --inspector-width: 320px;
+  --blur-amount: 18px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+
+  --accent: #2f6f5e;
+  --accent-contrast: #f6faf8;
+}
+
+/* ---- mode: dark (the default in the reference shots) ---- */
+[data-theme-mode="dark"] {
+  --bg: #14181a;
+  --bg-elevated: #1b2124;
+  --bg-sunken: #0f1214;
+  --bg-hover: #232a2e;
+  --text: #e8ecee;
+  --text-muted: #98a4a9;
+  --text-faint: #6c787e;
+  --border: #2b3338;
+  --border-strong: #3b464c;
+  --shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  --code-bg: #10151a;
+  --code-theme: "github-dark";
+  --success: #4caf7d;
+  --warning: #d8a13f;
+  --danger: #d9605f;
+  --diff-added: #2f6f3f;
+  --diff-removed: #6b2f2f;
+  color-scheme: dark;
+}
+
+/* ---- mode: light ---- */
+[data-theme-mode="light"] {
+  --bg: #f7f8f7;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #eceeed;
+  --bg-hover: #e3e7e6;
+  --text: #1b2124;
+  --text-muted: #5c686d;
+  --text-faint: #869196;
+  --border: #d9dfdd;
+  --border-strong: #c2cbc8;
+  --shadow: 0 10px 28px rgb(20 30 25 / 12%);
+  --code-bg: #f4f6f5;
+  --code-theme: "github-light";
+  --success: #2c7a4b;
+  --warning: #9a6b12;
+  --danger: #b3403f;
+  --diff-added: #d8f0dc;
+  --diff-removed: #f6dedd;
+  color-scheme: light;
+}
+
+/* ---- accent families (Forest, Mint, Bee, Parchment) ---- */
+[data-accent="forest"] {
+  --accent: #2f6f5e;
+  --accent-soft: color-mix(in oklab, var(--accent) 18%, transparent);
+  --accent-contrast: #f4faf7;
+}
+[data-accent="mint"] {
+  --accent: #3fa08a;
+  --accent-soft: color-mix(in oklab, var(--accent) 16%, transparent);
+  --accent-contrast: #0f1a17;
+}
+[data-accent="bee"] {
+  --accent: #c9992c;
+  --accent-soft: color-mix(in oklab, var(--accent) 18%, transparent);
+  --accent-contrast: #1b1608;
+}
+[data-accent="parchment"] {
+  --accent: #b08a5a;
+  --accent-soft: color-mix(in oklab, var(--accent) 16%, transparent);
+  --accent-contrast: #1f1710;
+}
+
+/* ---- surface: glass falls back to solid, never to a half-blurred nothing ---- */
+[data-surface="glass"] {
+  --surface-bg: color-mix(in oklab, var(--bg-elevated) 72%, transparent);
+  --surface-blur: blur(var(--blur-amount));
+  --surface-border: color-mix(in oklab, var(--border) 60%, transparent);
+}
+[data-surface="solid"] {
+  --surface-bg: var(--bg-elevated);
+  --surface-blur: none;
+  --surface-border: var(--border);
+}
+
+/* macOS hides the traffic lights behind the sidebar; the shell reserves the space. */
+[data-platform="darwin"] {
+  --traffic-light-inset: 78px;
+}
+[data-platform="win32"],
+[data-platform="linux"] {
+  --traffic-light-inset: var(--space-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --blur-amount: 0px;
+  }
+}

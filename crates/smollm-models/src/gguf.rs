@@ -96,12 +96,10 @@ impl IntegrityStatus {
     }
 }
 
-/// Check size first (cheap), then hash (a multi-GB read).
-pub fn verify(
-    path: &Path,
-    expected_size_bytes: u64,
-    expected_sha256: &str,
-) -> Result<IntegrityStatus, ModelsError> {
+/// Size-only presence check. `verify` below has to read every byte for the digest, which is a
+/// 7 GB walk on a 5.5–7.2 GB pack and belongs at download completion, not on every Model Manager
+/// refresh. A file whose size matches is reported `Ok` here; only `verify` can call it hashed.
+pub fn check_size(path: &Path, expected_size_bytes: u64) -> Result<IntegrityStatus, ModelsError> {
     if !path.exists() {
         return Ok(IntegrityStatus::Missing);
     }
@@ -116,6 +114,19 @@ pub fn verify(
             expected: expected_size_bytes,
             actual: actual_size,
         });
+    }
+    Ok(IntegrityStatus::Ok)
+}
+
+/// Check size first (cheap), then hash (a multi-GB read).
+pub fn verify(
+    path: &Path,
+    expected_size_bytes: u64,
+    expected_sha256: &str,
+) -> Result<IntegrityStatus, ModelsError> {
+    let status = check_size(path, expected_size_bytes)?;
+    if status != IntegrityStatus::Ok {
+        return Ok(status);
     }
     let actual = sha256_file(path)?;
     if actual.eq_ignore_ascii_case(expected_sha256) {

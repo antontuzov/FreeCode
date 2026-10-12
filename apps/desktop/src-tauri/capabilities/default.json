@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window. It may call the host's own commands and nothing else: no shell, no filesystem and no network capability is granted to the UI, because every privileged path goes through smollm-tools' sandbox on the Rust side.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

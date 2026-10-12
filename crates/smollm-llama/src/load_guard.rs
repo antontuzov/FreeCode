@@ -277,7 +277,12 @@ pub fn check(req: &GuardRequest) -> GuardReport {
     }
 
     // 4. Proof of the rotated basis — required for every pack of a ternary model, F16 included.
-    if req.pack.needs_fork_engine(&req.model.weight_format) {
+    //    An absent file is refused as "not downloaded" above; calling a file that is not on disk
+    //    "not a Prism export" would send the user checking a metadata prefix instead of pressing
+    //    Download.
+    if req.pack.needs_fork_engine(&req.model.weight_format)
+        && !matches!(req.state, FileState::Absent)
+    {
         let required = &req.model.engine.required_metadata_prefixes;
         let found: &[String] = req
             .header
@@ -499,6 +504,30 @@ mod tests {
             "F16 must not sail through: {:?}",
             report.blockers
         );
+    }
+
+    #[test]
+    fn a_file_that_is_not_downloaded_yet_is_refused_as_absent_not_as_forged() {
+        // The same host with no weights on disk must say "not downloaded", because "this is not a
+        // Prism export" would send the user at a metadata prefix instead of the Download button.
+        let (root, lock, model) = fixture();
+        let pack = model.packs.first().unwrap();
+        let metal = host(Backend::Metal);
+        let mut req = request(&root, &lock, &model, pack, None, None, Some(&metal));
+        req.state = FileState::Absent;
+        let report = check(&req);
+        assert!(
+            !report
+                .blockers
+                .iter()
+                .any(|b| matches!(b, Blocker::RotationMetadataMissing { .. })),
+            "{:?}",
+            report.blockers
+        );
+        assert!(report.blockers.iter().any(|b| matches!(
+            b,
+            Blocker::IntegrityFailed { status, .. } if status == "not downloaded"
+        )));
     }
 
     #[test]

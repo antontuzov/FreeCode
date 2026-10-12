@@ -1,0 +1,109 @@
+name: ci
+
+# The five verify-* jobs from the contract, plus the precommit gate. They run on macOS arm64 because
+# that is where Metal, the pinned `macos-aarch64` engine asset and `sysctl` hardware detection all
+# exist — a Linux runner would only ever exercise the CPU fallback.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  rust-tauri-precommit-gate:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/verify-precommit.sh
+
+  verify-hf-gguf-catalog-entry:
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The remote leg asks Hugging Face for the real object sizes and digests, so it runs where a
+      # network flake cannot block a PR; every other run checks the pinned contract offline.
+      - name: offline contract check
+        if: github.event_name == 'pull_request'
+        run: ./scripts/verify-catalog.sh
+      - name: check against Hugging Face
+        if: github.event_name != 'pull_request'
+        env:
+          HF_VERIFY_REMOTE: "1"
+        run: ./scripts/verify-catalog.sh
+
+  verify-tauri-ui-natively:
+    runs-on: macos-14
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/verify-tauri-ui.sh
+
+  tauri-desktop-native-verification:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # generate_context! embeds the built UI, so the frontend has to exist before the host links.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: ./scripts/verify-desktop-native.sh
+
+  verify-smollm-studio-natively:
+    needs:
+      - rust-tauri-precommit-gate
+      - verify-hf-gguf-catalog-entry
+      - verify-tauri-ui-natively
+      - tauri-desktop-native-verification
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/verify-studio-natively.sh

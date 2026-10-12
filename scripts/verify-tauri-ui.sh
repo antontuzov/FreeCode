@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# verify-tauri-ui-natively: the shell's contract with the host, checked statically.
+#   1. every command the UI invokes exists in the host, and every host command is registered
+#   2. every StepKind i18n key is translated in every locale, with matching {{parameters}}
+#   3. no component states a colour literally — the theme is a token swap or it is broken
+#   4. the bundle that ships is the bundle that was type-checked
+source "$(dirname "$0")/_env.sh"
+
+IPC=apps/desktop/src/lib/ipc.ts
+HOST=apps/desktop/src-tauri/src/lib.rs
+
+step "UI commands vs the host's #[tauri::command] list"
+ui_cmds=$(grep -oE 'invoke(<[^>]*>)?\("[a-z_]+"' "$IPC" | grep -oE '"[a-z_]+"' | tr -d '"' | sort -u)
+host_cmds=$(grep -A3 '#\[tauri::command\]' "$HOST" | grep -oE '^async fn [a-z_]+|^fn [a-z_]+' | awk '{print $NF}' | sort -u)
+registered=$(sed -n '/generate_handler!\[/,/\]/p' "$HOST" | grep -oE '[a-z_]+' | sort -u)
+
+[[ -n "$ui_cmds" ]] || { echo "no invoke() calls found in $IPC — the check itself broke"; exit 1; }
+for cmd in $ui_cmds; do
+  grep -qx "$cmd" <<<"$host_cmds" || { echo "FAIL the UI calls \"$cmd\" but the host defines no such command"; exit 1; }
+  grep -qx "$cmd" <<<"$registered" || { echo "FAIL $cmd is defined but not in generate_handler!, so invoke() rejects it"; exit 1; }
+done
+for cmd in $host_cmds; do
+  grep -qx "$cmd" <<<"$registered" || { echo "FAIL $cmd is a host command that invoke() can never reach"; exit 1; }
+done
+echo "OK — $(echo "$ui_cmds" | wc -l | tr -d ' ') commands wired both ways: $(echo "$ui_cmds" | tr '\n' ' ')"
+
+step "transcript i18n keys vs StepKind"
+cargo run --locked -q -p smollm-core --bin verify-transcript-i18n -- apps/desktop/src/i18n
+
+step "no hardcoded colours"
+pnpm_cmd lint
+
+step "typecheck and build"
+pnpm_cmd typecheck
+pnpm_cmd build
+
+printf '\n\033[1mverify-tauri-ui-natively: OK\033[0m\n'

@@ -1,0 +1,27 @@
+[package]
+name = "smollm-desktop"
+description = "SmoLLM Studio desktop host: the Tauri v2 shell that exposes the Rust catalog, engine guard and agent core to the React UI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+name = "smollm_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+smollm-config = { workspace = true }
+smollm-models = { workspace = true }
+smollm-llama = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

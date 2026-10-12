@@ -1,2 +1,8 @@
 packages:
   - "apps/*"
+
+# pnpm 11 blocks postinstall scripts unless named here. esbuild needs its platform binary and
+# @tauri-apps/cli its native binding; both would otherwise fail with a confusing runtime error.
+allowBuilds:
+  esbuild: true
+  "@tauri-apps/cli": true
