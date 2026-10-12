@@ -5,20 +5,26 @@
  * parallel palette the screenshots could never match in both modes. */
 @theme inline {
   --color-bg: var(--bg);
+  --color-panel: var(--bg-panel);
   --color-elevated: var(--bg-elevated);
   --color-sunken: var(--bg-sunken);
   --color-hover: var(--bg-hover);
+  --color-code: var(--code-bg);
   --color-fg: var(--text);
+  --color-fg-strong: var(--text-strong);
   --color-muted: var(--text-muted);
   --color-faint: var(--text-faint);
   --color-line: var(--border);
   --color-line-strong: var(--border-strong);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
   --color-accent-contrast: var(--accent-contrast);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-diff-added: var(--diff-added);
+  --color-diff-removed: var(--diff-removed);
   --font-sans: var(--font-family-ui);
   --font-mono: var(--font-family-code);
 }
@@ -49,6 +55,89 @@ body {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ---- the repeated shapes in the reference shots ---- */
+
+/* Nav rows are icon + label, quiet until hovered; the active one is an outlined pill, not a fill. */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 9px var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: var(--font-ui);
+  text-align: left;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.nav-item[data-active="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--text-strong);
+}
+
+/* "Personal", "Integrations", "Coding" — the group label above a run of nav items. */
+.section-label {
+  padding: var(--space-4) var(--space-3) var(--space-1);
+  color: var(--text-faint);
+  font-size: calc(var(--font-ui) - 2px);
+}
+
+/* Settings rows and inspector groups sit in a rounded card separated by dashed hairlines. */
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+.card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-bottom: 1px dashed var(--border);
+}
+.card-row:last-child {
+  border-bottom: none;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px var(--space-3);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--text-strong);
+  font-size: calc(var(--font-ui) - 1px);
+}
+
+/* Bare glyph buttons in the headers: the hit area is larger than the icon it draws. */
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .transcript-row {

@@ -25,6 +25,8 @@ export type ModelStatus = {
   packing: string;
   sizeGb: number;
   warnings: string[];
+  /** Caveats whose condition the host could not evaluate, so they may not apply to this machine. */
+  uncheckedWarnings: string[];
   packs: PackView[];
   /** Set when the load-guard refuses to run: title plus the one action that clears it. */
   blocked: { title: string; detail: string; ctaLabel: string; ctaUrl: string } | null;

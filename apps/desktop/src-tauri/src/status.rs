@@ -65,15 +65,34 @@ impl Assembly {
     }
 
     pub fn view(&self, settings: &Settings) -> ModelStatusView {
+        // A caveat whose condition this build cannot evaluate is not a claim about this machine.
+        // It travels in its own field so the UI can fold it behind a disclosure, rather than
+        // printing another platform's bug report as if it were a warning about this one.
         let mut warnings: Vec<String> = self
             .recommendation
             .warnings
             .iter()
             .cloned()
-            .chain(self.report.warnings.iter().map(|w| w.message.clone()))
+            .chain(
+                self.report
+                    .warnings
+                    .iter()
+                    .filter(|w| w.code != load_guard::WarningCode::CaveatUnevaluated)
+                    .map(|w| w.message.clone()),
+            )
             .collect();
         warnings.sort();
         warnings.dedup();
+
+        let mut unchecked_warnings: Vec<String> = self
+            .report
+            .warnings
+            .iter()
+            .filter(|w| w.code == load_guard::WarningCode::CaveatUnevaluated)
+            .map(|w| w.message.clone())
+            .collect();
+        unchecked_warnings.sort();
+        unchecked_warnings.dedup();
 
         let blocked = self.report.first_blocker().map(|b| {
             let cta = b.cta(&self.lock);
@@ -100,6 +119,7 @@ impl Assembly {
             packing: self.pack.key.clone(),
             size_gb: self.pack.size_gb,
             warnings,
+            unchecked_warnings,
             packs: self
                 .recommendation
                 .reports
@@ -268,6 +288,8 @@ pub struct ModelStatusView {
     pub packing: String,
     pub size_gb: f32,
     pub warnings: Vec<String>,
+    /// Caveats whose condition this build could not evaluate, so they may or may not apply here.
+    pub unchecked_warnings: Vec<String>,
     pub packs: Vec<PackView>,
     pub blocked: Option<BlockedView>,
 }
@@ -307,6 +329,25 @@ mod tests {
             assembly.contract_failures()
         );
         assert!(!assembly.report.is_allowed());
+    }
+
+    #[test]
+    fn caveats_the_host_cannot_evaluate_stay_out_of_the_matched_list() {
+        // The shipped catalog carries caveats about other operating systems and GPU models. They
+        // must reach the UI folded, never as a warning that reads like it is about this machine.
+        let status = build(&repo_root(), &Settings::default()).expect("status builds");
+        assert!(
+            status
+                .warnings
+                .iter()
+                .all(|w| !w.contains("condition: backend ==")),
+            "a cross-platform caveat leaked into the matched warnings: {:?}",
+            status.warnings
+        );
+        assert!(
+            !status.unchecked_warnings.is_empty(),
+            "the catalog's unverifiable caveats must still be surfaced somewhere"
+        );
     }
 
     #[test]

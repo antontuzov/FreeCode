@@ -6,6 +6,12 @@
  *   data-surface    = glass | solid   (glass degrades to solid when blur is unavailable)
  * Every screen must render correctly in all 2 x 4 x 2 combinations, so components consume these
  * variables exclusively and never mix a color literal with them.
+ *
+ * The neutrals below are measured, not eyeballed: each one is a pixel read out of
+ * docs/reference-ui with scripts/probe-reference-palette.swift (see the citation on the line).
+ * The four accent families are measured in light mode from the interface-style cards in shot 02;
+ * their dark-mode counterparts are the same hues lifted for contrast on the near-black green, and
+ * are marked as derived rather than claimed as measurements.
  */
 
 :root {
@@ -17,53 +23,60 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
+  --radius-pill: 9999px;
   --sidebar-width: 264px;
   --inspector-width: 320px;
+  --header-height: 44px;
   --blur-amount: 18px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-6: 24px;
-
-  --accent: #2f6f5e;
-  --accent-contrast: #f6faf8;
 }
 
-/* ---- mode: dark (the default in the reference shots) ---- */
+/* ---- mode: dark ----
+ * The reference dark is not neutral grey — every surface carries a green cast, and the sidebar is
+ * LIGHTER than the transcript column, which is the opposite of the usual raised-panel convention. */
 [data-theme-mode="dark"] {
-  --bg: #14181a;
-  --bg-elevated: #1b2124;
-  --bg-sunken: #0f1214;
-  --bg-hover: #232a2e;
-  --text: #e8ecee;
-  --text-muted: #98a4a9;
-  --text-faint: #6c787e;
-  --border: #2b3338;
-  --border-strong: #3b464c;
+  --bg: #0a110e; /* 05: transcript column and right panel */
+  --bg-panel: #112921; /* 05: left sidebar */
+  --bg-elevated: #16332a; /* cards and popovers, lifted one step from --bg-panel */
+  --bg-sunken: #080d0b; /* 05: code and diff gutters */
+  --bg-hover: #1a3a30;
+  --text: #e8f0e8; /* 05: primary text */
+  --text-strong: #cfe9d8;
+  --text-muted: #93a89c; /* 05: row labels and descriptions */
+  --text-faint: #6d8278; /* 05: timestamps and section headers */
+  --border: #1e3a30;
+  --border-strong: #2b4c40;
   --shadow: 0 12px 32px rgb(0 0 0 / 45%);
-  --code-bg: #10151a;
+  --code-bg: #0a0f0d; /* 06: review panel code surface */
   --code-theme: "github-dark";
   --success: #4caf7d;
   --warning: #d8a13f;
-  --danger: #d9605f;
-  --diff-added: #2f6f3f;
-  --diff-removed: #6b2f2f;
+  --danger: #ff4d4f; /* 05: the stopped-subagent marker */
+  --diff-added: #19321d; /* 06: added-line background */
+  --diff-removed: #3a1a1a;
   color-scheme: dark;
 }
 
-/* ---- mode: light ---- */
+/* ---- mode: light ----
+ * Here the tint moves to the sidebar and the content goes near-white, so the same "panel is
+ * tinted, content is neutral" rule holds in both modes. */
 [data-theme-mode="light"] {
-  --bg: #f7f8f7;
+  --bg: #fafbf9; /* 04: transcript column and right panel */
+  --bg-panel: #e0f1ea; /* 04: left sidebar, the mint wash */
   --bg-elevated: #ffffff;
-  --bg-sunken: #eceeed;
-  --bg-hover: #e3e7e6;
-  --text: #1b2124;
-  --text-muted: #5c686d;
-  --text-faint: #869196;
-  --border: #d9dfdd;
-  --border-strong: #c2cbc8;
-  --shadow: 0 10px 28px rgb(20 30 25 / 12%);
+  --bg-sunken: #eef5f2; /* 04: the user's own message bubble */
+  --bg-hover: #d5e9e0;
+  --text: #1b2420;
+  --text-strong: #284828; /* 04: headings and the active nav label are dark green, not black */
+  --text-muted: #5c6862;
+  --text-faint: #98a098;
+  --border: #d5e0d9;
+  --border-strong: #c0cfc6;
+  --shadow: 0 10px 28px rgb(20 40 30 / 12%);
   --code-bg: #f4f6f5;
   --code-theme: "github-light";
   --success: #2c7a4b;
@@ -74,26 +87,54 @@
   color-scheme: light;
 }
 
-/* ---- accent families (Forest, Mint, Bee, Parchment) ---- */
+/* ---- accent families ----
+ * Declared after the modes so the mode-specific override below wins on equal specificity. */
+:root {
+  --accent: #50a990;
+  --accent-contrast: #08130f;
+}
+
 [data-accent="forest"] {
-  --accent: #2f6f5e;
-  --accent-soft: color-mix(in oklab, var(--accent) 18%, transparent);
+  --accent: #4c765c; /* 02: the Forest style card */
   --accent-contrast: #f4faf7;
 }
 [data-accent="mint"] {
-  --accent: #3fa08a;
-  --accent-soft: color-mix(in oklab, var(--accent) 16%, transparent);
-  --accent-contrast: #0f1a17;
+  --accent: #50a990; /* 02: the Mint style card, and the default in 04-06 */
+  --accent-contrast: #08130f;
 }
 [data-accent="bee"] {
-  --accent: #c9992c;
-  --accent-soft: color-mix(in oklab, var(--accent) 18%, transparent);
+  --accent: #c4b267; /* 02: the Bee style card */
   --accent-contrast: #1b1608;
 }
 [data-accent="parchment"] {
-  --accent: #b08a5a;
+  --accent: #c96542; /* 02: the Parchment style card — terracotta, not beige */
+  --accent-contrast: #1f120d;
+}
+
+/* On the near-black green a light-mode accent sinks in; the same hue lifted ~14% is what shots 05
+ * and 06 actually show (mint measures #62c9a8 there). */
+[data-theme-mode="dark"][data-accent="forest"] {
+  --accent: #5fae7f;
+  --accent-contrast: #08130f;
+}
+[data-theme-mode="dark"][data-accent="mint"] {
+  --accent: #62c9a8; /* 05: measured */
+  --accent-contrast: #08130f;
+}
+[data-theme-mode="dark"][data-accent="bee"] {
+  --accent: #e0cf7d;
+  --accent-contrast: #1b1608;
+}
+[data-theme-mode="dark"][data-accent="parchment"] {
+  --accent: #e0805c;
+  --accent-contrast: #1f120d;
+}
+
+/* Soft fills carry the accent without claiming its contrast budget: selected rows, the user's
+ * bubble, and the tinted outline on an active pill. */
+[data-accent] {
   --accent-soft: color-mix(in oklab, var(--accent) 16%, transparent);
-  --accent-contrast: #1f1710;
+  --accent-line: color-mix(in oklab, var(--accent) 55%, transparent);
 }
 
 /* ---- surface: glass falls back to solid, never to a half-blurred nothing ---- */

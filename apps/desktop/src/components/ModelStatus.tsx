@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import { translate, type Locale } from "../i18n";
 import { useModel } from "../state/model";
+import { Icon } from "./icons";
 
 /**
  * The strip that makes the "Local" badge honest: it is fed by the host's real catalog + engine
@@ -39,43 +40,50 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   return (
     <section
       aria-label={translate(locale, "model.packing")}
-      className="surface m-[var(--space-4)] rounded-[var(--radius-lg)] border p-[var(--space-4)] shadow-[var(--shadow)]"
+      className="w-[var(--inspector-width)] shrink-0 border-b border-line bg-elevated p-[var(--space-4)]"
     >
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-fg">{status.displayName}</h2>
+        <Icon name="bolt" size={15} className="text-accent" />
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-fg">
+          {status.displayName}
+        </h2>
         <span
-          className={`rounded-full px-2 py-0.5 text-xs ${
-            status.blocked ? "bg-sunken text-muted" : "bg-accent-soft text-fg"
+          className={`shrink-0 rounded-[var(--radius-pill)] px-2 py-0.5 text-[calc(var(--font-ui)-2px)] ${
+            status.blocked ? "bg-sunken text-muted" : "bg-accent-soft text-fg-strong"
           }`}
         >
           {badge}
         </span>
       </div>
-      <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted">
-        <div className="flex justify-between">
-          <dt>{translate(locale, "model.packing")}</dt>
-          <dd className="font-mono text-fg">
+      <dl className="mt-3 flex flex-col gap-1 text-[calc(var(--font-ui)-2px)] text-muted">
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="shrink-0">{translate(locale, "model.packing")}</dt>
+          <dd className="truncate font-mono text-fg">
             {status.packing} · {status.sizeGb.toFixed(2)} GB
           </dd>
         </div>
-        <div className="flex justify-between">
-          <dt>{translate(locale, "model.engine")}</dt>
-          <dd className="font-mono text-fg">{status.engineTag}</dd>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="shrink-0">{translate(locale, "model.engine")}</dt>
+          <dd className="truncate font-mono text-fg">{status.engineTag}</dd>
         </div>
       </dl>
       {status.blocked ? (
         <div className="mt-3 rounded-[var(--radius-md)] border border-danger/40 p-3">
-          <p className="text-sm font-medium text-danger">{status.blocked.title}</p>
-          <p className="mt-1 text-xs text-muted">{status.blocked.detail}</p>
+          <p className="text-[calc(var(--font-ui)-1px)] font-medium text-danger">
+            {status.blocked.title}
+          </p>
+          <p className="mt-1 text-[calc(var(--font-ui)-2px)] text-muted">
+            {status.blocked.detail}
+          </p>
           {/* The action is printed, not yet clickable: opening it is the Model Manager's job in
               Phase 2, where the app fetches the fork engine itself instead of redirecting. */}
-          <p className="mt-2 text-xs text-fg">
+          <p className="mt-2 text-[calc(var(--font-ui)-2px)] text-fg">
             {status.blocked.ctaLabel}:{" "}
             <span className="font-mono text-muted">{status.blocked.ctaUrl}</span>
           </p>
         </div>
       ) : (
-        <p className="mt-3 text-xs text-muted">
+        <p className="mt-3 text-[calc(var(--font-ui)-2px)] text-muted">
           {status.engineInstalled && status.weightsPresent
             ? translate(locale, "model.status.ready")
             : status.engineInstalled
@@ -84,11 +92,27 @@ export function ModelStatus({ locale }: { locale: Locale }) {
         </p>
       )}
       {status.warnings.length > 0 && (
-        <ul className="mt-2 list-disc pl-5 text-xs text-warning">
+        <ul className="mt-2 list-disc pl-5 text-[calc(var(--font-ui)-2px)] text-warning">
           {status.warnings.map((warning) => (
             <li key={warning}>{warning}</li>
           ))}
         </ul>
+      )}
+      {status.uncheckedWarnings.length > 0 && (
+        // Folded, not dropped: these rows describe other machines, and hiding them would lose a
+        // real known issue — but listing them beside a matched warning implies they apply here.
+        <details className="mt-2 text-[calc(var(--font-ui)-2px)] text-muted">
+          <summary className="cursor-pointer text-faint">
+            {translate(locale, "model.warnings.unchecked", {
+              count: status.uncheckedWarnings.length,
+            })}
+          </summary>
+          <ul className="mt-1 list-disc pl-5">
+            {status.uncheckedWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </details>
       )}
     </section>
   );
