@@ -12,6 +12,7 @@
   "topbar.toggleBrowser": "Toggle built-in browser",
   "model.badge.local": "Local",
   "model.badge.remote": "Remote",
+  "model.badge.notRunning": "Not running",
   "model.packing": "Packing",
   "model.engine": "Engine",
   "model.status.checking": "Checking the local model…",

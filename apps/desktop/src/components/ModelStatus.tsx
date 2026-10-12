@@ -27,9 +27,14 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   }
   if (!status) return null;
 
-  const badge = status.local
-    ? translate(locale, "model.badge.local")
-    : translate(locale, "model.badge.remote");
+  // `local` is false both when a remote provider answers and when the guard refuses to run at all,
+  // so the badge cannot be derived from that one bit: a refused load is not "Remote", it is
+  // nothing, and claiming otherwise would hide the refusal behind a working-looking label.
+  const badge = status.blocked
+    ? translate(locale, "model.badge.notRunning")
+    : status.local
+      ? translate(locale, "model.badge.local")
+      : translate(locale, "model.badge.remote");
 
   return (
     <section
@@ -38,7 +43,13 @@ export function ModelStatus({ locale }: { locale: Locale }) {
     >
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-semibold text-fg">{status.displayName}</h2>
-        <span className="rounded-full bg-accent-soft px-2 py-0.5 text-xs text-fg">{badge}</span>
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs ${
+            status.blocked ? "bg-sunken text-muted" : "bg-accent-soft text-fg"
+          }`}
+        >
+          {badge}
+        </span>
       </div>
       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted">
         <div className="flex justify-between">

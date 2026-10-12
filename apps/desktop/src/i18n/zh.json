@@ -12,6 +12,7 @@
   "topbar.toggleBrowser": "切换内置浏览器",
   "model.badge.local": "本地",
   "model.badge.remote": "远程",
+  "model.badge.notRunning": "未运行",
   "model.packing": "量化方案",
   "model.engine": "引擎",
   "model.status.checking": "正在检查本地模型…",
