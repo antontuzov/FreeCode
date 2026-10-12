@@ -1,0 +1,16 @@
+[package]
+name = "smollm-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Settings schema and persistence for SmoLLM Studio"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

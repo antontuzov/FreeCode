@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/smollm-config",
+  "crates/smollm-models",
+  "crates/smollm-llama",
+  "crates/smollm-tools",
+  "crates/smollm-core",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/antontuzov/smollm-studio"
+authors = ["Anton Tuzov"]
+
+[workspace.dependencies]
+smollm-config = { path = "crates/smollm-config" }
+smollm-models = { path = "crates/smollm-models" }
+smollm-llama = { path = "crates/smollm-llama" }
+smollm-tools = { path = "crates/smollm-tools" }
+smollm-core = { path = "crates/smollm-core" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+tracing = "0.1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "json",
+  "stream",
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "process", "net"] }
+futures = "0.3"
+dirs = "5"
+tempfile = "3"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = true

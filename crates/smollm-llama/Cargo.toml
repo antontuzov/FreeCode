@@ -1,0 +1,16 @@
+[package]
+name = "smollm-llama"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PrismML llama.cpp fork resolution and the ternary load-guard"
+
+[dependencies]
+smollm-config = { workspace = true }
+smollm-models = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

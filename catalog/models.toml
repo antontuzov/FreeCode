@@ -1,0 +1,244 @@
+# SmoLLM Studio model catalog
+#
+# Source of truth for every number below:
+#   HF model card : https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/raw/main/README.md
+#   HF file tree  : https://huggingface.co/api/models/prism-ml/Ternary-Bonsai-2-27B-gguf/tree/main?recursive=true
+#                   (sha256 values are the LFS `oid` fields; sizes are the LFS `size` fields, in bytes)
+#   known issues  : https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/raw/main/KNOWN_ISSUES.md
+#   run scripts   : https://github.com/PrismML-Eng/Bonsai-demo (scripts/common.sh) — where this file and the
+#                   demo disagree, the demo repo wins.
+#
+# DO NOT edit a size, bits/weight, benchmark or throughput number by hand. Re-fetch the sources above.
+
+schema_version = 1
+updated = "2026-10-12"
+
+[defaults]
+# llama.cpp's own built-in default is 0.05 and the GGUF carries no min_p key
+# (KNOWN_ISSUES.md "Sampling and metadata"), so 0.05 is what a stock sampler applies. We set it
+# explicitly anyway because other runtimes default to 0.0.
+server_flags_extra = ["--log-disable"]
+
+[[model]]
+id = "ternary-bonsai-2-27b"
+name = "Bonsai 2 27B (ternary)"
+repo_id = "prism-ml/Ternary-Bonsai-2-27B-gguf"
+base_model = "Qwen/Qwen3.8-27B"
+architecture = "qwen35"                 # HF config arch tag; Bonsai GGUF reports qwen35
+license = "Apache-2.0"
+license_url = "https://www.apache.org/licenses/LICENSE-2.0"
+context_length = 262144
+homepage = "https://prismml.com"
+contact = "contact@prismml.com"
+citation = """
+@misc{bonsai2_27b,
+  title  = {Bonsai 2 27B},
+  author = {Prism ML},
+  year   = {2026},
+  month  = {September},
+  url    = {https://prismml.com}
+}
+"""
+paper_url = "https://prismml.com"
+demo_repo = "https://github.com/PrismML-Eng/Bonsai-demo"
+
+# Quantization scheme, verbatim from the model card:
+# weights in {-1, 0, +1} with one shared FP16 scale per 128-weight group ("g128"), stored in a
+# rotated basis (blockwise Hadamard rotation, block 1024, fixed +/-1 signs) folded offline, with the
+# matching transform applied to activations at runtime.
+[model.weight_format]
+scheme = "ternary-g128"
+alphabet = [-1, 0, 1]
+scale_group_size = 128
+scale_dtype = "F16"
+effective_bits_per_weight = 1.72
+rotation = "blockwise-hadamard"
+rotation_block = 1024
+rotation_applied = "offline, activation transform at runtime"
+coverage = ["embeddings", "attention projections", "mlp projections", "lm head"]
+metadata_key_prefix = "prism.hadamard."
+
+# Every pack of this repo needs the PrismML fork — including F16.
+# KNOWN_ISSUES.md ("Runtimes other than the PrismML build"): stock llama.cpp, Ollama and LM Studio
+# cannot load PQ2_0/PTQ1_0, and F16 *loads* on stock but produces garbled output because it depends
+# on metadata only the PrismML build applies. A load failure alone is therefore not enough to prove
+# we are on a fork; the guard must also reject a stock binary that loads successfully.
+[model.engine]
+needs_fork = true
+fork_repo = "PrismML-Eng/llama.cpp"
+# Launch-day release prism-b10687 shipped no binaries (KNOWN_ISSUES.md "Downloads, setup and
+# building from source"); b10709 is the floor for macOS/Linux/Windows/Android assets.
+min_release_tag = "prism-b10709-9a9394a"
+# Required GGUF metadata proving the checkpoint went through Prism's Hadamard export. An ordinary
+# model quantized to PQ2_0/PTQ1_0 has no rotation metadata, loads without warning and generates
+# nonsense (KNOWN_ISSUES.md, issue #242) — so presence of this key is a hard load precondition.
+required_metadata_prefixes = ["prism.hadamard."]
+
+[[model.packs]]
+key = "PQ2_0"
+file = "Ternary-Bonsai-2-27B-PQ2_0.gguf"
+quant_type = "PQ2_0"
+encoding = "trit in a 2-bit slot"
+bits_per_weight = 2.13
+size_bytes = 7_206_168_928
+size_gb = 7.21
+sha256 = "3907dc1658db1f78a9826bf8d5bcb8dc65db0d466388937af57f2294fae62ec1"
+marketing_ratio_vs_fp16 = 7.5
+# scripts/common.sh pq2_0_ready_backend(): mac|cpu|cuda|rocm|hip|local — and select_model_gguf()
+# orders "*-PQ2_0.gguf" first for those backends.
+preferred_for_backends = ["metal", "cpu", "cuda", "rocm", "hip"]
+# Measured on Apple Silicon (model card throughput table) and the faster prompt-processing pack
+# everywhere.
+notes = "Faster prefill on every backend; the pack benchmarked on Apple M5 Pro/Max."
+[[model.packs.caveats]]
+# KNOWN_ISSUES.md "CPU crash on load (AVX-512 CPUs)"
+condition = "backend == cpu and host_has_avx512 and engine_release < the fix for llama.cpp#245"
+symptom = "segfault while loading, even with all layers offloaded to a GPU"
+workaround = "prefer PTQ1_0, or build the prism branch from source; --no-repack is unconfirmed"
+severity = "fatal"
+[[model.packs.caveats]]
+# KNOWN_ISSUES.md: "PQ2_0 on Vulkan silently runs on the CPU" under 2 tok/s in the binary release.
+condition = "backend == vulkan"
+symptom = "silently falls back to CPU decode, under 2 tok/s, while logs claim full offload"
+workaround = "use PTQ1_0 on Vulkan, or build the prism branch from source (llama.cpp#238)"
+severity = "severe"
+[[model.packs.caveats]]
+# KNOWN_ISSUES.md (llama.cpp#223)
+condition = "backend == hip and windows and gpu == gfx1151"
+symptom = "garbled output"
+workaround = "-ngl 0, or the Vulkan build with PTQ1_0"
+severity = "severe"
+
+[[model.packs]]
+key = "PTQ1_0"
+file = "Ternary-Bonsai-2-27B-PTQ1_0.gguf"
+quant_type = "PTQ1_0"
+encoding = "dense trits"
+bits_per_weight = 1.75
+size_bytes = 5_946_648_928
+size_gb = 5.95
+sha256 = "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3"
+marketing_ratio_vs_fp16 = 9.0
+# Faster decode on Ada-generation GPUs and L4 (model card); the pick wherever memory is tightest.
+# Unpacking dense trits costs arithmetic.
+# Vulkan is the one backend that must take PTQ1_0: PQ2_0 silently decodes on the CPU there (#238).
+# SYCL is not listed at all because it cannot load either ternary type (llama.cpp#235).
+preferred_for_backends = ["vulkan"]
+fallback_for_backends = ["metal", "cpu", "cuda", "rocm", "hip"]
+notes = "The '1-bit / ~9x smaller than FP16' pack. Cheapest on disk and RAM."
+[[model.packs.caveats]]
+# KNOWN_ISSUES.md (llama.cpp#192)
+condition = "backend == vulkan and gpu == intel_arc"
+symptom = "hang after roughly 1,900 tokens"
+workaround = "run on CPU for now"
+severity = "severe"
+[[model.packs.caveats]]
+# KNOWN_ISSUES.md (llama.cpp#201): decode under 2 tok/s on Intel Arc in the binary release; fixed in
+# source for Xe2-class GPUs only.
+condition = "backend == vulkan"
+symptom = "slow decode on some Intel GPUs in prebuilt binaries"
+workaround = "build the prism branch from source"
+severity = "moderate"
+
+[[model.packs]]
+# Shipped for reference/eval only: it is ~53.8 GB on disk (the card's "~54 GB" is rounded), does not
+# fit on a normal laptop, and STILL requires the fork — stock loads it and outputs garbage.
+key = "F16"
+file = "Ternary-Bonsai-2-27B-F16.gguf"
+quant_type = "F16"
+encoding = "reference precision"
+bits_per_weight = 16.0
+size_bytes = 53_808_408_928
+size_gb = 53.8
+sha256 = "f6f3b2c9b41956c34b379ec7c301dc936bc38d79b3c24c83388dd7d76000c180"
+preferred_for_backends = []
+notes = "Benchmark baseline. Not offered as a runtime pack on consumer hardware."
+
+[[model.vision]]
+# Optional projector pack, loaded only while images are in context.
+key = "mmproj-Q8_0"
+file = "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
+quant_type = "Q8_0"
+size_bytes = 629_246_976
+size_gb = 0.63
+sha256 = "6807ede61d570bb86ba34b756a0fa109edc33668604de867c6ea6d8f1d631903"
+recommended = true
+[[model.vision]]
+key = "mmproj-BF16"
+file = "Ternary-Bonsai-2-27B-mmproj-BF16.gguf"
+quant_type = "BF16"
+size_bytes = 931_145_856
+size_gb = 0.93
+sha256 = "e287342d92332fa3577ed1d42e921dac9370c08da58ba9337fa450f6cc76cfd7"
+recommended = false
+
+[model.sampling]
+system_prompt = "You are a helpful assistant"
+
+# Model card, thinking mode. Verified in Bonsai-demo scripts/run_llama.sh, which launches
+# `-fa on --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.05` for the bonsai2 family.
+[model.sampling.thinking]
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+min_p = 0.05
+presence_penalty = 0.0
+repetition_penalty = 1.0
+
+# Model card, instruct / non-thinking mode.
+[model.sampling.instruct]
+temperature = 0.7
+top_p = 0.80
+top_k = 20
+min_p = 0.0
+presence_penalty = 1.5
+repetition_penalty = 1.0
+
+[model.sampling.reasoning]
+# The chat template accepts low | medium | xhigh (and "none" to disable thinking). It does NOT
+# accept "high" — sending it returns HTTP 500 (KNOWN_ISSUES.md). `low` is accepted but measured to
+# use about as many tokens as xhigh, so the UI maps "low" onto xhigh and says so.
+default_effort = "xhigh"
+supported_efforts = ["xhigh", "medium", "none"]
+unsupported_efforts = ["low", "high"]
+low_behaves_like = "xhigh"
+never_send = ["high"]
+# min_p / presence_penalty / repetition_penalty are absent from the GGUF, so the launcher must pass
+# them; it cannot rely on file metadata.
+carried_in_gguf = ["top_k", "top_p", "temperature"]
+not_carried_in_gguf = ["min_p", "presence_penalty", "repetition_penalty"]
+# A thinking budget inside chat_template_kwargs is silently ignored (KNOWN_ISSUES.md): use a
+# top-level request field, or the server's --reasoning-budget flag.
+budget_transport = "top-level request field or --reasoning-budget"
+# Leave the server at --reasoning auto: --reasoning on overrides a client's reasoning_effort "none".
+server_reasoning_flag = "auto"
+
+[model.agent_constraints]
+# Each entry is a hard, engine-observed constraint the Rust tool loop must honour.
+one_system_message_first = true                 # llama.cpp#? KNOWN_ISSUES.md: two or misplaced system messages -> HTTP 500
+empty_tool_arguments_as_object = true           # #112: empty/non-JSON tool arguments -> HTTP 500/400; send "{}"
+do_not_echo_reasoning_into_history = true       # Bonsai-demo#183: re-rendering reasoning breaks the prompt cache
+min_generation_budget_tokens = 4096             # a small cap ends generation mid-thought -> empty reply
+recommended_generation_budget_tokens = 16384
+recommended_context = 65536                     # card's "start here" table pairs -n 16384 with -c 65536
+kv_cache_types = ["f16", "q8_0", "q4_0"]        # q5_0 is several times slower (#191)
+kv_cache_forbidden_types = ["q5_0"]
+
+[model.benchmarks]
+# 14-benchmark average, thinking mode. From the model card table.
+fp16_avg = 86.32
+ud_q4_k_xl = { bits_per_weight = 5.2, size_gb = 17.6, avg = 85.18, percent_of_fp16 = 98.7 }
+iq2_xxs = { bits_per_weight = 2.16, size_gb = 7.27, avg = 72.59, percent_of_fp16 = 84.1 }
+bonsai = { bits_per_weight = 1.72, size_gb = 5.95, avg = 84.78, percent_of_fp16 = 98.2 }
+by_skill = { math = 96.57, coding = 89.42, agentic = 74.92, instruction_following = 82.66 }
+intelligence_density = { score_per_gb = 0.457, vs_densest_conventional = 1.8, vs_fp16 = 9.0 }
+
+[model.throughput]
+# Tokens/decode, model card. PQ2_0 tg128 on the RTX 5090; Apple numbers are decode streaming ~204
+# GB/s of weights.
+rtx_5090_tps = 130
+l4_tps = 30
+m5_max_tps = 47
+m5_pro_tps = 28
+m5_pro_power_w = { gpu = 27.5, cpu_plus_gpu = 34.1 }
+nvidia_board_power_w = { min = 300, max = 455 }

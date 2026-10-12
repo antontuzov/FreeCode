@@ -1,0 +1,156 @@
+# Pinned PrismML llama.cpp fork engine.
+#
+# Tag + asset names + sizes were read from the GitHub Releases API on 2026-10-12:
+#   https://api.github.com/repos/PrismML-Eng/llama.cpp/releases/latest   -> prism-b10772-e8fd209
+# The tag is NOT "whatever is newest": Bonsai-demo's scripts/download_binaries.sh currently pins an
+# older build (prism-b10743-adfffbe), and several ternary fixes are merged to the `prism` branch but
+# absent from ANY binary release. Where the two disagree the demo repo wins, so an override env var
+# (SMOLLM_ENGINE_TAG) and a from-source build path both exist.
+#
+# verify-hf-gguf-catalog-entry asserts: tag >= prism-b10709 (b10687 shipped no binaries), every
+# target we ship has a resolvable asset, and no stock-llama.cpp path is reachable.
+
+schema_version = 1
+pinned_tag = "prism-b10772-e8fd209"
+pinned_commit = "e8fd209"
+published_at = "2026-10-10T19:02:41Z"
+min_allowed_tag = "prism-b10709-9a9394a"
+repo = "PrismML-Eng/llama.cpp"
+download_url_template = "https://github.com/PrismML-Eng/llama.cpp/releases/download/{tag}/{asset}"
+# Bonsai-demo's own pin, recorded so CI can compare and flag drift.
+demo_pinned_tag = "prism-b10743-adfffbe"
+
+# Binaries the supervisor is allowed to launch, relative to engines/<tag>/<asset-dir>/.
+[binaries]
+server = "llama-server"
+cli = "llama-cli"
+quantize = "llama-quantize"
+
+# `recommended = false` assets are resolvable but must not be auto-selected; the reason is in
+# KNOWN_ISSUES.md and quoted per target.
+[[target]]
+key = "macos-arm64"
+os = "darwin"
+arch = "aarch64"
+backend = "metal"
+asset = "llama-prism-b10772-e8fd209-bin-macos-arm64.tar.gz"
+size_bytes = 11_534_167
+recommended = true
+notes = "Metal is the default on Apple Silicon. The M5 Pro/Max throughput numbers in the catalog are this path."
+[[target]]
+key = "macos-arm64-kleidiai"
+os = "darwin"
+arch = "aarch64"
+backend = "cpu"
+asset = "llama-prism-b10772-e8fd209-bin-macos-arm64-kleidiai.tar.gz"
+size_bytes = 11_565_786
+recommended = false
+notes = "KleidiAI CPU kernels; use only with -ngl 0."
+[[target]]
+key = "macos-x64"
+os = "darwin"
+arch = "x86_64"
+backend = "cpu"
+asset = "llama-prism-b10772-e8fd209-bin-macos-x64.tar.gz"
+size_bytes = 11_573_384
+recommended = true
+notes = "Intel Mac: no Metal, so -ngl 0 (Bonsai-demo common.sh emits 0 for non-arm64 macOS)."
+
+[[target]]
+key = "windows-cpu-x64"
+os = "windows"
+arch = "x86_64"
+backend = "cpu"
+asset = "llama-prism-b10772-e8fd209-bin-win-cpu-x64.zip"
+size_bytes = 19_458_591
+recommended = true
+notes = "Fallback when no usable GPU build starts; llama.cpp#241 reports CUDA builds failing on some CPUs while the CPU build works."
+[[target]]
+key = "windows-cpu-arm64"
+os = "windows"
+arch = "aarch64"
+backend = "cpu"
+asset = "llama-prism-b10772-e8fd209-bin-win-cpu-arm64.zip"
+size_bytes = 12_375_788
+recommended = true
+[[target]]
+key = "windows-cuda-12.4-x64"
+os = "windows"
+arch = "x86_64"
+backend = "cuda"
+asset = "llama-prism-b10772-e8fd209-bin-win-cuda-12.4-x64.zip"
+size_bytes = 313_894_096
+recommended = true
+notes = "Preferred CUDA build on Windows: llama.cpp#222 reports the CUDA 13.3 build printing its banner and exiting on some systems."
+[[target]]
+key = "windows-cuda-13.3-x64"
+os = "windows"
+arch = "x86_64"
+backend = "cuda"
+asset = "llama-prism-b10772-e8fd209-bin-win-cuda-13.3-x64.zip"
+size_bytes = 179_142_811
+recommended = false
+notes = "llama.cpp#222: crashes on some systems."
+[[target]]
+key = "windows-vulkan-x64"
+os = "windows"
+arch = "x86_64"
+backend = "vulkan"
+asset = "llama-prism-b10772-e8fd209-bin-win-vulkan-x64.zip"
+size_bytes = 31_242_630
+recommended = true
+# Vulkan is NOT in common.sh's pq2_0_ready_backend() list, because PQ2_0 silently decodes on the CPU
+# (#238). Pair this target with PTQ1_0.
+notes = "Must pair with the PTQ1_0 pack; the pack recommender encodes this."
+[[target]]
+key = "windows-hip-x64"
+os = "windows"
+arch = "x86_64"
+backend = "hip"
+asset = "llama-prism-b10772-e8fd209-bin-win-hip-radeon-x64.zip"
+size_bytes = 342_445_816
+recommended = true
+notes = "gfx1151 gets garbled PQ2_0 output (#223): use -ngl 0 or Vulkan+PTQ1_0. RDNA2 consumer parts abort (Bonsai-demo#197)."
+
+[[target]]
+key = "linux-cuda-12.8-x64"
+os = "linux"
+arch = "x86_64"
+backend = "cuda"
+asset = "llama-prism-b10772-e8fd209-bin-linux-cuda-12.8-x64.tar.gz"
+size_bytes = 208_141_397
+recommended = true
+notes = "Recommended Linux CUDA build (llama.cpp#222)."
+[[target]]
+key = "linux-cpu-x64"
+os = "linux"
+arch = "x86_64"
+backend = "cpu"
+asset = "llama-prism-b10772-e8fd209-bin-ubuntu-x64.tar.gz"
+size_bytes = 17_802_121
+recommended = true
+[[target]]
+key = "linux-rocm-x64"
+os = "linux"
+arch = "x86_64"
+backend = "rocm"
+asset = "llama-prism-b10772-e8fd209-bin-ubuntu-rocm-7.2-x64.tar.gz"
+size_bytes = 155_865_338
+recommended = true
+
+# Deliberately unresolvable: SYCL cannot load PQ2_0 or PTQ1_0 at all ("unsupport data type",
+# llama.cpp#235 still in review). We ship no SYCL target so a detection bug cannot select it; Intel
+# GPUs go to the Vulkan target with PTQ1_0 instead.
+[unsupported_backends]
+sycl = "llama.cpp#235: cannot load PQ2_0/PTQ1_0; use vulkan + PTQ1_0"
+
+[from_source]
+# Several important fixes are merged to `prism` but not in any binary release (llama.cpp#245 AVX-512
+# load crash, #238 Vulkan PQ2_0, #206 AVX2/AVX-VNNI CPU kernels, #196 Metal tensor API on newest
+# chips). When the detected machine hits one of those, the resolver must offer a source build.
+repo = "https://github.com/PrismML-Eng/llama.cpp"
+branch = "prism"
+macos = "git clone https://github.com/PrismML-Eng/llama.cpp && cd llama.cpp && cmake -B build && cmake --build build -j"
+cuda = "git clone https://github.com/PrismML-Eng/llama.cpp && cd llama.cpp && cmake -B build -DGGML_CUDA=ON && cmake --build build -j"
+cuda_arch_note = "source CUDA builds may need -DCMAKE_CUDA_ARCHITECTURES=89 (Ada) or 120a-real (RTX 5090), and -DGGML_CUDA_FA_ALL_QUANTS=ON for quantized KV cache with flash attention"
+known_blocker = "Bonsai-demo#177: setup.sh fails to build on macOS 27 / Xcode 26.5 — prefer the prebuilt macos-arm64 asset there"

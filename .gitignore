@@ -1,0 +1,13 @@
+target/
+node_modules/
+dist/
+.next/
+apps/desktop/src-tauri/gen/
+engines/*
+!engines/lock.toml
+*.gguf
+.env
+.env.*
+.DS_Store
+*.log
+coverage/

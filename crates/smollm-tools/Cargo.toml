@@ -1,0 +1,16 @@
+[package]
+name = "smollm-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent tool registry: JSON schemas, permission classes and the workspace sandbox"
+
+[dependencies]
+smollm-config = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

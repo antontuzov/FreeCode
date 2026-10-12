@@ -1,0 +1,20 @@
+{
+  "name": "smollm-studio",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SmoLLM Studio monorepo — local-first desktop coding agent for Ternary Bonsai 2 27B",
+  "packageManager": "pnpm@11.13.0",
+  "scripts": {
+    "dev": "pnpm --filter @smollm/desktop dev",
+    "build": "pnpm --filter @smollm/desktop build",
+    "typecheck": "pnpm --filter @smollm/desktop typecheck",
+    "lint": "pnpm --filter @smollm/desktop lint",
+    "tauri": "pnpm --filter @smollm/desktop tauri",
+    "app:dev": "pnpm --filter @smollm/desktop tauri dev",
+    "app:build": "pnpm --filter @smollm/desktop tauri build",
+    "format": "pnpm --filter @smollm/desktop format",
+    "format:check": "pnpm --filter @smollm/desktop format:check",
+    "verify:catalog": "./scripts/verify-catalog.sh",
+    "verify:ui": "./scripts/verify-tauri-ui.sh"
+  }
+}
