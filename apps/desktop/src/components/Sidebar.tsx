@@ -48,9 +48,11 @@ function Row({
 export function Sidebar({
   locale,
   fixture,
+  onOpenSettings,
 }: {
   locale: Locale;
   fixture: boolean;
+  onOpenSettings: () => void;
 }) {
   const workspaces = fixture ? FIXTURE_WORKSPACES : [];
 
@@ -118,7 +120,12 @@ export function Sidebar({
         <span className="min-w-0 flex-1 truncate text-[calc(var(--font-ui)-1px)] text-fg">
           {translate(locale, "sidebar.localUser")}
         </span>
-        <button type="button" aria-label={translate(locale, "sidebar.settings")} className="icon-btn">
+        <button
+          type="button"
+          aria-label={translate(locale, "sidebar.settings")}
+          className="icon-btn"
+          onClick={onOpenSettings}
+        >
           <Icon name="settings" />
         </button>
       </div>

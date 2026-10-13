@@ -72,9 +72,7 @@ export function ModelStatus({ locale }: { locale: Locale }) {
           <p className="text-[calc(var(--font-ui)-1px)] font-medium text-danger">
             {status.blocked.title}
           </p>
-          <p className="mt-1 text-[calc(var(--font-ui)-2px)] text-muted">
-            {status.blocked.detail}
-          </p>
+          <p className="mt-1 text-[calc(var(--font-ui)-2px)] text-muted">{status.blocked.detail}</p>
           {/* The action is printed, not yet clickable: opening it is the Model Manager's job in
               Phase 2, where the app fetches the fork engine itself instead of redirecting. */}
           <p className="mt-2 text-[calc(var(--font-ui)-2px)] text-fg">

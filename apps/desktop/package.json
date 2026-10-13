@@ -12,7 +12,8 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
     "tauri": "tauri",
-    "tauri:fixture": "tauri dev --config src-tauri/tauri.dev-fixture.conf.json"
+    "tauri:fixture": "tauri dev --config src-tauri/tauri.dev-fixture.conf.json",
+    "tauri:settings": "tauri dev --config src-tauri/tauri.dev-settings.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

@@ -41,11 +41,7 @@ export function StatusBar({ locale }: { locale: Locale }) {
         aria-label={translate(locale, "statusbar.context")}
         className="h-1.5 w-24 overflow-hidden rounded-[var(--radius-pill)] bg-sunken"
       >
-        <span
-          className="block h-full bg-accent"
-          style={{ width: `${used}%` }}
-          aria-hidden
-        />
+        <span className="block h-full bg-accent" style={{ width: `${used}%` }} aria-hidden />
       </span>
       <span className="w-8 text-right font-mono">{used}%</span>
     </footer>

@@ -27,6 +27,9 @@ echo "OK — $(echo "$ui_cmds" | wc -l | tr -d ' ') commands wired both ways: $(
 step "transcript i18n keys vs StepKind"
 cargo run --locked -q -p smollm-core --bin verify-transcript-i18n -- apps/desktop/src/i18n
 
+step "locale catalogs agree, and every lookup is defined"
+node scripts/check-i18n.mjs
+
 step "no hardcoded colours"
 pnpm_cmd lint
 

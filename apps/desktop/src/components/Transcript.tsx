@@ -84,7 +84,11 @@ export function Transcript({ locale }: { locale: Locale }) {
         <h1 className="min-w-0 flex-1 truncate text-sm font-medium text-fg">
           {translate(locale, "transcript.title")}
         </h1>
-        <button type="button" className="icon-btn" aria-label={translate(locale, "transcript.more")}>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={translate(locale, "transcript.more")}
+        >
           <Icon name="skills" />
         </button>
       </header>

@@ -18,7 +18,11 @@ export function interpolate(template: string, params: Record<string, string | nu
   return template.replace(/{{(\w+)}}/g, (_all, name: string) => String(params[name] ?? ""));
 }
 
-export function translate(locale: Locale, key: string, params: Record<string, string | number> = {}): string {
+export function translate(
+  locale: Locale,
+  key: string,
+  params: Record<string, string | number> = {},
+): string {
   const table = catalogs[locale] ?? catalogs.en;
   // A missing key falls back to English rather than rendering the key itself in the transcript.
   const template = table[key] ?? catalogs.en[key] ?? key;

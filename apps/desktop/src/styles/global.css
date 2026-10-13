@@ -149,6 +149,203 @@ body {
   font-size: calc(var(--font-ui) - 1px);
 }
 
+/* ---- Settings surface, shots 01–03 ---- */
+
+/* A row is title-over-description on the left with the control held to the right edge. */
+.row-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.row-title {
+  color: var(--text-strong);
+  font-size: var(--font-ui);
+}
+.row-desc {
+  color: var(--text-muted);
+  font-size: calc(var(--font-ui) - 1px);
+}
+
+/* One bordered trigger for the select, the number box and the text field. */
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: calc(var(--font-ui) - 1px);
+}
+.field:focus-within {
+  border-color: var(--accent-line);
+}
+.field:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.field-input {
+  min-width: 0;
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+select.field-input {
+  appearance: none;
+  cursor: pointer;
+  padding-right: var(--space-2);
+}
+.field-narrow {
+  width: 96px;
+  justify-content: flex-end;
+}
+/* Shot 01's `14 px` box shows no stepper arrows; the field is a number, not a spinner. */
+.field-narrow input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.field-narrow input[type="number"]::-webkit-outer-spin-button,
+.field-narrow input[type="number"]::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+/* The switch, not a checkbox: off is neutral, on is the accent, and the knob is the only thing
+ * that moves. */
+.toggle {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  transition: background-color 140ms ease;
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
+  transition: transform 140ms ease;
+}
+.toggle[data-on="true"] {
+  background: var(--accent);
+}
+.toggle[data-on="true"]::after {
+  transform: translateX(18px);
+}
+
+/* ⌘ ⇧ L as separate chips, the way shot 03 renders a shortcut. */
+.kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  font-family: var(--font-family-code);
+  font-size: calc(var(--font-ui) - 2px);
+}
+
+/* The four interface-style cards. Each paints the style it advertises through `--preview`, so the
+ * row stays readable whichever accent is live. */
+/* Shot 02: the tinted preview box carries the selection outline, and the style name sits below it
+   on the page rather than inside the swatch. */
+.style-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: calc(var(--font-ui) - 1px);
+  text-align: center;
+  cursor: pointer;
+}
+.style-preview {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--preview) 12%, var(--bg-elevated));
+}
+.style-card[data-selected="true"] .style-preview {
+  border-color: var(--accent);
+}
+.style-card[data-selected="true"] .style-name {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+.style-window {
+  position: relative;
+  display: flex;
+  height: 76px;
+  flex-direction: column;
+  gap: 5px;
+  padding: var(--space-3);
+}
+.style-bar {
+  height: 7px;
+  width: 62%;
+  border-radius: var(--radius-pill);
+  background: var(--preview);
+}
+.style-dot {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--preview);
+  border-radius: 50%;
+}
+.style-card[data-selected="true"] .style-dot {
+  background: var(--preview);
+  box-shadow: inset 0 0 0 5px color-mix(in oklab, var(--preview) 12%, var(--bg-elevated));
+}
+.style-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: auto;
+  padding: var(--space-2);
+  border: 1px solid color-mix(in oklab, var(--preview) 25%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--preview) 6%, var(--bg-elevated));
+}
+.style-line {
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--text-faint) 45%, transparent);
+}
+
+.swatch-forest {
+  --preview: var(--style-forest);
+}
+.swatch-mint {
+  --preview: var(--style-mint);
+}
+.swatch-bee {
+  --preview: var(--style-bee);
+}
+.swatch-parchment {
+  --preview: var(--style-parchment);
+}
+
 .dot-running {
   width: 8px;
   height: 8px;

@@ -48,8 +48,8 @@ async fn load_appearance(app: AppHandle) -> Result<AppearanceView, String> {
     ))
 }
 
-/// Persists the shell's five controls and echoes what the host now believes, so the UI never keeps
-/// a stale `resolvedMode`. `resolvedMode` is host-computed and is not read from the payload.
+/// Persists the shell's controls and echoes what the host now believes, so the UI never keeps a
+/// stale `resolvedMode`. `resolvedMode` is host-computed and is not read from the payload.
 #[tauri::command]
 async fn save_appearance(
     app: AppHandle,
@@ -64,13 +64,31 @@ async fn save_appearance(
     ))
 }
 
+/// The whole settings document, for the Settings surface. Deserialising on the way out is the
+/// validation: a payload the schema rejects never reaches the file.
+#[tauri::command]
+async fn load_settings() -> Result<Settings, String> {
+    appearance::load_settings()
+}
+
+/// The Settings surface edits the loaded document in place and hands it back, so a field it does
+/// not render still round-trips untouched. The host answers with what it stored.
+#[tauri::command]
+async fn save_settings(mut settings: Settings) -> Result<Settings, String> {
+    settings.schema_version = smollm_config::SETTINGS_SCHEMA_VERSION;
+    appearance::save_settings(&settings)?;
+    Ok(settings)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             model_status,
             load_appearance,
-            save_appearance
+            save_appearance,
+            load_settings,
+            save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running SmoLLM Studio");

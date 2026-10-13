@@ -12,6 +12,7 @@
     "tauri": "pnpm --filter @smollm/desktop tauri",
     "app:dev": "pnpm --filter @smollm/desktop tauri dev",
     "app:dev:fixture": "pnpm --filter @smollm/desktop tauri:fixture",
+    "app:dev:settings": "pnpm --filter @smollm/desktop tauri:settings",
     "app:build": "pnpm --filter @smollm/desktop tauri build",
     "format": "pnpm --filter @smollm/desktop format",
     "format:check": "pnpm --filter @smollm/desktop format:check",
@@ -20,6 +21,6 @@
     "verify:precommit": "./scripts/verify-precommit.sh",
     "verify:desktop": "./scripts/verify-desktop-native.sh",
     "verify:all": "./scripts/verify-studio-natively.sh",
-    "icon": "node scripts/make-app-icon.mjs && pnpm --filter @smollm/desktop tauri icon src-tauri/icons/source.png"
+    "icon": "pnpm --filter @smollm/desktop tauri icon src-tauri/icons/source.png"
   }
 }

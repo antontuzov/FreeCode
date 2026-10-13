@@ -12,6 +12,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 step "cargo test --workspace"
 cargo test --workspace
 
+step "frontend format"
+pnpm_cmd format:check
+
 step "frontend lint"
 pnpm_cmd lint
 

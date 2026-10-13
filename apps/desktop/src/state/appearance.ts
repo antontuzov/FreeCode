@@ -10,6 +10,7 @@ const FALLBACK: AppearanceState = {
   resolvedMode: "dark",
   accent: "mint",
   glass: true,
+  language: "en",
   uiFontSize: 14,
   codeFontSize: 12,
 };

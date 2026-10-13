@@ -18,25 +18,17 @@ type Item = { label: string; meta?: string; icon?: IconName };
 
 /** `?fixture=1` only — see the note in state/transcript.ts about invented run output. */
 const FIXTURE_ITEMS: Record<string, Item[]> = {
-  subagents: [
-    { label: "Explore · llama.cpp", meta: "stopped" },
-    { label: "Audit engine claims" },
+  subagents: [{ label: "Explore · llama.cpp", meta: "stopped" }, { label: "Audit engine claims" }],
+  skills: [
+    { label: "verify-smollm-studio-natively" },
+    { label: "tauri-desktop-native-verification" },
   ],
-  skills: [{ label: "verify-smollm-studio-natively" }, { label: "tauri-desktop-native-verification" }],
   artifact: [{ label: "README.md", icon: "artifact" }],
   webReading: [{ label: "huggingface.co/PrismML-Eng", icon: "webReading" }],
   source: [{ label: "catalog/models.toml", icon: "artifact" }],
 };
 
-function Section({
-  group,
-  items,
-  locale,
-}: {
-  group: Group;
-  items: Item[];
-  locale: Locale;
-}) {
+function Section({ group, items, locale }: { group: Group; items: Item[]; locale: Locale }) {
   const [open, setOpen] = useState(true);
   const label = translate(locale, `inspector.${group.key}`);
 

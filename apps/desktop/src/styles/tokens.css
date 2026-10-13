@@ -88,46 +88,52 @@
 }
 
 /* ---- accent families ----
- * Declared after the modes so the mode-specific override below wins on equal specificity. */
+ * Declared after the modes so the mode-specific override below wins on equal specificity.
+ * `--style-*` is the single measurement each family resolves from: the live accent picks it via
+ * `data-accent`, and the Settings preview cards pick it directly so all four stay distinguishable
+ * whatever is currently selected. */
 :root {
-  --accent: #50a990;
-  --accent-contrast: #08130f;
+  --style-forest: #4c765c; /* 02: the Forest style card */
+  --style-mint: #50a990; /* 02: the Mint style card, and the default in 04-06 */
+  --style-bee: #c4b267; /* 02: the Bee style card */
+  --style-parchment: #c96542; /* 02: the Parchment style card — terracotta, not beige */
+  --style-forest-contrast: #f4faf7;
+  --style-mint-contrast: #08130f;
+  --style-bee-contrast: #1b1608;
+  --style-parchment-contrast: #1f120d;
+
+  --accent: var(--style-mint);
+  --accent-contrast: var(--style-mint-contrast);
 }
 
 [data-accent="forest"] {
-  --accent: #4c765c; /* 02: the Forest style card */
-  --accent-contrast: #f4faf7;
+  --accent: var(--style-forest);
+  --accent-contrast: var(--style-forest-contrast);
 }
 [data-accent="mint"] {
-  --accent: #50a990; /* 02: the Mint style card, and the default in 04-06 */
-  --accent-contrast: #08130f;
+  --accent: var(--style-mint);
+  --accent-contrast: var(--style-mint-contrast);
 }
 [data-accent="bee"] {
-  --accent: #c4b267; /* 02: the Bee style card */
-  --accent-contrast: #1b1608;
+  --accent: var(--style-bee);
+  --accent-contrast: var(--style-bee-contrast);
 }
 [data-accent="parchment"] {
-  --accent: #c96542; /* 02: the Parchment style card — terracotta, not beige */
-  --accent-contrast: #1f120d;
+  --accent: var(--style-parchment);
+  --accent-contrast: var(--style-parchment-contrast);
 }
 
 /* On the near-black green a light-mode accent sinks in; the same hue lifted ~14% is what shots 05
  * and 06 actually show (mint measures #62c9a8 there). */
-[data-theme-mode="dark"][data-accent="forest"] {
-  --accent: #5fae7f;
-  --accent-contrast: #08130f;
-}
-[data-theme-mode="dark"][data-accent="mint"] {
-  --accent: #62c9a8; /* 05: measured */
-  --accent-contrast: #08130f;
-}
-[data-theme-mode="dark"][data-accent="bee"] {
-  --accent: #e0cf7d;
-  --accent-contrast: #1b1608;
-}
-[data-theme-mode="dark"][data-accent="parchment"] {
-  --accent: #e0805c;
-  --accent-contrast: #1f120d;
+[data-theme-mode="dark"] {
+  --style-forest: #5fae7f;
+  --style-mint: #62c9a8; /* 05: measured */
+  --style-bee: #e0cf7d;
+  --style-parchment: #e0805c;
+  --style-forest-contrast: #08130f;
+  --style-mint-contrast: #08130f;
+  --style-bee-contrast: #1b1608;
+  --style-parchment-contrast: #1f120d;
 }
 
 /* Soft fills carry the accent without claiming its contrast budget: selected rows, the user's
