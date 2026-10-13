@@ -1,5 +1,6 @@
 // The only module allowed to talk to Rust. Keeping the command names and payloads in one typed
 // place is what stops the UI from inventing a field the host never sends.
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 
 /** A packing the app can offer, as chosen for this machine by the catalog + hardware probe. */
@@ -29,8 +30,33 @@ export type ModelStatus = {
   uncheckedWarnings: string[];
   packs: PackView[];
   /** Set when the load-guard refuses to run: title plus the one action that clears it. */
-  blocked: { title: string; detail: string; ctaLabel: string; ctaUrl: string } | null;
+  blocked: {
+    title: string;
+    detail: string;
+    ctaLabel: string;
+    ctaUrl: string;
+    /** The host can clear this refusal itself by fetching the pinned engine. */
+    installable: boolean;
+  } | null;
 };
+
+/**
+ * The engine the host fetched and unpacked, and where the launcher must point.
+ * Mirrors `smollm_desktop_lib::engine::InstallOutcome`.
+ */
+export type InstallOutcome = {
+  tag: string;
+  targetKey: string;
+  asset: string;
+  sha256: string;
+  serverPath: string;
+};
+
+/** `smollm_llama::install::Phase`, emitted on the `engine-install` event while an install runs. */
+export type EngineInstallProgress =
+  | { phase: "downloading"; transferredBytes: number; totalBytes: number }
+  | { phase: "unpacking" }
+  | { phase: "done"; installed: InstallOutcome & { dir: string } };
 
 export type ThemeMode = "light" | "dark" | "system";
 export type Accent = "forest" | "mint" | "bee" | "parchment";
@@ -60,6 +86,9 @@ export type AppearanceState = {
   uiFontSize: number;
   codeFontSize: number;
 };
+
+/** Host event carrying `EngineInstallProgress`; must match `engine::PROGRESS_EVENT` in Rust. */
+export const ENGINE_INSTALL_EVENT = "engine-install";
 
 /* ---- the whole settings document, as the Settings surface edits it ----
  * Field-for-field the Rust schema in `crates/smollm-config`. The surface mutates the loaded object
@@ -149,6 +178,10 @@ export type SettingsDoc = {
 
 export const ipc = {
   modelStatus: () => invoke<ModelStatus>("model_status"),
+  /** Fetch and unpack the pinned fork engine. Progress arrives on `onEngineInstall`. */
+  installEngine: () => invoke<InstallOutcome>("install_engine"),
+  onEngineInstall: (onProgress: (progress: EngineInstallProgress) => void): Promise<() => void> =>
+    listen<EngineInstallProgress>(ENGINE_INSTALL_EVENT, (event) => onProgress(event.payload)),
   loadAppearance: () => invoke<AppearanceState>("load_appearance"),
   /** The host answers with what it stored, including a refreshed `resolvedMode`. */
   saveAppearance: (appearance: AppearanceState) =>

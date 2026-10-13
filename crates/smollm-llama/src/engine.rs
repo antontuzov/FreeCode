@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use smollm_models::hardware::{Backend, HostHardware};
+use smollm_models::hardware::{host_os, Backend, HostHardware};
 use smollm_models::lock::{EngineLock, EngineTarget};
 use smollm_models::validate::build_number;
 
@@ -22,7 +22,10 @@ use crate::LlamaError;
 
 /// llama.cpp's own release CI unpacks to `<asset-dir>/build/bin/<binary>`. We also accept `bin/`
 /// and the directory root so a hand-unpacked or from-source engine still resolves.
-const BIN_SUBDIRS: &[&str] = &["build/bin", "bin", "."];
+/// Where inside an unpacked release the server binary may sit. The empty entry is the layout the
+/// pinned macOS and Windows assets actually use — binaries at the top of the install directory —
+/// and it is spelled `""` rather than `"."` so the reported path does not carry a `./` segment.
+const BIN_SUBDIRS: &[&str] = &["build/bin", "bin", ""];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EngineBinary {
@@ -42,13 +45,7 @@ impl EngineBinary {
         lock: &EngineLock,
         host: &HostHardware,
     ) -> Result<Self, LlamaError> {
-        Self::resolve_for(
-            root,
-            lock,
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-            host.backend,
-        )
+        Self::resolve_for(root, lock, host_os(), std::env::consts::ARCH, host.backend)
     }
 
     /// Resolve for an explicit triple. `UnsupportedBackend` carries the reason copied verbatim out
@@ -117,11 +114,17 @@ impl EngineBinary {
     /// quant types, and loads the F16 reference into garbage because it never applies the
     /// activation transform (llama.cpp#242).
     pub fn assert_not_stock_engine(&self, root: &Path) -> Result<(), LlamaError> {
-        let under_engines = self
-            .server_path
-            .canonicalize()
-            .unwrap_or_else(|_| self.server_path.clone())
-            .starts_with(engines_root(root));
+        let engines = engines_root(root);
+        // Compare canonical forms when both are on disk: `Path::starts_with` matches components
+        // literally, so a workspace root spelled with `..` (or reached through a symlink) would
+        // otherwise reject the engine the installer just laid down — and a symlinked binary that
+        // actually lives outside `engines/` must still be refused. Only when there is nothing to
+        // canonicalise does the literal comparison stand, which is the resolver's own answer for a
+        // binary that is not installed yet.
+        let under_engines = match (self.server_path.canonicalize(), engines.canonicalize()) {
+            (Ok(server), Ok(dir)) => server.starts_with(dir),
+            _ => self.server_path.starts_with(&engines),
+        };
         if under_engines {
             Ok(())
         } else {
@@ -165,11 +168,31 @@ pub fn models_root(root: &Path) -> PathBuf {
     root.join("models")
 }
 
-fn find_server(dir: &Path, binary: &str) -> Option<PathBuf> {
+pub(crate) fn find_server(dir: &Path, binary: &str) -> Option<PathBuf> {
     BIN_SUBDIRS
         .iter()
-        .map(|sub| dir.join(sub).join(binary))
+        .flat_map(|sub| {
+            binary_names(binary)
+                .into_iter()
+                .map(move |name| dir.join(sub).join(name))
+        })
         .find(|p| p.is_file())
+}
+
+/// The file names a release asset may carry the server under. Windows builds ship `llama-server.exe`
+/// — verified against the pinned `…-bin-win-cpu-arm64.zip` on 2026-10-13 — so `.exe` is tried on
+/// every platform rather than behind `cfg(windows)`: the search is already confined to the directory
+/// the installer created for one specific pinned target, and a candidate list that varied with the
+/// build host would leave the Windows path untestable from macOS CI.
+fn binary_names(binary: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for suffix in [std::env::consts::EXE_SUFFIX, "", ".exe"] {
+        let name = format!("{binary}{suffix}");
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
 }
 
 /// The build number and commit from an engine banner. llama.cpp prints
@@ -241,6 +264,22 @@ mod tests {
                 .download_url(&lock)
                 .starts_with("https://github.com/PrismML-Eng/llama.cpp/releases/download/"));
         }
+    }
+
+    #[test]
+    fn the_host_os_vocabulary_is_the_ones_the_lock_spells() {
+        let lock = lock();
+        // `std::env::consts::OS` says `macos`; the lock says `darwin`. A lookup that hands one to the
+        // other resolves nothing on Apple hardware, which is exactly what this asserts against.
+        assert!(lock
+            .targets
+            .iter()
+            .all(|t| ["darwin", "windows", "linux"].contains(&t.os.as_str())));
+        assert!(
+            lock.targets.iter().any(|t| t.os == host_os()),
+            "the running host's os key ({}) must be a vocabulary the lock uses",
+            host_os()
+        );
     }
 
     #[test]
@@ -320,6 +359,55 @@ mod tests {
         let err = e
             .assert_not_stock_engine(&root)
             .expect_err("PATH binary is not the fork");
+        assert!(
+            matches!(err, LlamaError::StockEngineRejected { .. }),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn an_engine_installed_under_a_root_spelled_with_parent_dirs_is_not_stock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lock = lock();
+        let target = lock.targets.first().expect("targets seeded").clone();
+        let root = tmp.path().join("apps/desktop/../..");
+        let dir = lock.install_dir(&engines_root(&root), &target);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(lock.server_binary()), b"the fork build").unwrap();
+
+        let e = EngineBinary::from_target(&root, &lock, &target).unwrap();
+        assert!(e.installed, "{e:?}");
+        // The flat release layout is the common case, and it must be reported as the install
+        // directory itself rather than as `…/./llama-server`.
+        assert!(
+            !e.server_path.to_string_lossy().contains("/./"),
+            "{:?}",
+            e.server_path
+        );
+        e.assert_not_stock_engine(&root)
+            .expect("an engine under engines/ is the fork however the root is spelled");
+    }
+
+    /// The refusal has to survive a shortcut: a `llama-server` that is only a symlink to a system
+    /// build is stock llama.cpp wearing the fork's filename.
+    #[cfg(unix)]
+    #[test]
+    fn a_server_symlinked_out_of_engines_is_refused_as_stock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lock = lock();
+        let target = lock.targets.first().expect("targets seeded").clone();
+        let outside = tmp.path().join("system-build/llama-server");
+        std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
+        std::fs::write(&outside, b"stock llama.cpp").unwrap();
+        let dir = lock.install_dir(&engines_root(tmp.path()), &target);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join(lock.server_binary())).unwrap();
+
+        let e = EngineBinary::from_target(tmp.path(), &lock, &target).unwrap();
+        assert!(e.installed, "the link does resolve to a file: {e:?}");
+        let err = e
+            .assert_not_stock_engine(tmp.path())
+            .expect_err("a link out of engines/ is the stock build");
         assert!(
             matches!(err, LlamaError::StockEngineRejected { .. }),
             "{err:?}"

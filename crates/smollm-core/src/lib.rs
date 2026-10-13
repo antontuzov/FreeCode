@@ -56,8 +56,9 @@ pub enum CoreError {
 pub fn blocked_info(
     blocker: &smollm_llama::load_guard::Blocker,
     lock: &smollm_models::EngineLock,
+    model_repo: &str,
 ) -> BlockedInfo {
-    BlockedInfo::from_blocker(blocker, lock)
+    BlockedInfo::from_blocker(blocker, lock, model_repo)
 }
 
 #[cfg(test)]

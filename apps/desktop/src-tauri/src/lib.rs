@@ -6,6 +6,7 @@
 //! hardware probe and header parse run on the async runtime instead of the event-loop thread.
 
 mod appearance;
+mod engine;
 mod paths;
 mod status;
 pub mod verify_native;
@@ -48,6 +49,14 @@ async fn load_appearance(app: AppHandle) -> Result<AppearanceView, String> {
     ))
 }
 
+/// Fetch the pinned fork engine and unpack it into `engines/`. Progress arrives on the
+/// `engine-install` event and the answer is the final state. This is the app's only outbound request
+/// on the local-model path, and it happens because the user pressed Install.
+#[tauri::command]
+async fn install_engine(app: AppHandle) -> Result<engine::InstallOutcome, String> {
+    engine::install_engine(&app).await
+}
+
 /// Persists the shell's controls and echoes what the host now believes, so the UI never keeps a
 /// stale `resolvedMode`. `resolvedMode` is host-computed and is not read from the payload.
 #[tauri::command]
@@ -85,6 +94,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             model_status,
+            install_engine,
             load_appearance,
             save_appearance,
             load_settings,

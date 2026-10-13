@@ -253,6 +253,18 @@ fn available_disk_bytes(path: &str) -> u64 {
     }
 }
 
+/// This machine's OS key spelled the way `engines/lock.toml` spells it.
+///
+/// `std::env::consts::OS` says `macos`, while the lock — like llama.cpp's own asset names — says
+/// `darwin`. Handing one to a lookup in the other silently resolves no target on Apple hardware, so
+/// every lock lookup goes through here.
+pub fn host_os() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "darwin",
+        other => other,
+    }
+}
+
 impl HostHardware {
     /// Detect the machine we are running on, sized for the directory whose free space matters
     /// (the model dir).

@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 pub use catalog::{Catalog, ModelEntry, Pack, VisionPack};
 pub use download::{DownloadPlan, Progress};
 pub use gguf::{GgufHeader, IntegrityStatus};
-pub use hardware::{Backend, GpuArch, HostHardware};
+pub use hardware::{host_os, Backend, GpuArch, HostHardware};
 pub use lock::{EngineLock, EngineTarget};
 pub use select::{recommend, Recommendation, DEFAULT_HEADROOM_BYTES};
 pub use validate::{AvailableTarget, Violation};

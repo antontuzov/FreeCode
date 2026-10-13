@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use smollm_models::catalog::{ModelEntry, Pack, Severity};
 use smollm_models::gguf::GgufHeader;
-use smollm_models::hardware::{Backend, HostHardware};
+use smollm_models::hardware::{host_os, Backend, HostHardware};
 use smollm_models::lock::EngineLock;
 
 use crate::engine::EngineBinary;
@@ -133,7 +133,10 @@ impl Blocker {
         }
     }
 
-    pub fn cta(&self, lock: &EngineLock) -> CallToAction {
+    /// The one link that clears this blocker. `model_repo` is the Hugging Face repo the weights come
+    /// from, which is NOT `lock.repo`: that is the llama.cpp fork on GitHub, and sending someone
+    /// there to re-fetch a `.gguf` is how a wrong URL ends up printed under the right diagnosis.
+    pub fn cta(&self, lock: &EngineLock, model_repo: &str) -> CallToAction {
         let releases = format!(
             "https://github.com/{}/releases/tag/{}",
             lock.repo, lock.pinned_tag
@@ -156,11 +159,11 @@ impl Blocker {
             },
             Blocker::RotationMetadataMissing { .. } => CallToAction {
                 label: "Download the official Bonsai files",
-                url: format!("https://huggingface.co/{}", lock.repo),
+                url: format!("https://huggingface.co/{model_repo}"),
             },
-            Blocker::IntegrityFailed { .. } => CallToAction {
+            Blocker::IntegrityFailed { file, .. } => CallToAction {
                 label: "Re-download this file",
-                url: releases,
+                url: format!("https://huggingface.co/{model_repo}/resolve/main/{file}"),
             },
         }
     }
@@ -225,7 +228,7 @@ pub fn check(req: &GuardRequest) -> GuardReport {
             let resolved = EngineBinary::resolve_for(
                 req.root,
                 req.lock,
-                std::env::consts::OS,
+                host_os(),
                 std::env::consts::ARCH,
                 req.host.map(|h| h.backend).unwrap_or(Backend::Cpu),
             );
@@ -447,7 +450,7 @@ mod tests {
             report
                 .blockers
                 .iter()
-                .map(|b| b.title())
+                .map(|b| format!("{} — {}", b.title(), b.detail()))
                 .collect::<Vec<_>>()
         );
     }
@@ -545,12 +548,43 @@ mod tests {
         ));
         let blocker = report.first_blocker().expect("engine must be required");
         assert!(matches!(blocker, Blocker::EngineNotInstalled { .. }));
-        let cta = blocker.cta(&lock);
+        let cta = blocker.cta(&lock, &model.repo_id);
         assert_eq!(cta.label, "Install the PrismML engine");
-        assert!(cta
-            .url
-            .starts_with("https://github.com/PrismML-Eng/llama.cpp/releases/"));
+        assert!(
+            cta.url
+                .starts_with("https://github.com/PrismML-Eng/llama.cpp/releases/"),
+            "{}",
+            cta.url
+        );
         assert!(!cta.url.contains("ggerganov"));
+    }
+
+    /// The two blockers about the weights must send the user to the weights. `lock.repo` is the
+    /// llama.cpp fork on GitHub, so a URL built from it prints the right diagnosis over a link
+    /// nowhere near the file they need.
+    #[test]
+    fn a_weights_refusal_points_at_the_model_repo_not_the_engine_releases() {
+        let (_, lock, model) = fixture();
+        let file = "Ternary-Bonsai-2-27B-PQ2_0.gguf";
+        let cta = Blocker::IntegrityFailed {
+            file: file.into(),
+            status: "not downloaded".into(),
+        }
+        .cta(&lock, &model.repo_id);
+        assert_eq!(
+            cta.url,
+            format!(
+                "https://huggingface.co/{}/resolve/main/{file}",
+                model.repo_id
+            )
+        );
+        let cta = Blocker::RotationMetadataMissing {
+            path: PathBuf::from(file),
+            required_prefixes: vec!["prism.hadamard.".into()],
+            found_keys: vec![],
+        }
+        .cta(&lock, &model.repo_id);
+        assert_eq!(cta.url, format!("https://huggingface.co/{}", model.repo_id));
     }
 
     #[test]

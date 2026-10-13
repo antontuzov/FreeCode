@@ -95,12 +95,15 @@ impl Assembly {
         unchecked_warnings.dedup();
 
         let blocked = self.report.first_blocker().map(|b| {
-            let cta = b.cta(&self.lock);
+            let cta = b.cta(&self.lock, &self.model.repo_id);
             BlockedView {
                 title: b.title().to_string(),
                 detail: b.detail(),
                 cta_label: cta.label.to_string(),
                 cta_url: cta.url,
+                // Only the missing engine is something this app can fix by itself; the other
+                // blockers need a file the user has to fetch or a pin the repository has to move.
+                installable: matches!(b, Blocker::EngineNotInstalled { .. }),
             }
         });
 
@@ -272,6 +275,9 @@ pub struct BlockedView {
     pub detail: String,
     pub cta_label: String,
     pub cta_url: String,
+    /// True when the app can clear this itself by fetching the pinned engine; false when the fix is
+    /// a file or a pin change and the URL is the honest answer.
+    pub installable: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -303,13 +309,33 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
     }
 
+    /// A checkout carrying the pinned configuration and nothing fetched: no engine, no weights.
+    /// Built in a tempdir because the machine running these tests may already have installed the
+    /// engine, and a "clean checkout" that reads the repository's own `engines/` would pass or fail
+    /// according to what the last run downloaded.
+    fn clean_checkout() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = repo_root();
+        for rel in ["engines/lock.toml", "catalog/models.toml"] {
+            let dest = tmp.path().join(rel);
+            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            std::fs::copy(real.join(rel), &dest).unwrap_or_else(|e| panic!("{rel}: {e}"));
+        }
+        tmp
+    }
+
     #[test]
     fn a_clean_checkout_reports_the_missing_engine_as_the_first_blocker() {
         // Nothing unpacked, nothing downloaded: the refusal shown first must be the one carrying an
         // install action, and it must point at the fork, not a system llama.cpp.
-        let status = build(&repo_root(), &Settings::default()).expect("status builds");
+        let root = clean_checkout();
+        let status = build(root.path(), &Settings::default()).expect("status builds");
         let blocked = status.blocked.expect("a fresh tree blocks the run");
         assert_eq!(blocked.title, "PrismML engine not installed");
+        assert!(
+            blocked.installable,
+            "the first blocker on a fresh tree is the one Install fixes"
+        );
         assert!(
             blocked.cta_url.contains("PrismML-Eng"),
             "{}",
@@ -322,7 +348,8 @@ mod tests {
 
     #[test]
     fn a_fresh_tree_is_pending_install_not_a_contract_failure() {
-        let assembly = assemble(&repo_root(), &Settings::default()).unwrap();
+        let root = clean_checkout();
+        let assembly = assemble(root.path(), &Settings::default()).unwrap();
         assert!(
             assembly.contract_failures().is_empty(),
             "{:?}",

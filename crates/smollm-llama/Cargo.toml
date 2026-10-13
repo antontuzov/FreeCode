@@ -11,6 +11,11 @@ smollm-models = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+flate2 = { workspace = true }
+reqwest = { workspace = true }
+tar = { workspace = true }
+tokio = { workspace = true }
+zip = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

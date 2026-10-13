@@ -40,6 +40,9 @@ pub struct EngineTarget {
     pub backend: Backend,
     pub asset: String,
     pub size_bytes: u64,
+    /// GitHub's own `assets[].digest` for the pinned release. Required rather than defaulted: an
+    /// asset we cannot checksum is an asset the installer must refuse to unpack.
+    pub sha256: String,
     pub recommended: bool,
     #[serde(default)]
     pub notes: String,
@@ -232,6 +235,32 @@ mod tests {
             PathBuf::from("engines/prism-b10772-e8fd209/macos-arm64")
         );
         assert_eq!(l.server_binary(), "llama-server");
+    }
+
+    #[test]
+    fn every_locked_asset_carries_a_sha256_the_installer_can_check() {
+        let l = lock();
+        for t in l.targets.iter() {
+            assert_eq!(
+                t.sha256.len(),
+                64,
+                "{} must record GitHub's sha256 digest, not a placeholder",
+                t.key
+            );
+            assert!(
+                t.sha256.chars().all(|c| c.is_ascii_hexdigit())
+                    && t.sha256 == t.sha256.to_lowercase(),
+                "{}: {:?} is not a lowercase hex sha256",
+                t.key,
+                t.sha256
+            );
+            assert!(
+                t.size_bytes > 1_000_000,
+                "{}: an engine asset is not {} bytes",
+                t.key,
+                t.size_bytes
+            );
+        }
     }
 
     #[test]

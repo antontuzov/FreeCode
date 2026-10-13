@@ -29,8 +29,10 @@ pub struct BlockedInfo {
 }
 
 impl BlockedInfo {
-    pub fn from_blocker(blocker: &Blocker, lock: &EngineLock) -> Self {
-        let cta = blocker.cta(lock);
+    /// `model_repo` is the Hugging Face repo the weights came from; the blockers about the file on
+    /// disk point there, while the ones about the engine point at the GitHub fork in `lock`.
+    pub fn from_blocker(blocker: &Blocker, lock: &EngineLock, model_repo: &str) -> Self {
+        let cta = blocker.cta(lock, model_repo);
         Self {
             title: blocker.title().to_string(),
             detail: blocker.detail(),
@@ -213,7 +215,8 @@ mod tests {
         let blocker = Blocker::StockEngineRejected {
             path: Path::new("/opt/homebrew/bin/llama-server").to_path_buf(),
         };
-        let info = BlockedInfo::from_blocker(&blocker, &lock());
+        let info =
+            BlockedInfo::from_blocker(&blocker, &lock(), "prism-ml/Ternary-Bonsai-2-27B-gguf");
         assert_eq!(info.title, "This model cannot run on standard llama.cpp");
         assert_eq!(info.cta_label, "Install the PrismML engine");
         assert!(info

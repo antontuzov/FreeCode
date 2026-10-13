@@ -112,6 +112,14 @@ fn describe(probe: &mut Probe, assembly: &Assembly, root: &Path, require_engine:
         } else {
             probe.say(format!("{message} — pending install"));
         }
+    } else if let Some(engine) = &assembly.engine {
+        // Naming the binary the guard will launch, so a green probe on a runner that has an engine
+        // says which one it used.
+        probe.say(format!(
+            "fork engine {} resolved to {}",
+            assembly.lock.pinned_tag,
+            engine.server_path.display()
+        ));
     }
     if assembly.weights_absent {
         probe.say(format!(

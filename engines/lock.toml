@@ -2,6 +2,12 @@
 #
 # Tag + asset names + sizes were read from the GitHub Releases API on 2026-10-12:
 #   https://api.github.com/repos/PrismML-Eng/llama.cpp/releases/latest   -> prism-b10772-e8fd209
+# Each target's `sha256` is GitHub's own `assets[].digest` for that release, read on 2026-10-13.
+# Re-record them after any pin change with:
+#   python3 scripts/refresh-engine-digests.py            # writes
+#   python3 scripts/refresh-engine-digests.py --check    # fails if any digest is stale
+# The install path refuses to unpack an archive whose sha256 does not match the value recorded
+# here, so a substituted release asset cannot reach the loader.
 # The tag is NOT "whatever is newest": Bonsai-demo's scripts/download_binaries.sh currently pins an
 # older build (prism-b10743-adfffbe), and several ternary fixes are merged to the `prism` branch but
 # absent from ANY binary release. Where the two disagree the demo repo wins, so an override env var
@@ -35,6 +41,7 @@ arch = "aarch64"
 backend = "metal"
 asset = "llama-prism-b10772-e8fd209-bin-macos-arm64.tar.gz"
 size_bytes = 11_534_167
+sha256 = "b4cbf62095ab7f30bf5a5c457e415090777a8d185986300978ca297d88f9b7a3"
 recommended = true
 notes = "Metal is the default on Apple Silicon. The M5 Pro/Max throughput numbers in the catalog are this path."
 [[target]]
@@ -44,6 +51,7 @@ arch = "aarch64"
 backend = "cpu"
 asset = "llama-prism-b10772-e8fd209-bin-macos-arm64-kleidiai.tar.gz"
 size_bytes = 11_565_786
+sha256 = "7845c248b027a2e3c9f182aecd7b7e92c37309ab9a945a4f59fcbd75985a0c1d"
 recommended = false
 notes = "KleidiAI CPU kernels; use only with -ngl 0."
 [[target]]
@@ -53,6 +61,7 @@ arch = "x86_64"
 backend = "cpu"
 asset = "llama-prism-b10772-e8fd209-bin-macos-x64.tar.gz"
 size_bytes = 11_573_384
+sha256 = "be57416ed344bf0415a23400e772d6ce9e329d2854e77fa0f94bd9e3af03598a"
 recommended = true
 notes = "Intel Mac: no Metal, so -ngl 0 (Bonsai-demo common.sh emits 0 for non-arm64 macOS)."
 
@@ -63,6 +72,7 @@ arch = "x86_64"
 backend = "cpu"
 asset = "llama-prism-b10772-e8fd209-bin-win-cpu-x64.zip"
 size_bytes = 19_458_591
+sha256 = "53be70c8b87a4261a1a56f0f72df9d1b7b815e5794702c2d779cdea1c78a347b"
 recommended = true
 notes = "Fallback when no usable GPU build starts; llama.cpp#241 reports CUDA builds failing on some CPUs while the CPU build works."
 [[target]]
@@ -72,6 +82,7 @@ arch = "aarch64"
 backend = "cpu"
 asset = "llama-prism-b10772-e8fd209-bin-win-cpu-arm64.zip"
 size_bytes = 12_375_788
+sha256 = "064137ca2e2c6c1bd1e76a6479ba6fe30298e2f44b507a013b7dcd94217f4fe6"
 recommended = true
 [[target]]
 key = "windows-cuda-12.4-x64"
@@ -80,6 +91,7 @@ arch = "x86_64"
 backend = "cuda"
 asset = "llama-prism-b10772-e8fd209-bin-win-cuda-12.4-x64.zip"
 size_bytes = 313_894_096
+sha256 = "462599816f7a3cd66a397b2a7d652ac41a28cdf6cc6696f022b1429ba4126e6a"
 recommended = true
 notes = "Preferred CUDA build on Windows: llama.cpp#222 reports the CUDA 13.3 build printing its banner and exiting on some systems."
 [[target]]
@@ -89,6 +101,7 @@ arch = "x86_64"
 backend = "cuda"
 asset = "llama-prism-b10772-e8fd209-bin-win-cuda-13.3-x64.zip"
 size_bytes = 179_142_811
+sha256 = "984512655d5797835308ae7466c9d144f23ac511c1f18112806468c6bfb8876e"
 recommended = false
 notes = "llama.cpp#222: crashes on some systems."
 [[target]]
@@ -98,6 +111,7 @@ arch = "x86_64"
 backend = "vulkan"
 asset = "llama-prism-b10772-e8fd209-bin-win-vulkan-x64.zip"
 size_bytes = 31_242_630
+sha256 = "f365ad7c56fb9df8805eb4f701bd068ee36c61da894dc7c52f48644d1fa2b625"
 recommended = true
 # Vulkan is NOT in common.sh's pq2_0_ready_backend() list, because PQ2_0 silently decodes on the CPU
 # (#238). Pair this target with PTQ1_0.
@@ -109,6 +123,7 @@ arch = "x86_64"
 backend = "hip"
 asset = "llama-prism-b10772-e8fd209-bin-win-hip-radeon-x64.zip"
 size_bytes = 342_445_816
+sha256 = "742631b81d558c40c154599e2af8b1cb1679470405267148118fb3bf14a4e6bc"
 recommended = true
 notes = "gfx1151 gets garbled PQ2_0 output (#223): use -ngl 0 or Vulkan+PTQ1_0. RDNA2 consumer parts abort (Bonsai-demo#197)."
 
@@ -119,6 +134,7 @@ arch = "x86_64"
 backend = "cuda"
 asset = "llama-prism-b10772-e8fd209-bin-linux-cuda-12.8-x64.tar.gz"
 size_bytes = 208_141_397
+sha256 = "94bb4a8cf97dddb9ff87f02d654dfdf2744ee5f05a5d9df0463efa8d7ac47759"
 recommended = true
 notes = "Recommended Linux CUDA build (llama.cpp#222)."
 [[target]]
@@ -128,6 +144,7 @@ arch = "x86_64"
 backend = "cpu"
 asset = "llama-prism-b10772-e8fd209-bin-ubuntu-x64.tar.gz"
 size_bytes = 17_802_121
+sha256 = "0e9c3824d6b0d68b319013b801f19066cf4f773378c31e8a7dbf31aa36dfae82"
 recommended = true
 [[target]]
 key = "linux-rocm-x64"
@@ -136,6 +153,7 @@ arch = "x86_64"
 backend = "rocm"
 asset = "llama-prism-b10772-e8fd209-bin-ubuntu-rocm-7.2-x64.tar.gz"
 size_bytes = 155_865_338
+sha256 = "da677becd1ab0a514c481275f87208079e749e286908a04aad5a42acfee7fb01"
 recommended = true
 
 # Deliberately unresolvable: SYCL cannot load PQ2_0 or PTQ1_0 at all ("unsupport data type",
