@@ -117,7 +117,19 @@ mod tests {
     fn catalog_loads_from_the_repo_root() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let catalog = Catalog::load_default(&root).expect("seeded catalog loads");
-        assert_eq!(catalog.models.len(), 1);
+        let ids: Vec<&str> = catalog.models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["ternary-bonsai-2-27b", "ternary-bonsai-1-7b"]);
         assert_eq!(catalog.models[0].packs.len(), 3);
+
+        // The 1.7B lists four files but offers two: the F16 reference is a baseline, and the
+        // card-recommended legacy Q2_0 pack is the one the pinned engine refuses to load.
+        let small = catalog.model("ternary-bonsai-1-7b").unwrap();
+        assert_eq!(small.packs.len(), 4);
+        let offered: Vec<&str> = small
+            .downloadable_packs()
+            .iter()
+            .map(|p| p.key.as_str())
+            .collect();
+        assert_eq!(offered, ["PQ2_0", "Q2_0_g64"]);
     }
 }

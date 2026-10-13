@@ -190,18 +190,37 @@ fn validate_model(model: &ModelEntry, targets: &[AvailableTarget], out: &mut Vec
                 }
             }
         }
-        if model.engine.required_metadata_prefixes.is_empty() {
+        // The rotation-metadata requirement exists for exports whose weights were folded through a
+        // Hadamard basis (Bonsai 2): a file quantized by anyone else loads silently and emits
+        // nonsense, and metadata is the only proof of provenance. A ternary model stored in an
+        // unrotated basis — the earlier Bonsai generation — simply has no `prism.*` keys, so
+        // requiring them would reject the real file. Its provenance is instead the quant type id
+        // that only the fork's loader knows.
+        let rotated = model.weight_format.is_rotated();
+        if rotated {
+            if model.engine.required_metadata_prefixes.is_empty() {
+                out.push(Violation::new(
+                    "rotation-metadata-required",
+                    &model.id,
+                    "no required_metadata_prefixes: a ternary file quantized outside Prism loads silently and outputs garbage (llama.cpp#242)".into(),
+                ));
+            }
+            if model.weight_format.metadata_key_prefix.is_empty() {
+                out.push(Violation::new(
+                    "rotation-metadata-required",
+                    &model.id,
+                    "weight_format.metadata_key_prefix is empty".into(),
+                ));
+            }
+        } else if !model.engine.required_metadata_prefixes.is_empty() {
+            // Guard and catalog must agree, or the app rejects a pack it should run.
             out.push(Violation::new(
                 "rotation-metadata-required",
                 &model.id,
-                "no required_metadata_prefixes: a ternary file quantized outside Prism loads silently and outputs garbage (llama.cpp#242)".into(),
-            ));
-        }
-        if model.weight_format.metadata_key_prefix.is_empty() {
-            out.push(Violation::new(
-                "rotation-metadata-required",
-                &model.id,
-                "weight_format.metadata_key_prefix is empty".into(),
+                format!(
+                    "the format declares rotation {:?}, so required_metadata_prefixes {:?} can never be satisfied by a real export",
+                    model.weight_format.rotation, model.engine.required_metadata_prefixes
+                ),
             ));
         }
 
@@ -233,8 +252,10 @@ fn validate_model(model: &ModelEntry, targets: &[AvailableTarget], out: &mut Vec
     }
 
     // 5. Reasoning-effort contract: `high` must never be sendable, `low` must be documented as
-    // behaving like the default, and the default must be supported.
+    // behaving like the default, and the default must be supported. The `low` mapping is a Bonsai 2
+    // observation, so it is only required of a model that can actually think.
     let r = &model.sampling.reasoning;
+    let thinks = r.supported_efforts.iter().any(|e| e != "none");
     if r.supported_efforts.contains(&"high".to_string()) {
         out.push(Violation::new(
             "effort-high-never",
@@ -252,13 +273,24 @@ fn validate_model(model: &ModelEntry, targets: &[AvailableTarget], out: &mut Vec
             ),
         ));
     }
-    if r.unsupported_efforts.contains(&"low".to_string()) && r.low_behaves_like != "xhigh" {
+    if thinks && r.unsupported_efforts.contains(&"low".to_string()) && r.low_behaves_like != "xhigh"
+    {
         out.push(Violation::new(
             "effort-low-mapping",
             &model.id,
             format!(
                 "low is unsupported and must declare low_behaves_like = xhigh, got {:?}",
                 r.low_behaves_like
+            ),
+        ));
+    }
+    if !thinks && r.default_effort != "none" {
+        out.push(Violation::new(
+            "effort-none-only",
+            &model.id,
+            format!(
+                "the template has no thinking branch, so default_effort must be \"none\", got {:?}",
+                r.default_effort
             ),
         ));
     }
@@ -277,44 +309,53 @@ fn validate_model(model: &ModelEntry, targets: &[AvailableTarget], out: &mut Vec
         ));
     }
 
-    // 6. Sampling contract: min_p is not carried by the GGUF, so the launcher has to state it.
-    if model.sampling.thinking.min_p <= 0.0 {
+    // 6. Sampling contract: llama.cpp seeds its sampler defaults from the GGUF, so for every value
+    // the launcher has an opinion about, the catalog must say whether the file carries it or the
+    // flag has to be passed explicitly. A value in neither list is a gap where an engine default
+    // would silently decide the answer, and engine defaults differ between builds.
+    const SAMPLED: [&str; 6] = [
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "presence_penalty",
+        "repetition_penalty",
+    ];
+    let carried = |key: &str| {
+        r.carried_in_gguf.iter().any(|c| c == key) || r.not_carried_in_gguf.iter().any(|c| c == key)
+    };
+    for key in SAMPLED {
+        if !carried(key) {
+            out.push(Violation::new(
+                "sampling-carriage",
+                &model.id,
+                format!("{key} is neither declared in carried_in_gguf nor in not_carried_in_gguf"),
+            ));
+        }
+    }
+    // Bonsai 2's GGUF carries no min_p key (KNOWN_ISSUES.md "Sampling and metadata"), so its card
+    // value has to be stated by the launcher; a file that does carry min_p speaks for itself.
+    if !r.carried_in_gguf.iter().any(|c| c == "min_p") && model.sampling.thinking.min_p <= 0.0 {
         out.push(Violation::new(
             "thinking-min-p",
             &model.id,
-            "thinking min_p must be set explicitly (0.05); it is absent from the GGUF".into(),
-        ));
-    }
-    if !model
-        .sampling
-        .reasoning
-        .not_carried_in_gguf
-        .contains(&"min_p".to_string())
-    {
-        out.push(Violation::new(
-            "thinking-min-p",
-            &model.id,
-            "reasoning.not_carried_in_gguf must record min_p".into(),
-        ));
-    }
-    if model.sampling.instruct.presence_penalty <= 0.0 {
-        out.push(Violation::new(
-            "instruct-presence-penalty",
-            &model.id,
-            "instruct presence_penalty must be 1.5 per the model card".into(),
+            "min_p is absent from the GGUF, so thinking min_p must be stated (Bonsai 2: 0.05)"
+                .into(),
         ));
     }
 
     // 7. Generation budget: a cap small enough to end the run mid-thought yields an empty reply,
-    // the single most common report against this model.
+    // the single most common report against the thinking models. A model that cannot think has no
+    // trace to truncate, so only the thinking case carries the 4k floor.
     let c = &model.agent_constraints;
-    if c.min_generation_budget_tokens < 4_096 {
+    let budget_floor = if thinks { 4_096 } else { 256 };
+    if c.min_generation_budget_tokens < budget_floor {
         out.push(Violation::new(
             "thinking-budget-floor",
             &model.id,
             format!(
-                "min_generation_budget_tokens {} would truncate the thinking trace",
-                c.min_generation_budget_tokens
+                "min_generation_budget_tokens {} is below the {} token floor",
+                c.min_generation_budget_tokens, budget_floor
             ),
         ));
     }
@@ -355,22 +396,29 @@ fn validate_model(model: &ModelEntry, targets: &[AvailableTarget], out: &mut Vec
 
     // 9. Benchmark sanity: a ternary pack that claims to be a runtime pack must be measured, not
     // guessed. A percentage outside 50..100 means a typo like 8.2 for 82.
-    let b = &model.benchmarks.bonsai;
-    if !(50.0..=100.0).contains(&b.percent_of_fp16) {
+    if let Some(b) = &model.benchmarks.bonsai {
+        if !(50.0..=100.0).contains(&b.percent_of_fp16) {
+            out.push(Violation::new(
+                "benchmark-sane",
+                &model.id,
+                format!(
+                    "bonsai percent_of_fp16 {} is implausible",
+                    b.percent_of_fp16
+                ),
+            ));
+        }
+        if b.avg > model.benchmarks.fp16_avg {
+            out.push(Violation::new(
+                "benchmark-below-fp16",
+                &model.id,
+                format!("a quantized pack cannot score above its FP16 reference on the same suite ({} > {})", b.avg, model.benchmarks.fp16_avg),
+            ));
+        }
+    } else if model.packs.iter().any(|p| p.is_runtime_pack()) {
         out.push(Violation::new(
-            "benchmark-sane",
+            "benchmark-measured",
             &model.id,
-            format!(
-                "bonsai percent_of_fp16 {} is implausible",
-                b.percent_of_fp16
-            ),
-        ));
-    }
-    if b.avg > model.benchmarks.fp16_avg {
-        out.push(Violation::new(
-            "benchmark-below-fp16",
-            &model.id,
-            format!("a quantized pack cannot score above its FP16 reference on the same suite ({} > {})", b.avg, model.benchmarks.fp16_avg),
+            "the model offers runtime packs but [model.benchmarks] records no score for the ternary pack".into(),
         ));
     }
 

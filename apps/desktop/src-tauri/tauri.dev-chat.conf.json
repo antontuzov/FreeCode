@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "devUrl": "http://localhost:5173/?ask=Name%20the%20three%20primary%20colors.%20Answer%20in%20one%20short%20sentence."
+  }
+}

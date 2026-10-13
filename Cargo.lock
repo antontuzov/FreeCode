@@ -3207,6 +3207,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smollm-config",
+ "smollm-core",
  "smollm-llama",
  "smollm-models",
  "tauri",
@@ -3219,8 +3220,10 @@ name = "smollm-llama"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "futures",
  "reqwest 0.12.28",
  "serde",
+ "serde_json",
  "smollm-config",
  "smollm-models",
  "tar",

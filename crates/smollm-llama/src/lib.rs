@@ -1,36 +1,48 @@
-//! The PrismML llama.cpp fork: which build this machine may run, and whether a given weight file
-//! is allowed to be handed to it.
+//! The PrismML llama.cpp fork: which build this machine may run, whether a given weight file is
+//! allowed to be handed to it, and how to run it once it is.
 //!
-//! Three responsibilities, all deliberately free of subprocess calls so they can be unit-tested and
-//! asserted in CI:
+//! Resolution, guarding and flag assembly are deliberately free of subprocess calls so they can be
+//! unit-tested and asserted in CI:
 //!   * [`engine`] — resolve the pinned fork asset for this OS/arch/backend, and prove the pin is
 //!     new enough to exist.
 //!   * [`install`] — fetch that exact asset and unpack it, checksum-verified, into the directory the
 //!     resolver looks in.
 //!   * [`load_guard`] — refuse everything else: stock llama.cpp, an unpinned build, or a
 //!     rotated-basis GGUF that lacks the `prism.hadamard.*` metadata proving it is a Prism export.
+//!   * [`launch`] — assemble the `llama-server` argument vector the demo scripts are known to work
+//!     with, for this backend, packing and RAM.
 //!
-//! Launching a supervised `llama-server`, the verified flag set and the OpenAI-compatible streaming
-//! client are Phase 2 and live beside this, not inside it. Nothing in this crate ever falls back to
-//! a system llama.cpp, because for these packings a fallback produces *silently wrong output*
-//! rather than an error.
+//! Only [`server`] and [`client`] touch a process or a socket: the first starts the plan and kills it
+//! on drop, the second speaks OpenAI to it under the constraints the model's own issue list imposes.
+//!
+//! Nothing here falls back to a system llama.cpp, because for these packings a fallback produces
+//! *silently wrong output* rather than an error.
 
+pub mod client;
 pub mod engine;
 pub mod install;
+pub mod launch;
 pub mod load_guard;
+pub mod server;
 
 use std::path::PathBuf;
 
+pub use client::{
+    chat_body, clamp_budget, normalize, stream_chat, wire_effort, ChatRequest, Message, Reply,
+    ReplyDelta, RequestError, Role, SseDecoder, SseEvent, ToolCall,
+};
 pub use engine::{
     banner_matches_pin, engines_root, models_root, parse_version, EngineBinary, EngineVersion,
 };
 pub use install::{
     install, plan_for, prepare_scratch, tag_dir, unpack, Installed, Phase, PARTS_DIR, STAGING_DIR,
 };
+pub use launch::{context_from_ram, layers_to_offload, LaunchPlan, LaunchRequest, LaunchTuning};
 pub use load_guard::{
     caveat_matches, check, Blocker, CallToAction, FileState, GuardReport, GuardRequest, Warning,
     WarningCode,
 };
+pub use server::{pick_free_port, start, verify_version, ServerHandle};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlamaError {
@@ -97,4 +109,45 @@ pub enum LlamaError {
         dir: PathBuf,
         binary: String,
     },
+    #[error("cannot launch: {path} is not downloaded yet")]
+    WeightsNotInstalled { path: PathBuf },
+    #[error(
+        "refusing to launch with the {kind} KV cache: it is not one of the types the model card recommends ({allowed:?})"
+    )]
+    KvCacheRejected { kind: String, allowed: Vec<String> },
+    #[error("cannot start {}: {source}", .program.display())]
+    Spawn {
+        program: PathBuf,
+        source: std::io::Error,
+    },
+    #[error(
+        "{program} does not report the pinned engine commit {expected} (it reports {found}), so it is not the build the catalog was verified against:\n{banner}"
+    )]
+    VersionMismatch {
+        program: String,
+        expected: String,
+        found: String,
+        banner: String,
+    },
+    #[error("{program} did not answer `--version` within {after_secs}s")]
+    VersionProbeStalled { program: PathBuf, after_secs: u64 },
+    #[error("llama-server exited ({status}) before it became healthy.\n{log}")]
+    ServerExited { status: String, log: String },
+    #[error(
+        "llama-server never reported a healthy /health at {url} within {after_secs}s (last answer: {status}).\n{log}"
+    )]
+    ServerUnhealthy {
+        url: String,
+        after_secs: u64,
+        status: String,
+        log: String,
+    },
+    #[error("the llama.cpp server could not be reached: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error(
+        "the llama.cpp server answered {status}:\n{body}\nThis is the template's own refusal — see the model's KNOWN_ISSUES.md."
+    )]
+    ServerError { status: u16, body: String },
+    #[error(transparent)]
+    Request(#[from] client::RequestError),
 }

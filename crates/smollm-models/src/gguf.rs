@@ -20,9 +20,13 @@ use sha2::{Digest, Sha256};
 
 use crate::ModelsError;
 
-/// How much of the file to read for header parsing. A Qwen-class GGUF's KV section, including long
-/// chat templates, stays well under this.
+/// First window to read for header parsing. A real Bonsai export needs far more than this — its
+/// 248k-token vocab and 247k merge table sit in the KV section, putting the end of that section at
+/// ~11 MB into the file — so `read_header` grows the window on demand rather than assuming.
 pub const HEADER_WINDOW_BYTES: usize = 4 << 20;
+/// Hard ceiling on the grown window. Beyond this a GGUF is not a metadata section but a mistake,
+/// and the parse reports what it found rather than reading the pack into RAM.
+const MAX_HEADER_WINDOW_BYTES: usize = 64 << 20;
 /// Tensor infos to sample for their quant type ids.
 pub const TENSOR_SAMPLE: usize = 64;
 /// Upper bound on a single array field we are willing to walk.
@@ -220,19 +224,28 @@ impl Kind {
     }
 }
 
-/// Cursor over a bounded header window.
-struct Cursor_ {
-    buf: Vec<u8>,
+/// Upper bound on one metadata string. `tokenizer.chat_template` is ~9 KB; anything longer is a
+/// corrupt length field, not a name.
+const MAX_STRING_BYTES: u64 = 1 << 22;
+
+/// Cursor over a borrowed header window.
+struct Cursor_<'a> {
+    buf: &'a [u8],
     pos: usize,
+    /// Set when a read asked for bytes the window does not hold. This is the difference between a
+    /// file whose header is larger than the current window — which `read_header` responds to by
+    /// reading more — and a file that is genuinely malformed.
+    ran_out: bool,
 }
 
-impl Cursor_ {
-    fn take(&mut self, n: usize) -> Option<Vec<u8>> {
+impl<'a> Cursor_<'a> {
+    fn take(&mut self, n: usize) -> Option<&'a [u8]> {
         let end = self.pos.checked_add(n)?;
         if end > self.buf.len() {
+            self.ran_out = true;
             return None;
         }
-        let out = self.buf[self.pos..end].to_vec();
+        let out = &self.buf[self.pos..end];
         self.pos = end;
         Some(out)
     }
@@ -244,22 +257,97 @@ impl Cursor_ {
 
     fn u64(&mut self) -> Option<u64> {
         let b = self.take(8)?;
-        Some(u64::from_le_bytes(b.as_slice().try_into().ok()?))
+        Some(u64::from_le_bytes(b.try_into().ok()?))
     }
 
     fn string(&mut self) -> Option<String> {
         let len = self.u64()?;
-        if len > 1 << 22 {
+        if len > MAX_STRING_BYTES {
+            self.ran_out = true;
             return None;
         }
         let b = self.take(len as usize)?;
-        Some(String::from_utf8_lossy(&b).into_owned())
+        Some(String::from_utf8_lossy(b).into_owned())
+    }
+
+    /// Step forward without producing the bytes.
+    fn skip_bytes(&mut self, n: usize) -> bool {
+        self.take(n).is_some()
+    }
+
+    fn skip_string(&mut self) -> bool {
+        let Some(len) = self.u64() else { return false };
+        if len > MAX_STRING_BYTES {
+            self.ran_out = true;
+            return false;
+        }
+        self.skip_bytes(len as usize)
+    }
+
+    /// Step over a value of this type, ending exactly where reading it would have. Arrays are the
+    /// reason this exists: the vocab is an array of a quarter-million strings, whose total length is
+    /// only knowable by reading each of those length fields.
+    fn skip(&mut self, kind: Kind) -> bool {
+        match kind {
+            Kind::String => self.skip_string(),
+            Kind::Array => {
+                let Some(raw) = self.u32() else { return false };
+                let Some(elem) = Kind::from_u32(raw) else {
+                    self.ran_out = true;
+                    return false;
+                };
+                let Some(count) = self.u64() else {
+                    return false;
+                };
+                if count > MAX_ARRAY_LEN {
+                    self.ran_out = true;
+                    return false;
+                }
+                match elem.scalar_len() {
+                    Some(width) => {
+                        let Some(total) = width.checked_mul(count as usize) else {
+                            self.ran_out = true;
+                            return false;
+                        };
+                        self.skip_bytes(total)
+                    }
+                    None => (0..count).all(|_| self.skip(elem)),
+                }
+            }
+            scalar => self.skip_bytes(scalar.scalar_len().unwrap_or(0)),
+        }
     }
 }
 
+/// Read the metadata section of a GGUF file.
+///
+/// The window starts small and quadruples only when the parse actually runs out of bytes, because a
+/// real Bonsai export keeps its 248k-token vocab and 247k merge table in the KV section: that section
+/// ends ~11 MB into the file. A fixed 4 MB window truncates it, and a fixed 64 MB one would read
+/// sixteen times more than a probe file needs on every call.
 pub fn read_header(path: &Path) -> Result<GgufHeader, ModelsError> {
-    let buf = read_prefix(path, HEADER_WINDOW_BYTES)?;
-    parse_header(path, &buf)
+    let mut window = HEADER_WINDOW_BYTES;
+    loop {
+        let buf = read_prefix(path, window)?;
+        // A short read is EOF: there is no further data to window over, so a failed parse is the
+        // file's fault and must be reported rather than retried with a bigger buffer.
+        let at_eof = buf.len() < window;
+        let mut c = Cursor_ {
+            buf: &buf,
+            pos: 0,
+            ran_out: false,
+        };
+        match parse_header(path, &mut c) {
+            Ok(header) => return Ok(header),
+            Err(e) => {
+                if c.ran_out && !at_eof && window < MAX_HEADER_WINDOW_BYTES {
+                    window = (window * 4).min(MAX_HEADER_WINDOW_BYTES);
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
 }
 
 /// Read at most `limit` bytes from the start of a file, so header parsing never streams a 7 GB
@@ -279,14 +367,12 @@ fn read_prefix(path: &Path, limit: usize) -> Result<Vec<u8>, ModelsError> {
     Ok(buf)
 }
 
-fn parse_header(path: &Path, buf: &[u8]) -> Result<GgufHeader, ModelsError> {
+fn parse_header(path: &Path, c: &mut Cursor_) -> Result<GgufHeader, ModelsError> {
+    let buf = c.buf;
     if buf.len() < 24 || &buf[..4] != b"GGUF" {
         return err(path, "missing GGUF magic");
     }
-    let mut c = Cursor_ {
-        buf: buf.to_vec(),
-        pos: 4,
-    };
+    c.pos = 4;
     let version = c.u32().ok_or_else(|| unparseable(path))?;
     if version != 2 && version != 3 {
         return Err(ModelsError::NotGguf {
@@ -314,8 +400,16 @@ fn parse_header(path: &Path, buf: &[u8]) -> Result<GgufHeader, ModelsError> {
             path: path.to_path_buf(),
             reason: format!("unknown value type {raw_kind} for key {key}"),
         })?;
-        let value = read_value(path, &mut c, kind)?;
-        record_kv(&mut header, &key, &value);
+        record_key_name(&mut header, &key);
+        // The rest of this section is the vocab, the merge table and the rotation sign tables:
+        // hundreds of thousands of values that would be allocated and dropped for nothing. Step over
+        // them and keep the cursor position exact.
+        if key_needs_value(&key) {
+            let value = read_value(path, &mut *c, kind)?;
+            record_value(&mut header, &key, &value);
+        } else if !c.skip(kind) {
+            return err(path, "header window ended inside a metadata value");
+        }
     }
 
     // Tensor infos follow the KV section: name, n_dims, dims, type, offset.
@@ -383,7 +477,8 @@ fn read_value(path: &Path, c: &mut Cursor_, kind: Kind) -> Result<Value, ModelsE
         }
         scalar => {
             let n = scalar.scalar_len().unwrap_or(0);
-            Ok(Value::Scalar(c.take(n).ok_or_else(|| unparseable(path))?))
+            let bytes = c.take(n).ok_or_else(|| unparseable(path))?;
+            Ok(Value::Scalar(bytes.to_vec()))
         }
     }
 }
@@ -395,7 +490,22 @@ fn as_u32(value: &Value) -> Option<u32> {
     }
 }
 
-fn record_kv(header: &mut GgufHeader, key: &str, value: &Value) {
+/// Keys whose *value* this crate reads. Every key is seen by `record_key_name`; only these get past
+/// `skip`, so adding a metadata field to [`GgufHeader`] means adding it here too.
+fn key_needs_value(key: &str) -> bool {
+    matches!(key, "general.architecture" | "general.name") || key.ends_with(".context_length")
+}
+
+/// The rotation markers are identified by key name alone: `prism.hadamard.sign_values` is an array of
+/// 28k integers and `weight_names` a list of 401 strings, none of which has to be materialised to
+/// know the export applied the transform.
+fn record_key_name(header: &mut GgufHeader, key: &str) {
+    if key.starts_with("prism.") {
+        header.rotation_keys.push(key.to_string());
+    }
+}
+
+fn record_value(header: &mut GgufHeader, key: &str, value: &Value) {
     match key {
         "general.architecture" => {
             if let Value::Str(s) = value {
@@ -411,9 +521,6 @@ fn record_kv(header: &mut GgufHeader, key: &str, value: &Value) {
     }
     if key.ends_with(".context_length") {
         header.context_length = as_u32(value);
-    }
-    if key.starts_with("prism.hadamard.") || key.starts_with("prism.") {
-        header.rotation_keys.push(key.to_string());
     }
 }
 
@@ -512,6 +619,63 @@ mod tests {
         );
     }
 
+    /// The shape of the real 5.9 GB pack: a vocab array bigger than the first window, with the keys
+    /// that matter written *after* it. A fixed window truncates inside the vocab and reports a valid
+    /// file as garbage — which is exactly what the first run against Hugging Face's bytes did.
+    #[test]
+    fn a_header_larger_than_the_first_window_still_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        // Each entry costs a length prefix plus a 7-10 character name; dividing by the *smallest*
+        // plausible size keeps the fixture over the window instead of landing just under it.
+        let tokens: Vec<String> = (0..HEADER_WINDOW_BYTES / 15 + 20_000)
+            .map(|i| format!("tok{i:04}"))
+            .collect();
+        let refs: Vec<&str> = tokens.iter().map(String::as_str).collect();
+        let path = synth_file(
+            dir.path(),
+            &[
+                kv_str_array("tokenizer.ggml.tokens", &refs),
+                kv_str("general.architecture", "qwen35"),
+                kv_u32("qwen35.context_length", 262_144),
+                kv_u32("prism.hadamard.block_size", 1024),
+            ],
+            1,
+            &[tensor("blk.0.attn_q.weight", 143)],
+        );
+        assert!(
+            std::fs::metadata(&path).unwrap().len() > HEADER_WINDOW_BYTES as u64,
+            "the fixture has to overflow the initial window to prove the point"
+        );
+        let h =
+            read_header(&path).expect("the window must grow past the vocab to reach these keys");
+        assert_eq!(h.architecture.as_deref(), Some("qwen35"));
+        assert_eq!(h.context_length, Some(262_144));
+        assert_eq!(h.rotation_keys, ["prism.hadamard.block_size"]);
+        assert_eq!(h.quant_type_ids, vec![143]);
+    }
+
+    /// A file that stops is not a file with a bigger header. The reader must refuse it instead of
+    /// growing the window to its ceiling while re-reading the same short bytes.
+    #[test]
+    fn a_file_that_ends_mid_header_is_refused_not_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bytes = Vec::new();
+        bytes.extend(b"GGUF");
+        bytes.extend(3u32.to_le_bytes());
+        bytes.extend(1u64.to_le_bytes());
+        bytes.extend(9u64.to_le_bytes());
+        bytes.extend(kv_str("general.architecture", "qwen35"));
+        let path = dir.path().join("cut.gguf");
+        std::fs::write(&path, bytes).unwrap();
+        let err = read_header(&path).unwrap_err();
+        match &err {
+            ModelsError::NotGguf { reason, .. } => {
+                assert!(!reason.is_empty(), "{err}");
+            }
+            other => panic!("{other}"),
+        }
+    }
+
     #[test]
     fn a_file_without_rotation_metadata_is_flagged() {
         let dir = tempfile::tempdir().unwrap();
@@ -574,5 +738,58 @@ mod tests {
             verify(&dir.path().join("nope.gguf"), 1, "x").unwrap(),
             IntegrityStatus::Missing
         );
+    }
+
+    /// Every size, digest and context length in `catalog/models.toml` is a claim about bytes CI never
+    /// sees. This checks a claim against the file itself:
+    ///
+    /// ```text
+    ///   SMOLLM_GGUF=models/Ternary-Bonsai-1.7B-Q2_0.gguf cargo test -p smollm-models -- --ignored
+    /// ```
+    #[test]
+    #[ignore = "needs a pack downloaded out of band"]
+    fn a_real_pack_agrees_with_the_catalog_entry_for_it() {
+        let path = PathBuf::from(std::env::var("SMOLLM_GGUF").expect("set SMOLLM_GGUF"));
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let catalog = crate::Catalog::load_default(&root).unwrap();
+
+        let (model, pack) = catalog
+            .models
+            .iter()
+            .flat_map(|m| m.packs.iter().map(move |p| (m, p)))
+            .find(|(_, p)| p.file == name)
+            .unwrap_or_else(|| panic!("catalog/models.toml has no pack named {name}"));
+
+        let header = read_header(&path).unwrap();
+        println!(
+            "{name}: arch={:?} context={:?} n_tensors={} kv={} quant_ids={:?} prism_keys={:?}",
+            header.architecture,
+            header.context_length,
+            header.n_tensors,
+            header.n_kv,
+            header.quant_type_ids,
+            header.rotation_keys,
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            pack.size_bytes,
+            "the file on disk is not the size the catalog claims"
+        );
+        assert_eq!(sha256_file(&path).unwrap(), pack.sha256);
+        assert_eq!(
+            header.context_length,
+            Some(model.context_length),
+            "the GGUF's own window disagrees with the catalog"
+        );
+        for prefix in &model.engine.required_metadata_prefixes {
+            assert!(
+                header
+                    .rotation_keys
+                    .iter()
+                    .any(|k| k.starts_with(prefix.as_str())),
+                "catalog requires {prefix}, the file does not carry it"
+            );
+        }
     }
 }

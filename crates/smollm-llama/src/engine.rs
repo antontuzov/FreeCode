@@ -10,7 +10,7 @@
 //!   2. the pinned tag's build number is at or above `min_allowed_tag` — `prism-b10687` shipped no
 //!      binaries at all, so an older pin cannot work;
 //!   3. the binary's own `--version` banner reports the commit recorded in `engines/lock.toml`
-//!      (checked via `banner_matches_pin` once Phase 2 can run the subprocess).
+//!      (`banner_matches_pin`, run by `crate::server` before anything is spawned).
 
 use std::path::{Path, PathBuf};
 
@@ -195,9 +195,17 @@ fn binary_names(binary: &str) -> Vec<String> {
     names
 }
 
-/// The build number and commit from an engine banner. llama.cpp prints
-/// `version: <build> (<short-sha>)`; anything we cannot parse is reported as absent rather than
-/// guessed, so an unrecognisable banner can never be mistaken for a verified fork build.
+/// The build number and commit from an engine banner.
+///
+/// Two shapes occur, and both must parse. The pinned PrismML build prints
+/// ```text
+/// version: 0.2.0-dev (build 10772, commit e8fd209c9)
+/// built with AppleClang 21.0.0.21000101 for Darwin arm64
+/// ```
+/// while upstream llama.cpp prints `version: 10772 (e8fd209)`. Anything we cannot parse is reported
+/// as absent rather than guessed, so an unrecognisable banner can never be mistaken for a verified
+/// fork build — and the `AppleClang 21.0.0.21000101` token is why the build number is taken from the
+/// word `build` when that word is present, not from "the first long number in the text".
 #[derive(Debug, Clone, PartialEq)]
 pub struct EngineVersion {
     pub build: Option<u32>,
@@ -205,27 +213,65 @@ pub struct EngineVersion {
 }
 
 pub fn parse_version(banner: &str) -> EngineVersion {
-    let build = banner
+    let words: Vec<&str> = banner
         .split(|c: char| !c.is_ascii_alphanumeric())
-        .find(|tok| tok.len() >= 5 && tok.chars().all(|c| c.is_ascii_digit()))
-        .and_then(|tok| tok.parse().ok());
-    let commit = banner
-        .split('(')
-        .nth(1)
-        .and_then(|rest| rest.split(')').next())
-        .map(|s| s.trim().to_string())
-        .filter(|s| s.len() >= 7 && s.chars().all(|c| c.is_ascii_hexdigit()));
-    EngineVersion { build, commit }
+        .filter(|w| !w.is_empty())
+        .collect();
+    let mut build: Option<&str> = None;
+    let mut commit: Option<&str> = None;
+    for pair in words.windows(2) {
+        let (word, value) = (pair[0], pair[1]);
+        if word.eq_ignore_ascii_case("build") && is_number(value) {
+            build = build.or(Some(value));
+        } else if word.eq_ignore_ascii_case("commit") && is_sha(value) {
+            commit = commit.or(Some(value));
+        }
+    }
+    // The upstream shape has neither word: the number is `version:`'s first argument and the sha is
+    // the parenthesised one after it.
+    if build.is_none() {
+        build = words.iter().copied().find(|w| is_number(w) && w.len() >= 5);
+    }
+    if commit.is_none() {
+        commit = banner
+            .split('(')
+            .nth(1)
+            .and_then(|rest| rest.split(')').next())
+            .map(str::trim)
+            .filter(|s| is_sha(s));
+    }
+    EngineVersion {
+        build: build.and_then(|b| b.parse().ok()),
+        commit: commit.map(str::to_string),
+    }
+}
+
+fn is_number(w: &str) -> bool {
+    !w.is_empty() && w.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn is_sha(w: &str) -> bool {
+    w.len() >= 7 && w.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Proof 3: the banner must name the commit we pinned and verified the catalog against. A different
-/// commit is how the AVX-512 `PQ2_0` load crash (#245) or the Vulkan silent-CPU-fallback (#238)
-/// get reintroduced without anything visible changing.
+/// commit is how the AVX-512 `PQ2_0` load crash (#245) or the Vulkan silent-CPU-fallback (#238) get
+/// reintroduced without anything visible changing.
 pub fn banner_matches_pin(banner: &str, lock: &EngineLock) -> bool {
     parse_version(banner)
         .commit
         .as_deref()
-        .is_some_and(|c| lock.pinned_commit.eq_ignore_ascii_case(c))
+        .is_some_and(|c| same_commit(c, &lock.pinned_commit))
+}
+
+/// `engines/lock.toml` records the short sha from the release tag (`e8fd209`) and the binary prints
+/// a longer one (`e8fd209c9`), so equality has to be a prefix test in whichever direction is longer —
+/// the way `git` compares abbreviated object names. Requiring 7 characters keeps a one-letter
+/// difference from ever matching.
+fn same_commit(a: &str, b: &str) -> bool {
+    let (a, b) = (a.to_ascii_lowercase(), b.to_ascii_lowercase());
+    let shared = a.len().min(b.len());
+    shared >= 7 && a[..shared] == b[..shared]
 }
 
 #[cfg(test)]
@@ -332,6 +378,44 @@ mod tests {
         assert!(!banner_matches_pin("version: 10772 (0a1b2c3)", &lock));
         assert!(!banner_matches_pin("llama-server", &lock));
         assert_eq!(parse_version("llama-server").build, None);
+    }
+
+    /// What the pinned PrismML macOS build actually prints — captured from
+    /// `engines/prism-b10772-e8fd209/macos-arm64/llama-server --version` on 2026-10-13. The fork's
+    /// shape carries a `0.2.0-dev` semver and puts both numbers in one parenthesis, which the
+    /// upstream-only parser read as "no commit at all".
+    #[test]
+    fn the_fork_banner_shape_is_parsed_and_matches_the_pin() {
+        let banner = "version: 0.2.0-dev (build 10772, commit e8fd209c9)\n\
+                      built with AppleClang 21.0.0.21000101 for Darwin arm64";
+        let v = parse_version(banner);
+        assert_eq!(
+            v.build,
+            Some(10772),
+            "the build number, not the compiler version"
+        );
+        assert_eq!(v.commit.as_deref(), Some("e8fd209c9"));
+        assert!(
+            banner_matches_pin(banner, &lock()),
+            "the lock pins the 7-char short sha and the binary prints 9"
+        );
+        // A different commit that shares the first 7 characters must still be refused.
+        assert!(!banner_matches_pin(
+            "version: 0.2.0-dev (build 10772, commit e8fd2ffaa)",
+            &lock()
+        ));
+        assert!(!banner_matches_pin(
+            "version: 0.2.0-dev (build 99999, commit 0000000)",
+            &lock()
+        ));
+    }
+
+    #[test]
+    fn a_commit_is_matched_only_from_seven_characters() {
+        assert!(same_commit("abcdef1", "abcdef123"));
+        assert!(same_commit("E8FD209C9", "e8fd209"));
+        // Six shared characters is not enough to call it the same build.
+        assert!(!same_commit("abcdef", "abcdef123"));
     }
 
     #[test]

@@ -9,7 +9,7 @@ import { Icon } from "./icons";
  */
 export function StatusBar({ locale }: { locale: Locale }) {
   const status = useModel((s) => s.status);
-  const running = useTranscript((s) => s.running);
+  const contextUsed = useTranscript((s) => s.contextUsed);
 
   const badge = status?.blocked
     ? translate(locale, "model.badge.notRunning")
@@ -17,9 +17,10 @@ export function StatusBar({ locale }: { locale: Locale }) {
       ? translate(locale, "model.badge.local")
       : translate(locale, "model.badge.remote");
 
-  // Context usage is only meaningful once a session exists; an idle window shows an empty meter
-  // rather than a number nothing produced.
-  const used = running ? 40 : 0;
+  // Context usage is only meaningful once something has measured it. A real run reports none yet —
+  // the fork only tells us after the reply — so the meter reads as unknown instead of inventing a
+  // percentage, which would be the one number in this window the user might act on.
+  const used = contextUsed;
 
   return (
     <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-line bg-bg px-[var(--space-4)] text-[calc(var(--font-ui)-2px)] text-muted">
@@ -35,15 +36,15 @@ export function StatusBar({ locale }: { locale: Locale }) {
       <span className="flex-1" />
       <span
         role="progressbar"
-        aria-valuenow={used}
+        aria-valuenow={used ?? 0}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-label={translate(locale, "statusbar.context")}
         className="h-1.5 w-24 overflow-hidden rounded-[var(--radius-pill)] bg-sunken"
       >
-        <span className="block h-full bg-accent" style={{ width: `${used}%` }} aria-hidden />
+        <span className="block h-full bg-accent" style={{ width: `${used ?? 0}%` }} aria-hidden />
       </span>
-      <span className="w-8 text-right font-mono">{used}%</span>
+      <span className="w-8 text-right font-mono">{used === null ? "—" : `${used}%`}</span>
     </footer>
   );
 }

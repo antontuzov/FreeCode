@@ -13,6 +13,7 @@
     "app:dev": "pnpm --filter @smollm/desktop tauri dev",
     "app:dev:fixture": "pnpm --filter @smollm/desktop tauri:fixture",
     "app:dev:settings": "pnpm --filter @smollm/desktop tauri:settings",
+    "app:dev:chat": "pnpm --filter @smollm/desktop tauri:chat",
     "app:build": "pnpm --filter @smollm/desktop tauri build",
     "format": "pnpm --filter @smollm/desktop format",
     "format:check": "pnpm --filter @smollm/desktop format:check",

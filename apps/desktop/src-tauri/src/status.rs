@@ -14,6 +14,7 @@ use serde::Serialize;
 use smollm_config::{PackingChoice, Settings};
 use smollm_llama::load_guard::{self, Blocker, FileState, GuardReport, GuardRequest};
 use smollm_llama::{models_root, EngineBinary};
+use smollm_models::catalog::CatalogDefaults;
 use smollm_models::{
     gguf, recommend, EngineLock, HostHardware, IntegrityStatus, ModelEntry, Pack, Recommendation,
     DEFAULT_HEADROOM_BYTES,
@@ -32,6 +33,9 @@ pub struct Assembly {
     pub engine: Option<EngineBinary>,
     pub report: GuardReport,
     pub weights_absent: bool,
+    /// `[defaults]` from the catalog. `LaunchRequest` takes it by reference, so the launcher needs
+    /// the same parsed catalog the guard already read rather than a second, possibly newer one.
+    pub defaults: CatalogDefaults,
 }
 
 impl Assembly {
@@ -150,11 +154,13 @@ pub fn assemble(root: &Path, settings: &Settings) -> Result<Assembly, String> {
 
     let weights = weights_dir(root, settings);
     let host = HostHardware::detect(&weights.display().to_string());
+    let installed = installed_packs(model, &weights);
     let recommendation = recommend(
         model,
         &host,
         override_key(&settings.local_model.packing),
         DEFAULT_HEADROOM_BYTES,
+        &installed,
     );
     let pack = model
         .packs
@@ -200,6 +206,7 @@ pub fn assemble(root: &Path, settings: &Settings) -> Result<Assembly, String> {
         engine,
         report,
         weights_absent,
+        defaults: catalog.defaults.clone(),
     })
 }
 
@@ -221,6 +228,23 @@ fn override_key(packing: &PackingChoice) -> Option<&str> {
         PackingChoice::Auto => None,
         PackingChoice::Forced(key) => Some(key),
     }
+}
+
+/// Weight files already in the directory, by name. Size is the whole check: hashing 5.95 GB on
+/// every status round trip would take longer than loading the model, and the download path verifies
+/// the sha256 once when a transfer finishes.
+fn installed_packs(model: &ModelEntry, weights: &Path) -> Vec<String> {
+    model
+        .packs
+        .iter()
+        .filter(|p| {
+            matches!(
+                gguf::check_size(&weights.join(&p.file), p.size_bytes),
+                Ok(IntegrityStatus::Ok)
+            )
+        })
+        .map(|p| p.file.clone())
+        .collect()
 }
 
 /// Where the weights live: the per-workspace override, else `<root>/models`, the sibling of the
@@ -250,8 +274,9 @@ fn file_state(file: &Path, expected_size_bytes: u64, expected_sha256: &str) -> F
 }
 
 /// The "Local" badge reflects reality: generation is local only if the guard actually permits this
-/// machine to run it, and only while no remote provider is enabled.
-fn local_badge(guard_allows: bool, allow_remote_providers: bool) -> bool {
+/// machine to run it, and only while no remote provider is enabled. `chat` uses the same rule for the
+/// badge on a live run, so the transcript and the status card cannot disagree.
+pub(crate) fn local_badge(guard_allows: bool, allow_remote_providers: bool) -> bool {
     guard_allows && !allow_remote_providers
 }
 
@@ -381,7 +406,10 @@ mod tests {
     fn every_catalog_packing_is_offered_to_the_ui_with_a_reason() {
         let status = build(&repo_root(), &Settings::default()).unwrap();
         let catalog = Catalog::load_default(&repo_root()).unwrap();
-        assert_eq!(status.packs.len(), catalog.models[0].packs.len());
+        // The entry the status was built for, not whichever happens to be first: with two models in
+        // the catalog, `models[0]` would silently stop describing what the view shows.
+        let model = catalog.model(&status.catalog_id).unwrap();
+        assert_eq!(status.packs.len(), model.packs.len());
         assert!(status.packs.iter().all(|p| !p.reason.is_empty()));
         assert_eq!(status.packs.iter().filter(|p| p.selected).count(), 1);
     }
@@ -404,11 +432,25 @@ mod tests {
 
     #[test]
     fn a_forced_packing_reuses_the_same_assembly_the_ui_reads() {
+        // Forced to a packing the probe would not have chosen, named off the entry the settings
+        // select rather than hard-coded: the catalog has two models now, and a pack key that belongs
+        // to the other one is a test that quietly stops testing anything.
+        let catalog = Catalog::load_default(&repo_root()).unwrap();
+        let model = catalog
+            .model(&Settings::default().local_model.catalog_id)
+            .expect("the default id is in the catalog");
+        let auto = assemble(&repo_root(), &Settings::default()).unwrap();
+        let forced = model
+            .packs
+            .iter()
+            .find(|p| p.key != auto.pack.key)
+            .expect("an entry has more than one packing");
+
         let mut settings = Settings::default();
-        settings.local_model.packing = PackingChoice::Forced("PTQ1_0".into());
+        settings.local_model.packing = PackingChoice::Forced(forced.key.clone());
         let assembly = assemble(&repo_root(), &settings).unwrap();
-        assert_eq!(assembly.pack.key, "PTQ1_0");
-        assert_eq!(assembly.view(&settings).packing, "PTQ1_0");
+        assert_eq!(assembly.pack.key, forced.key);
+        assert_eq!(assembly.view(&settings).packing, forced.key);
     }
 
     #[test]

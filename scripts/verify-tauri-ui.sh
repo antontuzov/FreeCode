@@ -7,12 +7,15 @@
 source "$(dirname "$0")/_env.sh"
 
 IPC=apps/desktop/src/lib/ipc.ts
-HOST=apps/desktop/src-tauri/src/lib.rs
+HOST=apps/desktop/src-tauri/src
 
 step "UI commands vs the host's #[tauri::command] list"
 ui_cmds=$(grep -oE 'invoke(<[^>]*>)?\("[a-z_]+"' "$IPC" | grep -oE '"[a-z_]+"' | tr -d '"' | sort -u)
-host_cmds=$(grep -A3 '#\[tauri::command\]' "$HOST" | grep -oE '^async fn [a-z_]+|^fn [a-z_]+' | awk '{print $NF}' | sort -u)
-registered=$(sed -n '/generate_handler!\[/,/\]/p' "$HOST" | grep -oE '[a-z_]+' | sort -u)
+# Every host module can define commands — the engine and chat commands live in chat.rs, not lib.rs —
+# and one reached from another module carries `pub`, so both spellings have to count.
+host_cmds=$(grep -A3 -h '#\[tauri::command\]' "$HOST"/*.rs \
+  | grep -oE '^(pub )?(async )?fn [a-z_]+' | awk '{print $NF}' | sort -u)
+registered=$(sed -n '/generate_handler!\[/,/\]/p' "$HOST/lib.rs" | grep -oE '[a-z_]+' | sort -u)
 
 [[ -n "$ui_cmds" ]] || { echo "no invoke() calls found in $IPC — the check itself broke"; exit 1; }
 for cmd in $ui_cmds; do

@@ -1,23 +1,35 @@
 # SmoLLM Studio model catalog
 #
-# Source of truth for every number below:
-#   HF model card : https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/raw/main/README.md
-#   HF file tree  : https://huggingface.co/api/models/prism-ml/Ternary-Bonsai-2-27B-gguf/tree/main?recursive=true
+# Source of truth for every number below, per model entry:
+#   HF model card : https://huggingface.co/<repo_id>/raw/main/README.md
+#   HF file tree  : https://huggingface.co/api/models/<repo_id>/tree/main?recursive=true
 #                   (sha256 values are the LFS `oid` fields; sizes are the LFS `size` fields, in bytes)
 #   known issues  : https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/raw/main/KNOWN_ISSUES.md
-#   run scripts   : https://github.com/PrismML-Eng/Bonsai-demo (scripts/common.sh) — where this file and the
-#                   demo disagree, the demo repo wins.
+#   quant formats : https://raw.githubusercontent.com/PrismML-Eng/Bonsai-demo/main/MODEL-FORMATS.md
+#                   — which ggml type id each band is, which backend has kernels for it, and which
+#                   file names are deprecated
+#   run scripts   : https://github.com/PrismML-Eng/Bonsai-demo (scripts/common.sh,
+#                   scripts/start_llama_server.sh) — where this file and the demo disagree, the demo
+#                   repo wins.
+#
+# The GGUF header outranks the card. Both entries were written against the headers of the files on
+# disk (`general.architecture`, `.context_length`, `general.sampling.*`, the tensor type ids and the
+# chat template), which is how a card that still recommends a deprecated pack gets caught. To re-read
+# those headers against this file:
+#   cargo run -p smollm-models --bin verify-hf-gguf-catalog-entry -- . --model-dir models
 #
 # DO NOT edit a size, bits/weight, benchmark or throughput number by hand. Re-fetch the sources above.
 
 schema_version = 1
-updated = "2026-10-12"
+updated = "2026-10-13"
 
 [defaults]
-# llama.cpp's own built-in default is 0.05 and the GGUF carries no min_p key
-# (KNOWN_ISSUES.md "Sampling and metadata"), so 0.05 is what a stock sampler applies. We set it
-# explicitly anyway because other runtimes default to 0.0.
-server_flags_extra = ["--log-disable"]
+# Extra flags for every supervised `llama-server`, appended after the derived ones. Deliberately
+# empty: scripts/start_llama_server.sh passes no logging flag, and --log-disable — which run_llama.sh
+# does use for its one-shot CLI — would blind the supervisor to the load failure it has to explain.
+# The min_p the GGUF does not carry (KNOWN_ISSUES.md "Sampling and metadata") is not a server-wide
+# default either; it is a per-profile sampling value and lives in [model.sampling] below.
+server_flags_extra = []
 
 [[model]]
 id = "ternary-bonsai-2-27b"
@@ -175,8 +187,13 @@ recommended = false
 [model.sampling]
 system_prompt = "You are a helpful assistant"
 
-# Model card, thinking mode. Verified in Bonsai-demo scripts/run_llama.sh, which launches
-# `-fa on --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.05` for the bonsai2 family.
+# Model card, thinking mode. Verified in Bonsai-demo scripts/start_llama_server.sh, whose bonsai2
+# branch launches `--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.05`; run_llama.sh uses the same four.
+# min_p is passed explicitly because the GGUF carries no min_p key (KNOWN_ISSUES.md), even though
+# 0.05 is llama.cpp's own default — a runtime whose default is 0.0 would otherwise silently differ.
+# Confirmed against the shipped PTQ1_0 pack's own header, whose only sampling keys are
+# general.sampling.top_k = 20, general.sampling.top_p = 0.95 and general.sampling.temp = 1.0 — exactly
+# the three values above, and no min_p.
 [model.sampling.thinking]
 temperature = 1.0
 top_p = 0.95
@@ -242,3 +259,265 @@ m5_max_tps = 47
 m5_pro_tps = 28
 m5_pro_power_w = { gpu = 27.5, cpu_plus_gpu = 34.1 }
 nvidia_board_power_w = { min = 300, max = 455 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The previous ternary generation, at the size this app actually runs on a
+# laptop. Every number below comes from
+#   https://huggingface.co/prism-ml/Ternary-Bonsai-1.7B-gguf/raw/main/README.md,
+#   its tree API, the demo repo's MODEL-FORMATS.md / start_llama_server.sh, and
+#   the two packs' own GGUF headers (35 KV keys each, read with read_header).
+# ─────────────────────────────────────────────────────────────────────────────
+[[model]]
+id = "ternary-bonsai-1-7b"
+name = "Ternary Bonsai 1.7B"
+repo_id = "prism-ml/Ternary-Bonsai-1.7B-gguf"
+base_model = "Qwen/Qwen3-1.7B"          # card, Model Overview: "Base model | Qwen3-1.7B"
+architecture = "qwen3"                  # both packs report general.architecture = qwen3 (verified in the files)
+license = "Apache-2.0"                  # card frontmatter, and general.license = apache-2.0 in the file
+license_url = "https://www.apache.org/licenses/LICENSE-2.0"
+context_length = 32768                  # qwen3.context_length = 32768 in both packs, matching the card
+homepage = "https://prismml.com"
+contact = "contact@prismml.com"
+citation = """
+@techreport{ternarybonsai,
+    title   = {Ternary Bonsai: 1.58-bit Language Models at 8B, 4B, and 1.7B Scale},
+    author  = {Prism ML},
+    year    = {2026},
+    month   = {April},
+    url     = {https://prismml.com}
+}
+"""
+# The card's only white-paper link (it documents the 8B/4B/1.7B ternary generation).
+paper_url = "https://github.com/PrismML-Eng/Bonsai-demo/blob/main/ternary-bonsai-8b-whitepaper.pdf"
+demo_repo = "https://github.com/PrismML-Eng/Bonsai-demo"
+
+# Card, "Quantization Format: GGUF Q2_0 (g128)": w_i = scale_g * t_i with t_i in {-1, 0, +1} and one
+# shared FP16 scale per 128 weights; a 128-block is 34 bytes (2 scale + 32 codes) = 2.125 bits/weight,
+# and the fourth 2-bit code point is unused. The group size differs by pack: the official group-64
+# file spends 16 scale bits per 64 weights = 2.25 bits/weight, which is why it is 26,873,504 bytes
+# larger — 1.72e9 weights / 64 per block * 16 bits, to the byte against the published sizes.
+[model.weight_format]
+scheme = "ternary-g128"
+alphabet = [-1, 0, 1]
+scale_group_size = 128
+scale_dtype = "F16"
+effective_bits_per_weight = 2.125
+# This generation is stored in the plain basis: neither pack carries a single `prism.*` key (checked
+# against all 35 KV keys of both files), so there is no folded Hadamard rotation and no runtime
+# activation transform. Provenance is the quant type id instead, not metadata.
+rotation = "none"
+rotation_block = 0
+rotation_applied = ""
+coverage = ["embeddings", "attention projections", "MLP projections", "LM head"]
+metadata_key_prefix = ""
+
+# Still needs the PrismML fork: ggml type 142 (PQ2_0) is past upstream's GGML_TYPE_COUNT, so stock
+# refuses it, and the group-128 body filed under type id 42 is refused by v7 for the opposite reason.
+# The card's own words: "Q2_0 is not yet in mainline llama.cpp. Use our fork at
+# PrismML-Eng/llama.cpp (prism branch, default) which adds Q2_0 support for CPU (NEON/generic) and
+# Metal."
+[model.engine]
+needs_fork = true
+fork_repo = "PrismML-Eng/llama.cpp"
+# The demo's own pin for these models, recorded in engines/lock.toml as demo_pinned_tag: a prism-v7
+# line build, so it reads type 142 and refuses the legacy group-128 file.
+min_release_tag = "prism-b10743-adfffbe"
+# Deliberately empty, and validate.rs only demands prefixes for a rotated export. Requiring
+# `prism.hadamard.*` here would reject the genuine file.
+required_metadata_prefixes = []
+
+[[model.packs]]
+# MODEL-FORMATS.md: PQ2_0 is the fork's group-128 band under its own ggml type id (142), about 6%
+# smaller than the official group-64 file, and the band the demo selects wherever the backend has
+# kernels. Verified on disk: sha256 equals the LFS oid, 310 tensors of which 197 are type 142,
+# general.file_type 141.
+key = "PQ2_0"
+file = "Ternary-Bonsai-1.7B-PQ2_0.gguf"
+quant_type = "PQ2_0"
+encoding = "trit in a 2-bit slot, group 128 (ggml type 142)"
+bits_per_weight = 2.125
+size_bytes = 463_290_464
+size_gb = 0.46
+sha256 = "de68ba48a8dacb21979915991e7741b917869d71410a370df951c0c3a237ae50"
+marketing_ratio_vs_fp16 = 7.5
+# MODEL-FORMATS.md's PQ2_0 kernel table (Metal yes, CUDA yes, ROCm/HIP yes, CPU x86-VNNI/ARM-NEON
+# yes; Vulkan and SYCL "not yet"), mirrored by common.sh pq2_0_ready_backend().
+preferred_for_backends = ["metal", "cpu", "cuda", "rocm", "hip"]
+# Card throughput table for this model on M4 Pro 48 GB, same 0.46 GB layout: 2,088 tok/s PP512 and
+# 229 tok/s TG128 on Metal against 60 tok/s for the FP16 export (3.8x); 508/123 on 10-thread NEON.
+notes = "The pack to run on this backend: group-128, 463 MB, fork kernels for Metal and CPU."
+[[model.packs.caveats]]
+# The two PQ2_0 failures recorded in the 27B's KNOWN_ISSUES.md are properties of the type-142
+# kernels rather than of a size, so they are listed here as a documented risk to check, not as a
+# measurement of this pack: no 1.7B run on those parts is published.
+condition = "backend == cpu and host_has_avx512 and engine_release < the fix for llama.cpp#245"
+symptom = "segfault while loading (documented for the 27B's PQ2_0 band; the same ggml type 142 kernels)"
+workaround = "use Q2_0_g64, or build the prism branch from source"
+severity = "fatal"
+[[model.packs.caveats]]
+condition = "backend == hip and windows and gpu == gfx1151"
+symptom = "garbled output (documented for the 27B's PQ2_0 band; the same kernels)"
+workaround = "-ngl 0, or the Vulkan build with Q2_0_g64"
+severity = "severe"
+
+[[model.packs]]
+# MODEL-FORMATS.md: the official group-64 band keeps mainline compatibility — "works everywhere
+# (every fork backend and mainline llama.cpp)" — and is what the demo falls back to where PQ2_0 has
+# no kernels. 490 MB against 463 MB, because a 16-bit scale every 64 weights costs 0.125 extra bits.
+key = "Q2_0_g64"
+file = "Ternary-Bonsai-1.7B-Q2_0_g64.gguf"
+quant_type = "Q2_0"
+encoding = "group-64 official Q2_0 (ggml type 42)"
+bits_per_weight = 2.25
+size_bytes = 490_163_968
+size_gb = 0.49
+sha256 = "6d0ecb3d9055969b5cde332b6fdb60e67ed3599e9f73e56b977731e1467e5c91"
+# Vulkan is the backend MODEL-FORMATS lists as "not yet" for PQ2_0 kernels and the one the demo's
+# selection order sends to the g64 file. SYCL is not listed because this app ships no SYCL target.
+preferred_for_backends = ["vulkan"]
+fallback_for_backends = ["metal", "cpu", "cuda", "rocm", "hip"]
+notes = "The portable band: +27 MB over PQ2_0, and the only ternary pack a stock llama.cpp can read."
+
+[[model.packs]]
+# The file the card still recommends — the reason this entry exists. It is the DEPRECATED legacy
+# layout: a group-128 body stored under ggml type id 42, which prism-v7 reads as group-64. Proved
+# natively on the pinned prism-b10772 binary, whose loader refuses it:
+#   E gguf_init_from_reader: this file matches the legacy Prism Q2_0 layout (group size 128 stored
+#     as ggml type id 42), but this build reads Q2_0 as the official group-64 format
+#   E gguf_init_from_reader: you are probably using the wrong GGUF: use the PQ2_0 version of this
+#     model (ggml type id 142) or download the group-64 Q2_0 file
+# The demo agrees in its own launcher: scripts/start_llama_server.sh line 65, "Find model:
+# backend-aware selection, never the deprecated legacy Q2_0".
+# It stays out of `downloadable_packs` (empty preferred list, and a quant type the picker does not
+# treat as a ternary band) so the app can recognise and refuse it instead of offering it.
+key = "Q2_0-legacy"
+file = "Ternary-Bonsai-1.7B-Q2_0.gguf"
+quant_type = "Q2_0"
+encoding = "DEPRECATED legacy group-128 body under ggml type 42"
+bits_per_weight = 2.125
+size_bytes = 463_290_464
+size_gb = 0.46
+sha256 = "d97d94eb564590c9f0300e54d3f87bbbb25a78693d0ade9f6e177973dcb8228a"
+marketing_ratio_vs_fp16 = 7.5
+preferred_for_backends = []
+notes = "Card-recommended, but no prism-v7 build can read it; the byte-size-identical PQ2_0 pack is the supported twin."
+[[model.packs.caveats]]
+condition = "engine is prism-v7 or newer (any build that reads Q2_0 as group-64)"
+symptom = "refuses to load: 'this file matches the legacy Prism Q2_0 layout'"
+workaround = "download Ternary-Bonsai-1.7B-PQ2_0.gguf (same 463 MB) or the _g64 file; the frozen pre-v7 `prism` (= v5) branch is the only thing that runs this file"
+severity = "fatal"
+
+[[model.packs]]
+# Card, "Files in this repo": the FP16 export, the baseline the fidelity table is measured against
+# and the re-quantization source. At 3.44 GB it does fit a laptop, unlike the 27B's reference, but it
+# is still not the pack to run when a 7.5x memory win is on the table.
+key = "F16"
+file = "Ternary-Bonsai-1.7B-F16.gguf"
+quant_type = "F16"
+encoding = "reference precision"
+bits_per_weight = 16.0
+size_bytes = 3_446_249_408
+size_gb = 3.45
+sha256 = "00be231b1ba8ab8b45db35d288f897fa9b5836bb6ad41762b759b6bc990b4fea"
+preferred_for_backends = []
+notes = "Benchmark baseline. The card measures the 2-bit pack against it at mean KL 0.000000, 100.000% top-1 agreement and a 1.0048 PPL ratio, because the ternary values land exactly on three of the four 2-bit code points."
+
+[model.sampling]
+# The card publishes no system prompt, and the pack's chat template renders a system message only
+# when the caller supplies one as messages[0], so the agent sends none by default.
+system_prompt = ""
+
+# Bonsai-demo scripts/start_llama_server.sh line 117, the non-bonsai2 (ternary) family branch:
+#   SAMPLING="--temp 0.7 --top-p 0.95 --top-k 20 --min-p 0"
+# That variable is only expanded on the script's full-profile launch (line 123, `_full_profile=1`,
+# which a non-27B reaches by setting BONSAI_GGUF), the same branch that passes `--jinja`; the plain
+# older-size launch at the bottom of the file hard-codes the values in [model.sampling.instruct]
+# instead. This is therefore the profile for the fully-featured run, which is what this app launches.
+# min_p 0 is stated even though the file carries general.sampling.min_p = 0.0, so a build with a
+# different default cannot silently change it.
+[model.sampling.thinking]
+temperature = 0.7
+top_p = 0.95
+top_k = 20
+min_p = 0.0
+# llama.cpp's own defaults: neither the card nor the file states a penalty for this generation, and
+# inventing one would be exactly the sort of guess this catalog exists to prevent.
+presence_penalty = 0.0
+repetition_penalty = 1.0
+
+# The demo's plain (non-full-profile) server path for the older sizes, start_llama_server.sh ~208:
+#   --temp 0.5 --top-p 0.85 --top-k 20 --min-p 0 --reasoning-budget 0 --reasoning-format none
+# Those four values are what both packs carry in their own headers (general.sampling.temp 0.5,
+# top_p 0.85, top_k 20, min_p 0.0), which is why this is the profile used when thinking is off.
+[model.sampling.instruct]
+temperature = 0.5
+top_p = 0.85
+top_k = 20
+min_p = 0.0
+presence_penalty = 0.0
+repetition_penalty = 1.0
+
+[model.sampling.reasoning]
+# There is no effort contract for this generation. The template inside the file (4,063 chars) has no
+# thinking conditional at all — the strings "thinking" and "enable_thinking" do not occur in it — and
+# its generation prompt always opens an empty think block, so there is no effort level to request.
+# The demo does not disagree: its plain older-size launch (start_llama_server.sh ~208) sends
+#   --reasoning-budget 0 --reasoning-format none --chat-template-kwargs '{"enable_thinking": false}'
+# Both mechanisms, because the script serves every generation. Only the server flags can have any
+# effect on this one: the string `enable_thinking` does not occur in its template, so the kwarg is
+# parsed and then ignored.
+default_effort = "none"
+supported_efforts = ["none"]
+unsupported_efforts = ["low", "medium", "high", "xhigh"]
+# "low" is unsupported, but there is no measured behaviour to map it onto; that field documents the
+# Bonsai 2 measurement, and validate.rs only demands it of a model that can think.
+low_behaves_like = ""
+never_send = ["low", "medium", "high", "xhigh"]
+# Verified in both packs' headers: these four keys are in the file, so stock llama.cpp would seed
+# them itself. The two penalties are absent, so whoever launches has to decide them — see the
+# profiles above, which state llama.cpp's own defaults rather than invent values.
+carried_in_gguf = ["temperature", "top_p", "top_k", "min_p"]
+not_carried_in_gguf = ["presence_penalty", "repetition_penalty"]
+budget_transport = "server flags --reasoning-budget / --reasoning-format (the demo's older-size path); chat_template_kwargs has no effect because the template has no conditional"
+# Same reason as the 27B: --reasoning on would override a client's reasoning_effort "none".
+server_reasoning_flag = "auto"
+
+[model.agent_constraints]
+# All eight keys are written out because a defaulted struct would silently inherit the 27B's numbers.
+# The first three are read off this pack's own chat template, which is the Qwen3 tool-calling one:
+# a system message is only rendered from messages[0], tool arguments go through `tojson`, and an
+# assistant turn's reasoning is recovered by splitting its content on the think close tag — so
+# re-emitting it into history re-renders the prompt instead of reusing the cache.
+one_system_message_first = true
+empty_tool_arguments_as_object = true
+do_not_echo_reasoning_into_history = true
+# The 4k floor exists for models that emit a thinking trace (a cap that ends the run mid-thought
+# yields an empty reply). This one has no thinking conditional, so the floor is llama.cpp's own
+# short-request scale and the card's quickstart (-n 256) is the reference point.
+min_generation_budget_tokens = 1024
+recommended_generation_budget_tokens = 8192
+# qwen3.context_length is 32768 in the file, and the card's context row says the same, so this entry
+# cannot ask for the 64K the Bonsai 2 card pairs with -n 16384.
+recommended_context = 32768
+# Same llama.cpp KV-cache kernel guidance as the 27B entry (KNOWN_ISSUES.md: q5_0 is several times
+# slower, #191); it is a property of the runtime, not of the checkpoint.
+kv_cache_types = ["f16", "q8_0", "q4_0"]
+kv_cache_forbidden_types = ["q5_0"]
+
+[model.benchmarks]
+# Card benchmark table, EvalScope v1.4.2 + vLLM 0.15.1 on H100, six suites. The FP16 reference row is
+# the card's own "Qwen3 1.7B" line (3.44 GB, avg 66.57) measured on the same suite.
+fp16_avg = 66.57
+bonsai = { bits_per_weight = 2.125, size_gb = 0.44, avg = 58.47, percent_of_fp16 = 87.83 }
+# 58.47 / 66.57. ud_q4_k_xl and iq2_xxs are omitted on purpose: the card measures no such bands for
+# this size, and a row invented to fill the struct would be shown to users as a measurement.
+by_skill = { "MMLU-R" = 52.9, "MuSR" = 50.8, "IFEval" = 70.1, "GSM8K" = 74.2, "HE+" = 51.8, "BFCLv3" = 51.0 }
+# Card intelligence-density table, density = -ln(1 - score/100) / size_GB. Only the value the card
+# prints is recorded; the ratios are not published for this model.
+intelligence_density = { score_per_gb = 2.001 }
+
+# No [model.throughput] table: the fields there are named for the machines the Bonsai 2 card measured
+# (RTX 5090, L4, M5 Max, M5 Pro), and this card measures on an M4 Pro 48 GB instead — 2,088 tok/s
+# PP512 / 229 tok/s TG128 on Metal, 60 tok/s for its FP16 export (3.8x), 508/123 on 10-thread NEON.
+# Those numbers are on the PQ2_0 pack's notes above rather than squeezed into keys that would mislabel
+# them.

@@ -54,8 +54,13 @@ pub struct ModelEntry {
     pub sampling: SamplingContract,
     #[serde(default)]
     pub agent_constraints: AgentConstraints,
+    #[serde(default)]
     pub benchmarks: Benchmarks,
-    pub throughput: Throughput,
+    /// `None` when the card publishes no throughput table that these fields can hold. Nothing in the
+    /// UI reads this yet, so a model whose numbers were measured on different hardware records them
+    /// in the pack notes instead of putting them in fields named for another machine.
+    #[serde(default)]
+    pub throughput: Option<Throughput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -78,6 +83,14 @@ pub struct WeightFormat {
 impl WeightFormat {
     pub fn is_ternary(&self) -> bool {
         self.scheme.starts_with("ternary")
+    }
+
+    /// True when the export folded its weights through a rotation basis, which is what makes
+    /// `prism.*` metadata the only proof of provenance. The earlier ternary generation stores its
+    /// trits in the plain basis and carries no such key, so a check for rotation metadata must not
+    /// be applied to it.
+    pub fn is_rotated(&self) -> bool {
+        !self.rotation.is_empty() && self.rotation != "none"
     }
 }
 
@@ -219,14 +232,25 @@ impl Default for AgentConstraints {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Benchmarks {
+    /// The FP16 reference average on the same suite, from the card's comparison table.
+    #[serde(default)]
     pub fp16_avg: f32,
-    pub ud_q4_k_xl: QuantScore,
-    pub iq2_xxs: QuantScore,
-    pub bonsai: QuantScore,
+    /// A card publishes only the quantizations it actually measured, so every row but the ternary
+    /// one is optional: `None` means "the card has no number for this", which is a fact about the
+    /// data, while inventing a score would be a lie the UI would repeat.
+    #[serde(default)]
+    pub ud_q4_k_xl: Option<QuantScore>,
+    #[serde(default)]
+    pub iq2_xxs: Option<QuantScore>,
+    /// The ternary pack itself. `validate_catalog` requires it for any model with a runtime pack.
+    #[serde(default)]
+    pub bonsai: Option<QuantScore>,
+    #[serde(default)]
     pub by_skill: BTreeMap<String, f32>,
-    pub intelligence_density: Density,
+    #[serde(default)]
+    pub intelligence_density: Option<Density>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -240,8 +264,11 @@ pub struct QuantScore {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Density {
     pub score_per_gb: f32,
-    pub vs_densest_conventional: f32,
-    pub vs_fp16: f32,
+    /// Ratios the card prints; absent when the card only publishes the density itself.
+    #[serde(default)]
+    pub vs_densest_conventional: Option<f32>,
+    #[serde(default)]
+    pub vs_fp16: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

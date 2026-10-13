@@ -6,6 +6,7 @@
 //! hardware probe and header parse run on the async runtime instead of the event-loop thread.
 
 mod appearance;
+mod chat;
 mod engine;
 mod paths;
 mod status;
@@ -26,7 +27,7 @@ fn os_prefers_light(app: &AppHandle) -> bool {
         .is_some_and(|theme| matches!(theme, Theme::Light))
 }
 
-fn root_and_settings(app: &AppHandle) -> Result<(PathBuf, Settings), String> {
+pub(crate) fn root_and_settings(app: &AppHandle) -> Result<(PathBuf, Settings), String> {
     let root = paths::workspace_root(Some(app))?;
     Ok((root, appearance::load_settings()?))
 }
@@ -92,13 +93,20 @@ async fn save_settings(mut settings: Settings) -> Result<Settings, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // The supervised server and the conversation it is answering from. One window, one engine:
+        // the state is here so a second `start_engine` cannot begin a second 6 GB load.
+        .manage(chat::ChatState::default())
         .invoke_handler(tauri::generate_handler![
             model_status,
             install_engine,
             load_appearance,
             save_appearance,
             load_settings,
-            save_settings
+            save_settings,
+            chat::start_engine,
+            chat::stop_engine,
+            chat::engine_status,
+            chat::chat_send
         ])
         .run(tauri::generate_context!())
         .expect("error while running SmoLLM Studio");

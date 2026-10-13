@@ -7,7 +7,8 @@
 //!   3. the resolution path stays inside `engines/` — a system `llama-server` on `PATH` is never an
 //!      acceptable answer, so the guard cannot be satisfied by an upstream binary;
 //!   4. the numbers we ship are still what Hugging Face publishes (`--remote`), and any pack already
-//!      on disk hashes to the recorded sha256 and carries `prism.hadamard.*` metadata (`--model-dir`).
+//!      on disk hashes to the recorded sha256 and matches the basis the entry declares
+//!      (`--model-dir`).
 //!
 //! Usage:
 //!   cargo run -p smollm-models --bin verify-hf-gguf-catalog-entry -- [root] [--remote] [--model-dir PATH]
@@ -17,8 +18,15 @@ use std::process::ExitCode;
 
 use smollm_models::{Backend, Catalog, EngineLock, ModelEntry};
 
-const REMOTE_TREE: &str =
-    "https://huggingface.co/api/models/prism-ml/Ternary-Bonsai-2-27B-gguf/tree/main?recursive=true";
+/// The HF tree API for one catalog entry. Built from the entry's own repo, because two entries can
+/// come from two different repos and checking a 1.7B pack against the 27B's listing would report
+/// every one of its files as unpublished.
+fn tree_url(model: &ModelEntry) -> String {
+    format!(
+        "https://huggingface.co/api/models/{}/tree/main?recursive=true",
+        model.repo_id
+    )
+}
 
 #[derive(Debug, Default)]
 struct Args {
@@ -160,7 +168,7 @@ async fn check_remote(model: &ModelEntry) -> Vec<String> {
         .user_agent("smollm-studio-verify")
         .build()
         .unwrap_or_default();
-    let resp = match client.get(REMOTE_TREE).send().await {
+    let resp = match client.get(tree_url(model)).send().await {
         Ok(r) => r,
         Err(e) => return vec![format!("could not reach the HF tree API: {e}")],
     };
@@ -229,7 +237,10 @@ fn check_local_files(model: &ModelEntry, dir: &Path, failures: &mut Vec<String>)
             ),
         }
         // The rotation metadata is what separates a real Bonsai file from a ternary-quantized
-        // arbitrary model, which loads fine and outputs nonsense.
+        // arbitrary model, which loads fine and outputs nonsense. It only exists for an export whose
+        // weights were folded through a rotation basis: the unrotated ternary generation has no
+        // `prism.*` key at all, and demanding one there would reject the genuine file. Its
+        // provenance is instead the quant type id, which only the fork's loader knows.
         match smollm_models::gguf::read_header(&path) {
             Ok(header) => {
                 let arch_ok = header
@@ -237,16 +248,40 @@ fn check_local_files(model: &ModelEntry, dir: &Path, failures: &mut Vec<String>)
                     .as_deref()
                     .map(|a| a == model.architecture)
                     .unwrap_or(false);
-                report(
-                    failures,
-                    header.has_rotation_metadata(),
-                    &format!("{} carries prism.hadamard.* metadata", pack.key),
-                    format!("rotation keys: {:?}", header.rotation_keys),
-                );
+                if model.weight_format.is_rotated() {
+                    report(
+                        failures,
+                        header.has_rotation_metadata(),
+                        &format!("{} carries prism.hadamard.* metadata", pack.key),
+                        format!("rotation keys: {:?}", header.rotation_keys),
+                    );
+                } else {
+                    report(
+                        failures,
+                        header.rotation_keys.is_empty(),
+                        &format!("{} is in the plain basis, as declared", pack.key),
+                        format!(
+                            "the entry declares rotation {:?} but the file carries {}",
+                            model.weight_format.rotation,
+                            header.rotation_keys.len()
+                        ),
+                    );
+                }
                 if !arch_ok {
                     println!(
                         "  WARN  {} declares architecture {:?}, catalog says {}",
                         pack.key, header.architecture, model.architecture
+                    );
+                }
+                if let Some(file_ctx) = header.context_length {
+                    report(
+                        failures,
+                        file_ctx == model.context_length,
+                        &format!("{} context length matches the entry", pack.key),
+                        format!(
+                            "the file says {file_ctx}, the catalog says {}",
+                            model.context_length
+                        ),
                     );
                 }
             }

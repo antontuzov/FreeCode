@@ -13,7 +13,8 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
     "tauri": "tauri",
     "tauri:fixture": "tauri dev --config src-tauri/tauri.dev-fixture.conf.json",
-    "tauri:settings": "tauri dev --config src-tauri/tauri.dev-settings.conf.json"
+    "tauri:settings": "tauri dev --config src-tauri/tauri.dev-settings.conf.json",
+    "tauri:chat": "tauri dev --config src-tauri/tauri.dev-chat.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

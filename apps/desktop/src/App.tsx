@@ -8,14 +8,19 @@ import { StatusBar } from "./components/StatusBar";
 import { Transcript } from "./components/Transcript";
 import type { Locale } from "./i18n";
 import { useAppearance } from "./state/appearance";
-import { FIXTURE_STEPS, useTranscript } from "./state/transcript";
+import { connectAgentEvents, useChat } from "./state/chat";
+import { FIXTURE_ROWS, useTranscript } from "./state/transcript";
 
 export default function App() {
   const load = useAppearance((s) => s.load);
   const language = useAppearance((s) => s.language);
-  const setSteps = useTranscript((s) => s.setSteps);
+  const setRows = useTranscript((s) => s.setRows);
+  const setContextUsed = useTranscript((s) => s.setContextUsed);
+  const refreshEngine = useChat((s) => s.refresh);
+  const send = useChat((s) => s.send);
   const [settingsPage, setSettingsPage] = useState<string | null>(query("settings"));
   const fixture = fixtureMode();
+  const ask = query("ask");
 
   // The catalog language is the setting, so switching it in Settings repaints every label.
   const locale: Locale = language;
@@ -24,12 +29,38 @@ export default function App() {
     void load();
   }, [load]);
 
+  // One subscription for the window's lifetime: a run's events keep arriving whether or not this
+  // component re-rendered, and the engine row has to agree with the server that is actually up.
+  useEffect(() => {
+    let live = true;
+    let unlisten: (() => void) | null = null;
+    void connectAgentEvents().then((off) => {
+      if (live) unlisten = off;
+      else off();
+    });
+    void refreshEngine();
+    return () => {
+      live = false;
+      unlisten?.();
+    };
+  }, [refreshEngine]);
+
   // `?fixture=1` renders the shell with a scripted run so the layout can be compared against
   // docs/reference-ui. Nothing sets it by default: an empty transcript is honest, an invented one
   // is not.
   useEffect(() => {
-    if (fixture) setSteps(FIXTURE_STEPS);
-  }, [fixture, setSteps]);
+    if (!fixture) return;
+    setRows(FIXTURE_ROWS);
+    // The shot this is compared against has a context meter part-filled. Only the fixture can claim
+    // a number; a real run reports none until the engine measures it.
+    setContextUsed(40);
+  }, [fixture, setRows, setContextUsed]);
+
+  // `?ask=<prompt>` sends that prompt on mount. The native window takes no injected clicks, so this
+  // is how a real answer from the local engine gets verified in the real app.
+  useEffect(() => {
+    if (ask) void send(ask);
+  }, [ask, send]);
 
   if (settingsPage !== null) {
     return <Settings locale={locale} page={settingsPage} onBack={() => setSettingsPage(null)} />;

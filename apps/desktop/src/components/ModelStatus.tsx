@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import { translate, type Locale } from "../i18n";
 import type { EngineInstallProgress } from "../lib/ipc";
+import { useChat } from "../state/chat";
 import { useModel } from "../state/model";
 import { Icon } from "./icons";
 
@@ -61,6 +62,7 @@ function InstallProgress({
 export function ModelStatus({ locale }: { locale: Locale }) {
   const { status, error, loading, refresh, installing, progress, installError, installEngine } =
     useModel();
+  const engine = useChat((s) => s.engine);
 
   useEffect(() => {
     void refresh();
@@ -124,6 +126,16 @@ export function ModelStatus({ locale }: { locale: Locale }) {
           <dt className="shrink-0">{translate(locale, "model.engine")}</dt>
           <dd className="truncate font-mono text-fg">{status.engineTag}</dd>
         </div>
+        {engine && (
+          // The card only says a server is up when the host confirms one is answering, so the
+          // address here is the evidence behind the "Local" badge rather than a promise.
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="shrink-0">{translate(locale, "model.server")}</dt>
+            <dd className="truncate font-mono text-fg">
+              {engine.baseUrl.replace(/^\w+:\/\//, "")} · -c {engine.contextTokens}
+            </dd>
+          </div>
+        )}
       </dl>
       {status.blocked ? (
         <div className="mt-3 rounded-[var(--radius-md)] border border-danger/40 p-3">

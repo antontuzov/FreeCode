@@ -63,7 +63,12 @@ struct Score {
     source_build: bool,
 }
 
-fn score_pack(pack: &Pack, host: &HostHardware, headroom: u64) -> Score {
+/// A pack already sitting in the weights directory beats the hardware preference. The scoring below
+/// answers "what should this machine download"; on a machine that already holds a verified pack the
+/// honest answer to "what do I run" is the one that is here, not a second download.
+const INSTALLED_BONUS: i32 = 50;
+
+fn score_pack(pack: &Pack, host: &HostHardware, headroom: u64, installed: bool) -> Score {
     let mut s = Score {
         value: 0,
         reasons: Vec::new(),
@@ -200,6 +205,12 @@ fn score_pack(pack: &Pack, host: &HostHardware, headroom: u64) -> Score {
             .push("reference precision, not offered as a runtime pack".into());
     }
 
+    if installed {
+        s.value += INSTALLED_BONUS;
+        s.reasons
+            .push("already downloaded here, so no second pack is needed".into());
+    }
+
     s
 }
 
@@ -208,16 +219,21 @@ fn format_gb(bytes: u64) -> String {
 }
 
 /// Pick a pack for this machine, or honour a user override. `override_key` is the packing picker's
-/// persisted choice (`PackingChoice::Forced`).
+/// persisted choice (`PackingChoice::Forced`). `installed` lists the weight file names already on
+/// disk with the size the catalog claims.
 pub fn recommend(
     model: &ModelEntry,
     host: &HostHardware,
     override_key: Option<&str>,
     headroom: u64,
+    installed: &[String],
 ) -> Recommendation {
     let mut scores: Vec<(&Pack, Score)> = Vec::new();
     for pack in &model.packs {
-        scores.push((pack, score_pack(pack, host, headroom)));
+        scores.push((
+            pack,
+            score_pack(pack, host, headroom, installed.contains(&pack.file)),
+        ));
     }
 
     let mut forced = false;
@@ -266,12 +282,18 @@ pub fn recommend(
         .collect();
 
     // Every documented penalty on this host is worth surfacing, including the ones that steered
-    // the choice *away* from a pack the user might otherwise force.
+    // the choice *away* from a pack the user might otherwise force. A penalty about a pack that is
+    // not the one running has to name it, or a 7 GB pick inherits F16's "does not fit".
     let mut warnings: Vec<String> = Vec::new();
-    for (_, sc) in &scores {
+    for (i, (pack, sc)) in scores.iter().enumerate() {
         for w in &sc.warnings {
-            if !warnings.contains(w) {
-                warnings.push(w.clone());
+            let text = if i == chosen_idx || w.starts_with(&pack.key) {
+                w.clone()
+            } else {
+                format!("{}: {}", pack.key, w)
+            };
+            if !warnings.contains(&text) {
+                warnings.push(text);
             }
         }
     }
@@ -351,9 +373,59 @@ mod tests {
             &host(Backend::Metal, GpuArch::AppleSilicon),
             None,
             DEFAULT_HEADROOM_BYTES,
+            &[],
         );
         assert_eq!(rec.selected_key, "PQ2_0");
         assert!(!rec.forced);
+    }
+
+    #[test]
+    fn a_pack_that_is_already_downloaded_beats_the_hardware_preference() {
+        // Detection says what to fetch; this machine already holds the 1-bit pack, and launching it
+        // beats downloading 1.3 GB more to satisfy a preference list.
+        let m = catalog().model("ternary-bonsai-2-27b").unwrap().clone();
+        let h = host(Backend::Metal, GpuArch::AppleSilicon);
+        let rec = recommend(
+            &m,
+            &h,
+            None,
+            DEFAULT_HEADROOM_BYTES,
+            &["Ternary-Bonsai-2-27B-PTQ1_0.gguf".into()],
+        );
+        assert_eq!(rec.selected_key, "PTQ1_0", "{}", rec.reason);
+        assert!(rec.reason.contains("already downloaded"), "{}", rec.reason);
+        // With nothing on disk the card's ordering still stands.
+        assert_eq!(
+            recommend(&m, &h, None, DEFAULT_HEADROOM_BYTES, &[]).selected_key,
+            "PQ2_0"
+        );
+    }
+
+    #[test]
+    fn a_warning_about_another_pack_names_it() {
+        // F16 does not fit a laptop, but the pack that runs does: printing its "no headroom" note
+        // under a 5.95 GB pick tells the user the machine is too small when it is not.
+        let m = catalog().model("ternary-bonsai-2-27b").unwrap().clone();
+        let rec = recommend(
+            &m,
+            &host(Backend::Metal, GpuArch::AppleSilicon),
+            None,
+            DEFAULT_HEADROOM_BYTES,
+            &["Ternary-Bonsai-2-27B-PTQ1_0.gguf".into()],
+        );
+        assert_eq!(rec.selected_key, "PTQ1_0");
+        assert!(
+            rec.warnings
+                .iter()
+                .any(|w| w.starts_with("F16: needs 50.11 GB")),
+            "{:?}",
+            rec.warnings
+        );
+        assert!(
+            !rec.warnings.iter().any(|w| w.starts_with("needs")),
+            "the chosen pack inherited another pack's warning: {:?}",
+            rec.warnings
+        );
     }
 
     #[test]
@@ -364,6 +436,7 @@ mod tests {
             &host(Backend::Cuda, GpuArch::NvidiaAda),
             None,
             DEFAULT_HEADROOM_BYTES,
+            &[],
         );
         assert_eq!(ada.selected_key, "PTQ1_0", "{}", ada.reason);
         let hopper = recommend(
@@ -371,6 +444,7 @@ mod tests {
             &host(Backend::Cuda, GpuArch::NvidiaHopper),
             None,
             DEFAULT_HEADROOM_BYTES,
+            &[],
         );
         assert_eq!(hopper.selected_key, "PQ2_0", "{}", hopper.reason);
     }
@@ -383,6 +457,7 @@ mod tests {
             &host(Backend::Vulkan, GpuArch::IntelArc),
             None,
             DEFAULT_HEADROOM_BYTES,
+            &[],
         );
         assert_eq!(rec.selected_key, "PTQ1_0");
         assert!(rec.requires_source_build);
@@ -394,7 +469,15 @@ mod tests {
         let m = catalog().model("ternary-bonsai-2-27b").unwrap().clone();
         let mut h = host(Backend::Cpu, GpuArch::None);
         h.avx512 = true;
-        let rec = recommend(&m, &h, None, DEFAULT_HEADROOM_BYTES);
+        // Even with the crashing pack already downloaded: a documented segfault outranks "it is
+        // already here", which is the whole reason the bonus is a score and not a short-circuit.
+        let rec = recommend(
+            &m,
+            &h,
+            None,
+            DEFAULT_HEADROOM_BYTES,
+            &["Ternary-Bonsai-2-27B-PQ2_0.gguf".into()],
+        );
         assert_eq!(rec.selected_key, "PTQ1_0");
         assert!(rec.warnings.iter().any(|w| w.contains("#245")));
     }
@@ -404,7 +487,7 @@ mod tests {
         let m = catalog().model("ternary-bonsai-2-27b").unwrap().clone();
         let mut h = host(Backend::Metal, GpuArch::AppleSilicon);
         h.total_ram_bytes = 16 << 30;
-        let rec = recommend(&m, &h, None, DEFAULT_HEADROOM_BYTES);
+        let rec = recommend(&m, &h, None, DEFAULT_HEADROOM_BYTES, &[]);
         let pq2 = rec.reports.iter().find(|r| r.key == "PQ2_0").unwrap();
         assert!(pq2.viable, "PQ2_0 should fit in 16 GiB unified memory");
         let f16 = rec.reports.iter().find(|r| r.key == "F16").unwrap();
@@ -422,6 +505,7 @@ mod tests {
             &host(Backend::Metal, GpuArch::AppleSilicon),
             Some("PTQ1_0"),
             DEFAULT_HEADROOM_BYTES,
+            &[],
         );
         assert_eq!(rec.selected_key, "PTQ1_0");
         assert!(rec.forced);
@@ -436,6 +520,7 @@ mod tests {
             &host(Backend::Sycl, GpuArch::IntelArc),
             None,
             DEFAULT_HEADROOM_BYTES,
+            &[],
         );
         for r in rec
             .reports

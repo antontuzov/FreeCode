@@ -26,7 +26,11 @@ pub use sampling::{GenerationBudget, ReasoningEffort, SamplingProfile};
 pub use voice::{InputDevice, Shortcut, Voice};
 
 /// Default catalog entry — see `catalog/models.toml`.
-pub const DEFAULT_MODEL_ID: &str = "ternary-bonsai-2-27b";
+///
+/// The 1.7B rather than Bonsai 2 27B: it is the ternary generation this build's engine can load from
+/// the pack the demo pins, it needs 463 MB instead of 5.9 GB, and its 32k window is what the launcher
+/// can fill on a 16 GB laptop. The 27B stays in the catalog for a host that has it.
+pub const DEFAULT_MODEL_ID: &str = "ternary-bonsai-1-7b";
 
 /// Bump when a stored document must be migrated rather than silently defaulted.
 pub const SETTINGS_SCHEMA_VERSION: u32 = 1;

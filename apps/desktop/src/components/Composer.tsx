@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { translate, type Locale } from "../i18n";
+import { useChat } from "../state/chat";
 import { useTranscript } from "../state/transcript";
 import { Icon } from "./icons";
 
@@ -14,8 +15,17 @@ type ApprovalMode = (typeof APPROVAL_MODES)[number];
  */
 export function Composer({ locale }: { locale: Locale }) {
   const running = useTranscript((s) => s.running);
+  const send = useChat((s) => s.send);
+  const stop = useChat((s) => s.stop);
+  const error = useChat((s) => s.error);
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<ApprovalMode>("ask");
+
+  const submit = () => {
+    if (!draft.trim()) return;
+    void send(draft);
+    setDraft("");
+  };
 
   return (
     <div className="shrink-0 px-[var(--space-6)] pb-[var(--space-3)]">
@@ -27,10 +37,25 @@ export function Composer({ locale }: { locale: Locale }) {
           id="composer-input"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter sends, Shift+Enter adds the newline a multi-line task needs.
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
           rows={2}
           placeholder={translate(locale, "composer.placeholder")}
           className="w-full resize-none bg-transparent px-[var(--space-4)] pt-[var(--space-3)] text-fg outline-none placeholder:text-faint"
         />
+        {error && (
+          <p
+            role="alert"
+            className="px-[var(--space-4)] pb-1 text-[calc(var(--font-ui)-2px)] text-danger"
+          >
+            {error}
+          </p>
+        )}
         <div className="flex items-center gap-2 px-[var(--space-3)] pb-[var(--space-3)]">
           <button type="button" className="icon-btn" aria-label={translate(locale, "composer.add")}>
             <Icon name="plus" />
@@ -76,9 +101,13 @@ export function Composer({ locale }: { locale: Locale }) {
           </button>
           <button
             type="button"
+            onClick={() => (running ? void stop() : submit())}
+            disabled={!running && !draft.trim()}
             aria-label={translate(locale, running ? "composer.stop" : "composer.send")}
-            className="grid size-8 place-items-center rounded-[var(--radius-md)] bg-accent text-accent-contrast"
+            className="grid size-8 place-items-center rounded-[var(--radius-md)] bg-accent text-accent-contrast disabled:opacity-60"
           >
+            {/* Stopping a run means stopping the server that is answering it: the stream dies with
+                its socket. The next prompt starts a fresh one. */}
             <Icon name={running ? "stop" : "send"} size={15} />
           </button>
         </div>

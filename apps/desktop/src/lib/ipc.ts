@@ -90,6 +90,52 @@ export type AppearanceState = {
 /** Host event carrying `EngineInstallProgress`; must match `engine::PROGRESS_EVENT` in Rust. */
 export const ENGINE_INSTALL_EVENT = "engine-install";
 
+/* ---- the live engine and its streamed replies ---- */
+
+/**
+ * `smollm_desktop_lib::chat::EngineView`: the supervised `llama-server` as the host reports it.
+ * `command` is the argument vector that actually went to the binary, so the verified flags are
+ * checkable on screen instead of claimed.
+ */
+export type EngineView = {
+  baseUrl: string;
+  backend: string;
+  engineTag: string;
+  packing: string;
+  modelFile: string;
+  contextTokens: number;
+  layersOffloaded: number;
+  command: string;
+};
+
+export type EngineStatus = { running: boolean; engine: EngineView | null };
+
+/** A load-guard refusal plus the one action that clears it. Mirrors `smollm_core::BlockedInfo`. */
+export type BlockedInfo = {
+  title: string;
+  detail: string;
+  ctaLabel: string;
+  ctaUrl: string;
+};
+
+/**
+ * `smollm_core::AgentEvent` on the `agent-event` channel. Only the variants this host can emit are
+ * listed: the tool-step variants arrive with the agent loop, and their payloads are Rust
+ * `TranscriptStep`s rather than the UI's own row shape, so they get their mapping then.
+ */
+export type AgentEvent =
+  | { type: "runStarted"; runId: string; modelLabel: string; local: boolean }
+  | { type: "thoughtDelta"; text: string }
+  | { type: "answerDelta"; text: string }
+  | { type: "engineBlocked"; info: BlockedInfo }
+  | { type: "warning"; code: string; message: string }
+  /** `totalDiff` is the "+N −M" pill's running total, which the tool loop is what produces. */
+  | { type: "runFinished"; runId: string; stopped: boolean; totalDiff: null }
+  | { type: "failed"; message: string };
+
+/** Host event carrying `AgentEvent`; must match `chat::EVENT` in Rust. */
+export const AGENT_EVENT = "agent-event";
+
 /* ---- the whole settings document, as the Settings surface edits it ----
  * Field-for-field the Rust schema in `crates/smollm-config`. The surface mutates the loaded object
  * in place and hands it straight back, so a field no control renders still round-trips untouched. */
@@ -189,4 +235,15 @@ export const ipc = {
   loadSettings: () => invoke<SettingsDoc>("load_settings"),
   /** Validated by deserialising on the host side; the answer is what actually landed on disk. */
   saveSettings: (settings: SettingsDoc) => invoke<SettingsDoc>("save_settings", { settings }),
+  /** Launch the supervised fork server, or refuse with the load guard's own reason. */
+  startEngine: () => invoke<EngineView>("start_engine"),
+  stopEngine: () => invoke<void>("stop_engine"),
+  engineStatus: () => invoke<EngineStatus>("engine_status"),
+  /**
+   * Send one prompt and stream the answer on `agent-event`. The promise settles when the run is
+   * over, with the finished text — so a listener that missed a delta can still close the turn.
+   */
+  chatSend: (text: string) => invoke<string>("chat_send", { text }),
+  onAgentEvent: (onEvent: (event: AgentEvent) => void): Promise<() => void> =>
+    listen<AgentEvent>(AGENT_EVENT, (event) => onEvent(event.payload)),
 };

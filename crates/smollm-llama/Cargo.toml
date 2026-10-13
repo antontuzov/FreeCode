@@ -9,9 +9,11 @@ description = "PrismML llama.cpp fork resolution and the ternary load-guard"
 smollm-config = { workspace = true }
 smollm-models = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 flate2 = { workspace = true }
+futures = { workspace = true }
 reqwest = { workspace = true }
 tar = { workspace = true }
 tokio = { workspace = true }
@@ -19,3 +21,6 @@ zip = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# Only so the end-to-end probe can ask the settings which model the app actually ships with; the
+# crate's own layering (launcher below settings) stays untouched.
+smollm-config = { workspace = true }
