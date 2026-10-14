@@ -135,7 +135,7 @@ impl Running {
     ) -> Self {
         let view = EngineView {
             base_url: handle.base_url().to_string(),
-            backend: handle.plan.backend.label().to_string(),
+            backend: handle.plan.decode_backend().label().to_string(),
             engine_tag: assembly.lock.pinned_tag.clone(),
             packing: assembly.pack.key.clone(),
             model_file: assembly.file.display().to_string(),
@@ -384,6 +384,7 @@ async fn launch(app: &AppHandle) -> Result<Running, String> {
             model_path: assembly.file.clone(),
             hardware: &assembly.host,
             tuning: tuning.clone(),
+            pid_registry: crate::paths::server_pid_registry(),
         },
         &assembly.lock,
         READY_TIMEOUT,

@@ -105,6 +105,19 @@ fn release_engine(app: &AppHandle) {
     chat::release_engine(&state);
 }
 
+/// The other half of [`release_engine`], for the way out that runs none of this process's code.
+///
+/// A `SIGKILL` — what a force quit, a crash and `tauri dev`'s restart send — stops the host where it
+/// stands, and its server goes on holding gigabytes of weights under a pid nothing remembers. Each
+/// launch records that pid beside the host's own, so the next run can tell a stranded server from one
+/// a live window is still watching. Observed 2026-10-14: three dev restarts left three servers behind.
+fn reap_leftover_servers() {
+    let Some(path) = paths::server_pid_registry() else {
+        return;
+    };
+    smollm_llama::reap_orphaned_servers(&path);
+}
+
 /// SIGTERM, SIGINT and SIGHUP never reach [`RunEvent::Exit`]: their default action stops the process
 /// where it stands, which is how a supervised server is orphaned (observed 2026-10-13 — `kill -TERM`
 /// to the host left `llama-server` holding its port and its weights). Registering a listener takes
@@ -159,6 +172,9 @@ pub fn run() {
             chat::chat_send
         ])
         .setup(|app| {
+            // Before this process spawns a server of its own, so a leftover's port is free to be
+            // chosen again and its memory is back before the first load.
+            reap_leftover_servers();
             watch_signals(app.handle().clone());
             Ok(())
         })

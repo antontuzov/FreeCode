@@ -111,6 +111,7 @@ impl Real {
             defaults: &self.catalog.defaults,
             model_path: self.weights.clone(),
             hardware: &self.host,
+            pid_registry: None,
             tuning: LaunchTuning::default(),
         }
     }

@@ -1,4 +1,5 @@
 import { translate, type Locale } from "../i18n";
+import { useChat } from "../state/chat";
 import { useModel } from "../state/model";
 import { useTranscript } from "../state/transcript";
 import { Icon } from "./icons";
@@ -9,6 +10,7 @@ import { Icon } from "./icons";
  */
 export function StatusBar({ locale }: { locale: Locale }) {
   const status = useModel((s) => s.status);
+  const engine = useChat((s) => s.engine);
   const contextUsed = useTranscript((s) => s.contextUsed);
 
   const badge = status?.blocked
@@ -16,6 +18,15 @@ export function StatusBar({ locale }: { locale: Locale }) {
     : status?.local
       ? translate(locale, "model.badge.local")
       : translate(locale, "model.badge.remote");
+
+  // While a server is up, this pair describes the run rather than the machine. The status' backend is
+  // what this host *could* decode on, so it goes on saying "Metal" after layer offload is switched
+  // off and every layer is being decoded on the CPU.
+  const runLine = engine
+    ? `${engine.packing} · ${engine.backend}`
+    : status
+      ? `${status.packing} · ${status.backend}`
+      : null;
 
   // Context usage is only meaningful once something has measured it. A real run reports none yet —
   // the fork only tells us after the reply — so the meter reads as unknown instead of inventing a
@@ -28,11 +39,7 @@ export function StatusBar({ locale }: { locale: Locale }) {
         <Icon name="monitor" size={13} />
         {badge}
       </span>
-      {status && (
-        <span className="truncate font-mono text-faint">
-          {status.packing} · {status.backend}
-        </span>
-      )}
+      {runLine && <span className="truncate font-mono text-faint">{runLine}</span>}
       <span className="flex-1" />
       <span
         role="progressbar"

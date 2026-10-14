@@ -92,6 +92,10 @@ pub struct LaunchRequest<'a> {
     pub model_path: PathBuf,
     pub hardware: &'a HostHardware,
     pub tuning: LaunchTuning,
+    /// File mirroring the pid of every server this host spawns, so the next instance can reap what a
+    /// killed one stranded. See [`crate::server::reap_orphaned_servers`]. `None` keeps the registry
+    /// in memory, which is enough for a caller that cannot be killed.
+    pub pid_registry: Option<PathBuf>,
 }
 
 /// A fully assembled invocation. `args` contains nothing this function guessed: each value is
@@ -248,6 +252,18 @@ impl LaunchPlan {
             .and_then(|i| self.args.get(i + 1))
             .map(String::as_str)
     }
+
+    /// Where this plan actually decodes, which is not always what the binary was built for.
+    ///
+    /// `-ngl 0` leaves every layer on the CPU whatever backend carries the kernels, so naming the
+    /// machine's accelerator on a run that switched it off is a claim the command line contradicts.
+    pub fn decode_backend(&self) -> Backend {
+        if self.layers_offloaded == 0 {
+            Backend::Cpu
+        } else {
+            self.backend
+        }
+    }
 }
 
 /// The demo's four sampling flags plus the two the GGUF cannot carry. The penalties are only passed
@@ -349,6 +365,7 @@ mod tests {
                 defaults: &self.defaults,
                 model_path: self.model_path.clone(),
                 hardware: &self.hardware,
+                pid_registry: None,
                 tuning,
             }
         }
@@ -519,6 +536,23 @@ mod tests {
         assert_eq!(forced.arg("-ngl"), Some("99"));
     }
 
+    /// A Metal build told to offload nothing decodes on the CPU, and the run has to be reported that
+    /// way: the switch that causes it is a user-facing setting, and a status that keeps saying
+    /// "Metal" after it is thrown tells the user the machine is doing work it is not doing.
+    #[test]
+    fn a_metal_build_told_to_offload_nothing_decodes_on_the_cpu() {
+        let f = fixture(Backend::Metal, 16);
+        let metal = f.plan(LaunchTuning::default());
+        assert_eq!(metal.decode_backend(), Backend::Metal);
+        let cpu = f.plan(LaunchTuning {
+            layers_override: Some(0),
+            ..Default::default()
+        });
+        assert_eq!(cpu.arg("-ngl"), Some("0"));
+        assert_eq!(cpu.backend, Backend::Metal);
+        assert_eq!(cpu.decode_backend(), Backend::Cpu);
+    }
+
     #[test]
     fn one_dedicated_slot_with_a_prompt_cache_is_the_documented_single_user_launch() {
         let f = fixture(Backend::Metal, 16);
@@ -686,6 +720,7 @@ mod tests {
                 defaults: &catalog.defaults,
                 model_path: weights.clone(),
                 hardware: &hardware,
+                pid_registry: None,
                 tuning: LaunchTuning::default(),
             })
             .unwrap_or_else(|e| panic!("{}: {e}", target.key));

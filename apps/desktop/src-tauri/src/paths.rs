@@ -11,6 +11,16 @@ use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 pub const ROOT_ENV: &str = "SMOLLM_STUDIO_ROOT";
+/// The file mirroring the pids of the supervised servers, one line per launch.
+const SERVER_PIDS: &str = "servers.pid";
+
+/// Where the server pid registry lives: beside `settings.json`, in the directory the app already
+/// owns and which outlives a crash. `None` when the platform has no such directory, which leaves the
+/// registry in memory only.
+pub(crate) fn server_pid_registry() -> Option<PathBuf> {
+    smollm_config::Settings::default_path()
+        .and_then(|settings| settings.parent().map(|dir| dir.join(SERVER_PIDS)))
+}
 
 /// The directory holding `catalog/` and `engines/`.
 pub fn workspace_root(app: Option<&AppHandle>) -> Result<PathBuf, String> {

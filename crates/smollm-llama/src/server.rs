@@ -16,6 +16,9 @@
 //! the host process where it stands: during a load the child runs for seconds before any handle
 //! exists, because the handle is only built once `/health` is green. [`kill_spawned_servers`] is the
 //! registry for that window, so the host's shutdown hook has something to reach for on its way out.
+//! And what *that* cannot cover is a `SIGKILL`, which runs no hook at all — for it the registry is
+//! mirrored on disk as each server appears, and the next run calls [`reap_orphaned_servers`] to
+//! finish what the last one started.
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -83,6 +86,123 @@ pub fn kill_spawned_servers() -> usize {
         let _ = pid;
     }
     count
+}
+
+/// One line of the on-disk mirror of [`SPAWNED`]: `host_pid server_pid program`.
+///
+/// The file exists for the one death no in-process hook can cover. A `SIGKILL`, an abort and a dev
+/// restart all stop the host where it stands — and the server it was tracking goes on holding
+/// gigabytes of weights under a pid nothing remembers (observed 2026-10-14: three `tauri dev`
+/// restarts left three servers behind, ~4 GB each, with only their next instance to notice).
+fn record_spawn(registry: Option<&Path>, server_pid: u32, program: &Path) {
+    let Some(path) = registry else { return };
+    let line = format!(
+        "{} {} {}\n",
+        std::process::id(),
+        server_pid,
+        program.display()
+    );
+    // Append, never rewrite: another host's lines must survive, and a torn final line is one the
+    // reader below skips. A registry that cannot be written costs a leftover server, not a run that
+    // could otherwise have worked.
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        use std::io::Write;
+        let _ = file.write_all(line.as_bytes());
+    }
+}
+
+/// Kill the servers that a host which is no longer running recorded, and rewrite the file to hold
+/// only the lines still worth having. Returns how many processes were signalled.
+///
+/// A line is acted on only when three things hold: its host pid is gone, its server pid is still
+/// up, and that pid's executable is the program the line names. The last test is what makes killing
+/// by a number read out of a file safe — pids are handed out again eventually, and the wrong target
+/// would be a process the user started themselves.
+#[cfg(unix)]
+pub fn reap_orphaned_servers(registry: &Path) -> usize {
+    let Ok(raw) = std::fs::read_to_string(registry) else {
+        return 0;
+    };
+    let mut killed = 0;
+    let mut kept: Vec<String> = Vec::new();
+    for line in raw.lines() {
+        let Some((host, server, program)) = parse_entry(line) else {
+            continue;
+        };
+        // Its host is up: the server belongs to a run that is still watching it, this one included.
+        if host == std::process::id() || pid_alive(host) {
+            kept.push(line.to_string());
+            continue;
+        }
+        if !pid_alive(server) {
+            continue;
+        }
+        if executable_of(server).is_some_and(|found| found == program) {
+            // Safety: `kill(2)` on a pid this file only ever holds for a server this app spawned,
+            // after its name has been checked above.
+            unsafe { libc::kill(server as libc::pid_t, libc::SIGKILL) };
+            killed += 1;
+        } else {
+            // The number has been reused for something else. Leaving the line is the conservative
+            // reading: it costs one more look next start, where acting on it could stop a stranger.
+            kept.push(line.to_string());
+        }
+    }
+    if kept.len() != raw.lines().count() {
+        let mut rewritten = kept.join("\n");
+        if !rewritten.is_empty() {
+            rewritten.push('\n');
+        }
+        let _ = std::fs::write(registry, rewritten);
+    }
+    killed
+}
+
+/// Windows has no signal to catch and no pid to check cheaply; there the child is released by the
+/// app-exit hook, and a Job Object is the way to cover a kill that runs no code.
+#[cfg(not(unix))]
+pub fn reap_orphaned_servers(_: &Path) -> usize {
+    0
+}
+
+/// `host_pid server_pid program`, with the program allowed to contain spaces because an installed
+/// app's resources usually do.
+fn parse_entry(line: &str) -> Option<(u32, u32, String)> {
+    let mut fields = line.splitn(3, ' ');
+    let host = fields.next()?.parse().ok()?;
+    let server = fields.next()?.parse().ok()?;
+    let program = fields.next()?.trim_end().to_string();
+    (!program.is_empty()).then_some((host, server, program))
+}
+
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    // Safety: `kill(2)` with signal 0 asks whether the pid exists and sends nothing. `EPERM` answers
+    // "it exists, but is not ours", which is still a reason to leave it alone.
+    unsafe {
+        libc::kill(pid as libc::pid_t, 0) == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+}
+
+/// The executable a pid is running, as the kernel reports it. `None` when it is not running at all
+/// or is not ours to ask about.
+#[cfg(unix)]
+fn executable_of(pid: u32) -> Option<String> {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    let path = text.trim();
+    (!path.is_empty()).then(|| path.to_string())
 }
 
 /// The server's trailing output, kept so any later failure can quote the reason.
@@ -315,6 +435,7 @@ pub async fn start(
     // green, and a load is the longest window in which the host can be told to die.
     if let Some(pid) = child.id() {
         track(pid);
+        record_spawn(req.pid_registry.as_deref(), pid, &plan.program);
     }
 
     let logs = Arc::new(Mutex::new(LogTail::default()));
@@ -361,6 +482,26 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A process to stand in for a server: the same shape the reaper sees, without the weights.
+    #[cfg(unix)]
+    fn spawn_placeholder() -> std::process::Child {
+        std::process::Command::new("/bin/sleep")
+            .arg("120")
+            .spawn()
+            .expect("a placeholder for a server still holding its weights")
+    }
+
+    /// A pid that is not running: a child that finished and was reaped, so its number is released.
+    #[cfg(unix)]
+    fn dead_host_pid() -> u32 {
+        let mut gone = std::process::Command::new("/usr/bin/true")
+            .spawn()
+            .expect("a host that will not outlive this line");
+        let pid = gone.id();
+        gone.wait().expect("the host is reaped");
+        pid
+    }
 
     #[test]
     fn the_log_tail_keeps_the_last_lines_and_says_when_there_are_none() {
@@ -413,6 +554,91 @@ mod tests {
             0,
             "a flush empties the registry, so nothing is signalled twice"
         );
+    }
+
+    /// A launch records who spawned it and what it is, which is everything the next run needs to
+    /// tell a stranded server from one a live window owns.
+    #[test]
+    fn a_recorded_spawn_names_its_host_and_its_program() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("servers.pid");
+        // The path the app installs under routinely contains spaces, so the program is the field
+        // that absorbs them rather than being split by them.
+        record_spawn(Some(&path), 4242, Path::new("/Users/a b/llama-server"));
+        record_spawn(Some(&path), 4243, Path::new("/bin/sleep"));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("registry"),
+            format!(
+                "{} 4242 /Users/a b/llama-server\n{} 4243 /bin/sleep\n",
+                std::process::id(),
+                std::process::id()
+            )
+        );
+        // No file named is no file written: a caller that cannot be killed keeps the registry in
+        // memory, which is what it asked for.
+        record_spawn(None, 1, Path::new("/bin/sleep"));
+        assert_eq!(parse_entry("nope"), None);
+    }
+
+    /// The death the in-memory registry cannot cover: the host is gone, so nothing is left that knows
+    /// the server exists. This is the case the on-disk mirror is for.
+    #[cfg(unix)]
+    #[test]
+    fn a_server_whose_host_is_gone_is_reaped_by_the_next_run() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("servers.pid");
+        let mut stranded = spawn_placeholder();
+        let line = format!("{} {} /bin/sleep\n", dead_host_pid(), stranded.id());
+        std::fs::write(&path, &line).expect("registry");
+
+        assert_eq!(reap_orphaned_servers(&path), 1);
+        assert_eq!(
+            stranded.wait().expect("reaped").signal(),
+            Some(libc::SIGKILL),
+            "the leftover server must actually stop"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("registry"),
+            "",
+            "a reaped line is not worth carrying to the next start"
+        );
+    }
+
+    /// Two of the three reasons a line is *not* acted on. A host that is still up is watching its own
+    /// server — a second window starting must not kill the first one's engine — and a pid whose
+    /// program is not the one recorded has been handed out again since, so killing it would stop a
+    /// process the user started themselves.
+    #[cfg(unix)]
+    #[test]
+    fn a_line_is_only_acted_on_when_its_host_is_gone_and_its_program_matches() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("servers.pid");
+
+        let mut watched = spawn_placeholder();
+        std::fs::write(
+            &path,
+            format!("{} {} /bin/sleep\n", std::process::id(), watched.id()),
+        )
+        .expect("registry");
+        assert_eq!(reap_orphaned_servers(&path), 0, "its host is alive");
+        assert!(watched.try_wait().expect("polled").is_none());
+
+        let mut reused = spawn_placeholder();
+        std::fs::write(
+            &path,
+            format!("{} {} /bin/cat\n", dead_host_pid(), reused.id()),
+        )
+        .expect("registry");
+        assert_eq!(
+            reap_orphaned_servers(&path),
+            0,
+            "the recorded program is not what holds the pid"
+        );
+        assert!(reused.try_wait().expect("polled").is_none());
+        reused.kill().expect("cleaned up");
+        watched.kill().expect("cleaned up");
     }
 
     /// The mechanism `live_turn` depends on: a server killed by something other than the handle —
