@@ -11,6 +11,7 @@ mod engine;
 mod paths;
 mod status;
 pub mod verify_native;
+mod weights;
 
 use std::path::PathBuf;
 
@@ -51,11 +52,18 @@ async fn load_appearance(app: AppHandle) -> Result<AppearanceView, String> {
 }
 
 /// Fetch the pinned fork engine and unpack it into `engines/`. Progress arrives on the
-/// `engine-install` event and the answer is the final state. This is the app's only outbound request
-/// on the local-model path, and it happens because the user pressed Install.
+/// `engine-install` event and the answer is the final state. One of the two fetches this app makes
+/// on the local-model path, and it only happens because the user pressed Install.
 #[tauri::command]
 async fn install_engine(app: AppHandle) -> Result<engine::InstallOutcome, String> {
     engine::install_engine(&app).await
+}
+
+/// Download the packing the status strip chose into `models/`, resuming whatever is already in
+/// flight. Progress arrives on the `weights-download` event; the answer is the file that landed.
+#[tauri::command]
+async fn download_weights(app: AppHandle) -> Result<weights::Downloaded, String> {
+    weights::download_weights(&app).await
 }
 
 /// Persists the shell's controls and echoes what the host now believes, so the UI never keeps a
@@ -140,6 +148,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             model_status,
             install_engine,
+            download_weights,
             load_appearance,
             save_appearance,
             load_settings,

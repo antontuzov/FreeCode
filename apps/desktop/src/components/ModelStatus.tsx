@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
 import { translate, type Locale } from "../i18n";
-import type { EngineInstallProgress } from "../lib/ipc";
+import type { EngineInstallProgress, WeightsProgress } from "../lib/ipc";
 import { useChat } from "../state/chat";
 import { useModel } from "../state/model";
 import { Icon } from "./icons";
@@ -11,6 +11,43 @@ function megabytes(bytes: number): string {
   // One decimal on both sides of "x of y": switching precision at 10 MB made an 11.5 MB asset
   // report "11 MB of 12 MB" while its bar was already full.
   return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+/** The part of a fetch progress the two kinds of progress payload have in common. */
+type Downloading = { phase: "downloading"; transferredBytes: number; totalBytes: number };
+
+/** The bar both fetches draw: bytes moved against the size the catalog or the lock published. */
+function ByteProgress({
+  locale,
+  label,
+  progress,
+}: {
+  locale: Locale;
+  label: string;
+  progress: Downloading;
+}) {
+  const { transferredBytes, totalBytes } = progress;
+  const percent = totalBytes > 0 ? Math.min(100, (transferredBytes / totalBytes) * 100) : 0;
+  return (
+    <div className="mt-2">
+      <div
+        aria-label={label}
+        aria-valuemax={100}
+        aria-valuemin={0}
+        aria-valuenow={Math.round(percent)}
+        className="h-1 overflow-hidden rounded-full bg-sunken"
+        role="progressbar"
+      >
+        <div className="h-full bg-accent" style={{ width: `${percent}%` }} />
+      </div>
+      <p className="mt-1 font-mono text-[calc(var(--font-ui)-2px)] text-muted">
+        {translate(locale, "model.fetch.progress", {
+          transferred: megabytes(transferredBytes),
+          total: megabytes(totalBytes),
+        })}
+      </p>
+    </div>
+  );
 }
 
 /** Byte progress while the host fetches the engine; `done` is the command's own return value. */
@@ -31,27 +68,22 @@ function InstallProgress({
     );
   }
   if (progress.phase !== "downloading") return null;
-  const { transferredBytes, totalBytes } = progress;
-  const percent = totalBytes > 0 ? Math.min(100, (transferredBytes / totalBytes) * 100) : 0;
   return (
-    <div className="mt-2">
-      <div
-        aria-label={translate(locale, "model.install")}
-        aria-valuemax={100}
-        aria-valuemin={0}
-        aria-valuenow={Math.round(percent)}
-        className="h-1 overflow-hidden rounded-full bg-sunken"
-        role="progressbar"
-      >
-        <div className="h-full bg-accent" style={{ width: `${percent}%` }} />
-      </div>
-      <p className="mt-1 font-mono text-[calc(var(--font-ui)-2px)] text-muted">
-        {translate(locale, "model.install.progress", {
-          transferred: megabytes(transferredBytes),
-          total: megabytes(totalBytes),
-        })}
-      </p>
-    </div>
+    <ByteProgress locale={locale} label={translate(locale, "model.install")} progress={progress} />
+  );
+}
+
+/** Byte progress while the host downloads the pack; `done` only lands once the command returns. */
+function DownloadProgress({
+  locale,
+  progress,
+}: {
+  locale: Locale;
+  progress: WeightsProgress | null;
+}) {
+  if (!progress || progress.phase !== "downloading") return null;
+  return (
+    <ByteProgress locale={locale} label={translate(locale, "model.download")} progress={progress} />
   );
 }
 
@@ -60,20 +92,38 @@ function InstallProgress({
  * resolution, and it names the load-guard refusal instead of hiding it.
  */
 export function ModelStatus({ locale }: { locale: Locale }) {
-  const { status, error, loading, refresh, installing, progress, installError, installEngine } =
-    useModel();
+  const {
+    status,
+    error,
+    loading,
+    refresh,
+    installing,
+    progress,
+    installError,
+    installEngine,
+    downloading,
+    downloadProgress,
+    downloadError,
+    downloadWeights,
+  } = useModel();
   const engine = useChat((s) => s.engine);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  // `?install-engine=1` runs the Install action on mount. The native window takes no injected
-  // clicks, so this is how the download and its progress bar get verified in the real app.
-  const autoInstall = new URLSearchParams(window.location.search).get("install-engine") === "1";
+  // `?install-engine=1` runs the Install action and `?download-weights=1` the Download one on mount.
+  // The native window takes no injected clicks, so these are how the two fetches and their progress
+  // bars get verified in the real app.
+  const params = new URLSearchParams(window.location.search);
+  const autoInstall = params.get("install-engine") === "1";
+  const autoDownload = params.get("download-weights") === "1";
   useEffect(() => {
     if (autoInstall) void installEngine();
   }, [autoInstall, installEngine]);
+  useEffect(() => {
+    if (autoDownload) void downloadWeights();
+  }, [autoDownload, downloadWeights]);
 
   if (loading && !status) {
     return <p className="transcript-row">{translate(locale, "model.status.checking")}</p>;
@@ -96,6 +146,33 @@ export function ModelStatus({ locale }: { locale: Locale }) {
     : status.local
       ? translate(locale, "model.badge.local")
       : translate(locale, "model.badge.remote");
+
+  // Which refusal the app can clear itself, by fetching what the catalog and the lock pinned. The
+  // host says which one it is — the UI never re-derives it from the file name — and both kinds render
+  // the same shape, so they share one block rather than two near-copies of it. The labels are
+  // translated here rather than at the button, so the i18n gate, which resolves only literal key
+  // strings passed to translate, still sees every key this card can show.
+  const fetchAction = !status.blocked
+    ? null
+    : status.blocked.installable
+      ? {
+          run: installEngine,
+          busy: installing,
+          error: installError,
+          label: translate(locale, "model.install"),
+          busyLabel: translate(locale, "model.install.busy"),
+          bar: <InstallProgress locale={locale} progress={progress} />,
+        }
+      : status.blocked.downloadable
+        ? {
+            run: downloadWeights,
+            busy: downloading,
+            error: downloadError,
+            label: translate(locale, "model.download"),
+            busyLabel: translate(locale, "model.download.busy"),
+            bar: <DownloadProgress locale={locale} progress={downloadProgress} />,
+          }
+        : null;
 
   return (
     <section
@@ -143,23 +220,23 @@ export function ModelStatus({ locale }: { locale: Locale }) {
             {status.blocked.title}
           </p>
           <p className="mt-1 text-[calc(var(--font-ui)-2px)] text-muted">{status.blocked.detail}</p>
-          {status.blocked.installable ? (
-            // The app fetches the pinned asset itself; the release page stays as the fallback text
-            // for every other refusal, where no button could clear it.
+          {fetchAction ? (
+            // The app fetches the pinned asset itself; the fallback URL text below stays for every
+            // other refusal, where no button in the app could clear it.
             <>
               <button
                 type="button"
-                onClick={() => void installEngine()}
-                disabled={installing}
+                onClick={() => void fetchAction.run()}
+                disabled={fetchAction.busy}
                 className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-accent px-2.5 py-1 text-[calc(var(--font-ui)-2px)] font-medium text-accent-contrast disabled:opacity-60"
               >
                 <Icon name="download" size={13} />
-                {translate(locale, installing ? "model.install.busy" : "model.install")}
+                {fetchAction.busy ? fetchAction.busyLabel : fetchAction.label}
               </button>
-              {installing && <InstallProgress locale={locale} progress={progress} />}
-              {installError && (
+              {fetchAction.busy && fetchAction.bar}
+              {fetchAction.error && (
                 <p role="alert" className="mt-2 text-[calc(var(--font-ui)-2px)] text-danger">
-                  {installError}
+                  {fetchAction.error}
                 </p>
               )}
             </>

@@ -55,17 +55,17 @@ impl Assembly {
         self.report
             .blockers
             .iter()
-            .filter(|b| !self.is_pending_install(b))
+            .filter(|b| !self.pending_fetch(b))
             .map(|b| format!("{}: {}", b.title(), b.detail()))
             .collect()
     }
 
-    fn is_pending_install(&self, blocker: &Blocker) -> bool {
-        match blocker {
-            Blocker::EngineNotInstalled { .. } => true,
-            Blocker::IntegrityFailed { file, .. } => self.weights_absent && *file == self.pack.file,
-            _ => false,
-        }
+    /// The refusals that are simply work the app has not done yet, and which its own fetch buttons
+    /// clear: the pinned engine is not unpacked, or the chosen pack is not on disk.
+    fn pending_fetch(&self, blocker: &Blocker) -> bool {
+        matches!(blocker, Blocker::EngineNotInstalled { .. })
+            || (self.weights_absent
+                && matches!(blocker, Blocker::IntegrityFailed { file, .. } if *file == self.pack.file))
     }
 
     pub fn view(&self, settings: &Settings) -> ModelStatusView {
@@ -105,9 +105,12 @@ impl Assembly {
                 detail: b.detail(),
                 cta_label: cta.label.to_string(),
                 cta_url: cta.url,
-                // Only the missing engine is something this app can fix by itself; the other
-                // blockers need a file the user has to fetch or a pin the repository has to move.
+                // Two refusals are things this app clears itself by fetching what it pinned. Every
+                // other one is a fact about the tree — a stock binary, a stale pin, a file whose bytes
+                // disagree with the catalog — and the honest answer there is the URL, not a button
+                // that would overwrite a file the user put there.
                 installable: matches!(b, Blocker::EngineNotInstalled { .. }),
+                downloadable: self.weights_absent && matches!(b, Blocker::IntegrityFailed { .. }),
             }
         });
 
@@ -249,7 +252,7 @@ fn installed_packs(model: &ModelEntry, weights: &Path) -> Vec<String> {
 
 /// Where the weights live: the per-workspace override, else `<root>/models`, the sibling of the
 /// `engines/` directory the resolver unpacks into.
-fn weights_dir(root: &Path, settings: &Settings) -> PathBuf {
+pub(crate) fn weights_dir(root: &Path, settings: &Settings) -> PathBuf {
     match &settings.local_model.model_dir {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
         _ => models_root(root),
@@ -257,7 +260,11 @@ fn weights_dir(root: &Path, settings: &Settings) -> PathBuf {
 }
 
 /// Size-checked here; the sha256 is verified once, when the download finishes.
-fn file_state(file: &Path, expected_size_bytes: u64, expected_sha256: &str) -> FileState {
+pub(crate) fn file_state(
+    file: &Path,
+    expected_size_bytes: u64,
+    expected_sha256: &str,
+) -> FileState {
     if expected_sha256.is_empty() {
         return FileState::Unverifiable;
     }
@@ -303,6 +310,9 @@ pub struct BlockedView {
     /// True when the app can clear this itself by fetching the pinned engine; false when the fix is
     /// a file or a pin change and the URL is the honest answer.
     pub installable: bool,
+    /// True when the app can clear this itself by downloading the chosen pack into the weights
+    /// directory, which is only the case when that pack has never been fetched.
+    pub downloadable: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -381,6 +391,31 @@ mod tests {
             assembly.contract_failures()
         );
         assert!(!assembly.report.is_allowed());
+    }
+
+    #[test]
+    fn a_pack_that_was_never_fetched_offers_the_in_app_download() {
+        let root = clean_checkout();
+        let mut assembly = assemble(root.path(), &Settings::default()).unwrap();
+        // The state a machine reaches once the engine has been installed and the pack has not: the
+        // one blocker the view must hand to the Download button.
+        assembly.report.blockers = vec![Blocker::IntegrityFailed {
+            file: assembly.pack.file.clone(),
+            status: "not downloaded".into(),
+        }];
+        let blocked = assembly.view(&Settings::default()).blocked.unwrap();
+        assert!(blocked.downloadable);
+        assert!(
+            !blocked.installable,
+            "the engine is on disk in this state, so Install is not the fix"
+        );
+
+        // The same refusal for a file that IS on disk with the wrong bytes is not a fetch the app
+        // gets to decide about: clearing it would overwrite something the user put there, so the URL
+        // stays the answer.
+        assembly.weights_absent = false;
+        let blocked = assembly.view(&Settings::default()).blocked.unwrap();
+        assert!(!blocked.downloadable);
     }
 
     #[test]

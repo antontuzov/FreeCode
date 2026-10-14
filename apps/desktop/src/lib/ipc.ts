@@ -37,6 +37,8 @@ export type ModelStatus = {
     ctaUrl: string;
     /** The host can clear this refusal itself by fetching the pinned engine. */
     installable: boolean;
+    /** The host can clear this refusal itself by downloading the chosen pack. */
+    downloadable: boolean;
   } | null;
 };
 
@@ -57,6 +59,24 @@ export type EngineInstallProgress =
   | { phase: "downloading"; transferredBytes: number; totalBytes: number }
   | { phase: "unpacking" }
   | { phase: "done"; installed: InstallOutcome & { dir: string } };
+
+/**
+ * The pack that ended up on disk. Mirrors `smollm_desktop_lib::weights::Downloaded`.
+ * `path` is where the load guard will read the weights from, so it is shown rather than assumed.
+ */
+export type WeightsDownloaded = {
+  catalogId: string;
+  packing: string;
+  file: string;
+  sha256: string;
+  path: string;
+  sizeBytes: number;
+};
+
+/** `smollm_desktop_lib::weights::Phase`, emitted on the `weights-download` event. */
+export type WeightsProgress =
+  | { phase: "downloading"; transferredBytes: number; totalBytes: number }
+  | { phase: "done"; downloaded: WeightsDownloaded };
 
 export type ThemeMode = "light" | "dark" | "system";
 export type Accent = "forest" | "mint" | "bee" | "parchment";
@@ -89,6 +109,9 @@ export type AppearanceState = {
 
 /** Host event carrying `EngineInstallProgress`; must match `engine::PROGRESS_EVENT` in Rust. */
 export const ENGINE_INSTALL_EVENT = "engine-install";
+
+/** Host event carrying `WeightsProgress`; must match `weights::PROGRESS_EVENT` in Rust. */
+export const WEIGHTS_DOWNLOAD_EVENT = "weights-download";
 
 /* ---- the live engine and its streamed replies ---- */
 
@@ -228,6 +251,10 @@ export const ipc = {
   installEngine: () => invoke<InstallOutcome>("install_engine"),
   onEngineInstall: (onProgress: (progress: EngineInstallProgress) => void): Promise<() => void> =>
     listen<EngineInstallProgress>(ENGINE_INSTALL_EVENT, (event) => onProgress(event.payload)),
+  /** Fetch the packing the status strip chose. Progress arrives on `onWeightsDownload`. */
+  downloadWeights: () => invoke<WeightsDownloaded>("download_weights"),
+  onWeightsDownload: (onProgress: (progress: WeightsProgress) => void): Promise<() => void> =>
+    listen<WeightsProgress>(WEIGHTS_DOWNLOAD_EVENT, (event) => onProgress(event.payload)),
   loadAppearance: () => invoke<AppearanceState>("load_appearance"),
   /** The host answers with what it stored, including a refreshed `resolvedMode`. */
   saveAppearance: (appearance: AppearanceState) =>
