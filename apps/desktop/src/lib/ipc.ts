@@ -86,7 +86,7 @@ export type FontStyle = "sans" | "serif" | "mono";
 export type ContentWidth = "standard" | "wide" | "full";
 export type FileIconSet = "qoder" | "seti" | "vscode" | "none";
 export type ApprovalMode = "auto_approve" | "ask_always" | "plan_only" | "custom";
-export type ReasoningEffort = "low" | "medium" | "xhigh" | "none";
+export type ReasoningEffort = "auto" | "low" | "medium" | "xhigh" | "none";
 /** `automatic` follows the OS default; `named` pins a specific microphone. */
 export type InputDevice = "automatic" | { named: string };
 /** `auto` lets the hardware probe choose; `forced` pins a packing key from the catalog. */

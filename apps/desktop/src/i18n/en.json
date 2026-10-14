@@ -164,7 +164,7 @@
   "settings.row.dedicatedServerSlots": "Single dedicated slot",
   "settings.row.dedicatedServerSlots.desc": "Run the server with one slot and a bounded prompt cache, so the cache does not thrash across requests.",
   "settings.row.effort": "Reasoning effort",
-  "settings.row.effort.desc": "Low reasons about as long as Extra high: the chat template only accepts xhigh, medium and none.",
+  "settings.row.effort.desc": "Auto takes the effort the selected model publishes as its default. Low reasons about as long as Extra high: the chat template only accepts xhigh, medium and none.",
   "settings.row.nonThinking": "Instruct mode",
   "settings.row.nonThinking.desc": "Sample with the instruct profile. The model's measured quality comes from thinking mode.",
   "settings.row.maxTokens": "Maximum tokens per reply",

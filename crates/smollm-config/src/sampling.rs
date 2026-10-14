@@ -46,9 +46,14 @@ impl SamplingProfile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
+    /// Take the effort the selected model publishes as its own default. The alternative is a number
+    /// saved while a different model was selected — which is what a shipped default becomes, the
+    /// card behind these values describing the 27B while the app runs the 1.7B — and every launch
+    /// then has to announce that it substituted something nobody chose.
+    #[default]
+    Auto,
     Low,
     Medium,
-    #[default]
     Xhigh,
     /// Thinking disabled. Only honoured when the server runs `--reasoning auto`; `--reasoning on`
     /// overrides it client-side.
@@ -56,17 +61,19 @@ pub enum ReasoningEffort {
 }
 
 impl ReasoningEffort {
-    /// The value actually sent to the chat template.
+    /// The value an explicit choice puts on the chat template, or `None` for [`Self::Auto`], which
+    /// has no value until a model has been resolved against its catalog entry.
     ///
     /// `low` is in the template's vocabulary but measured to consume about as many tokens as the
     /// default `xhigh` (KNOWN_ISSUES.md), so we send `xhigh` and label the control accordingly
     /// rather than promising a shorter trace. `high` is never sent: the template rejects it with
     /// HTTP 500.
-    pub fn wire_value(self) -> &'static str {
+    pub fn wire_value(self) -> Option<&'static str> {
         match self {
-            Self::Low | Self::Xhigh => "xhigh",
-            Self::Medium => "medium",
-            Self::None => "none",
+            Self::Auto => None,
+            Self::Low | Self::Xhigh => Some("xhigh"),
+            Self::Medium => Some("medium"),
+            Self::None => Some("none"),
         }
     }
 
@@ -80,8 +87,8 @@ impl ReasoningEffort {
             .then_some("Low is unsupported by this model: it reasons about as long as Extra high.")
     }
 
-    pub fn all() -> [Self; 4] {
-        [Self::Low, Self::Medium, Self::Xhigh, Self::None]
+    pub fn all() -> [Self; 5] {
+        [Self::Auto, Self::Low, Self::Medium, Self::Xhigh, Self::None]
     }
 }
 
@@ -155,14 +162,30 @@ mod tests {
 
     #[test]
     fn low_maps_to_xhigh_and_high_is_never_sent() {
-        assert_eq!(ReasoningEffort::Low.wire_value(), "xhigh");
+        assert_eq!(ReasoningEffort::Low.wire_value(), Some("xhigh"));
         assert!(ReasoningEffort::Low.tooltip().is_some());
-        assert_eq!(ReasoningEffort::Xhigh.wire_value(), "xhigh");
-        assert_eq!(ReasoningEffort::Medium.wire_value(), "medium");
-        assert_eq!(ReasoningEffort::None.wire_value(), "none");
+        assert_eq!(ReasoningEffort::Xhigh.wire_value(), Some("xhigh"));
+        assert_eq!(ReasoningEffort::Medium.wire_value(), Some("medium"));
+        assert_eq!(ReasoningEffort::None.wire_value(), Some("none"));
         assert!(!ReasoningEffort::all()
             .iter()
-            .any(|e| e.wire_value() == "high"));
+            .any(|e| e.wire_value() == Some("high")));
+    }
+
+    /// The default has no wire value of its own, which is the whole point: it is the one setting
+    /// that cannot go stale when the selected model changes.
+    #[test]
+    fn auto_carries_no_value_until_a_model_resolves_it() {
+        assert_eq!(ReasoningEffort::default(), ReasoningEffort::Auto);
+        assert_eq!(ReasoningEffort::Auto.wire_value(), None);
+        assert_eq!(
+            serde_json::to_string(&ReasoningEffort::Auto).unwrap(),
+            "\"auto\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ReasoningEffort>("\"auto\"").unwrap(),
+            ReasoningEffort::Auto
+        );
     }
 
     #[test]

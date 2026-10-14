@@ -664,7 +664,7 @@ function Reasoning({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
           <Select
             label={t("row.effort")}
             value={s.effort}
-            options={(["low", "medium", "xhigh", "none"] as const).map((v) => ({
+            options={(["auto", "low", "medium", "xhigh", "none"] as const).map((v) => ({
               value: v,
               label: t(`opt.${v}`),
             }))}

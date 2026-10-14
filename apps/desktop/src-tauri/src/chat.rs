@@ -271,6 +271,9 @@ fn tuning(settings: &Settings) -> LaunchTuning {
 
 fn effort_word(effort: ReasoningEffort) -> &'static str {
     match effort {
+        // Never reaches a request: `resolve_effort` answers `auto` from the catalog first, so the
+        // word only names a choice the user actually made.
+        ReasoningEffort::Auto => "auto",
         ReasoningEffort::Low => "low",
         ReasoningEffort::Medium => "medium",
         ReasoningEffort::Xhigh => "xhigh",
@@ -281,15 +284,21 @@ fn effort_word(effort: ReasoningEffort) -> &'static str {
 /// The effort this model will take, plus the sentence explaining any replacement.
 ///
 /// `client::wire_effort` rejects an effort the loaded model's template does not accept, so a choice
-/// saved while another model was selected — the default `xhigh`, on a generation whose chat template
-/// has no thinking branch at all — would turn every request into an error. The catalog's
+/// saved while another model was selected would turn every request into an error. The catalog's
 /// `default_effort` stands in, and the substitution is reported rather than applied quietly.
+///
+/// `auto` takes that default with no report: nothing is being overridden, so announcing it would be
+/// the app describing its own default to the user on every launch. A saved word is different — the
+/// user picked it, and the sentence is what tells them the model they now have cannot take it.
 ///
 /// `low` is left alone even when unsupported: `wire_effort` maps it onto the catalog's measured
 /// synonym, and the Settings control already labels that downgrade.
 fn resolve_effort(model: &ModelEntry, stored: ReasoningEffort) -> (String, Option<String>) {
-    let word = effort_word(stored).to_string();
     let r = &model.sampling.reasoning;
+    if stored == ReasoningEffort::Auto {
+        return (r.default_effort.clone(), None);
+    }
+    let word = effort_word(stored).to_string();
     let translatable = word == "low" && !r.low_behaves_like.is_empty();
     if r.supported_efforts.contains(&word) || translatable {
         return (word, None);
@@ -660,6 +669,25 @@ mod tests {
         assert_eq!(
             resolve_effort(&big, ReasoningEffort::Xhigh),
             ("xhigh".into(), None)
+        );
+    }
+
+    /// `auto` is what a fresh install ships, so it must not cost the user a notice on every launch,
+    /// while the very same model still reports a substitution for an effort someone did pick.
+    #[test]
+    fn auto_takes_the_models_published_default_without_announcing_it() {
+        assert_eq!(
+            resolve_effort(&seeded("ternary-bonsai-1-7b"), ReasoningEffort::Auto),
+            ("none".into(), None)
+        );
+        assert_eq!(
+            resolve_effort(&seeded("ternary-bonsai-2-27b"), ReasoningEffort::Auto),
+            ("xhigh".into(), None)
+        );
+        assert!(
+            resolve_effort(&seeded("ternary-bonsai-1-7b"), ReasoningEffort::Xhigh)
+                .1
+                .is_some()
         );
     }
 

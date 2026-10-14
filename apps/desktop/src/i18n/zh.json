@@ -164,7 +164,7 @@
   "settings.row.dedicatedServerSlots": "单专用槽位",
   "settings.row.dedicatedServerSlots.desc": "以单槽位与有界提示缓存运行服务，避免缓存在多槽位间反复失效。",
   "settings.row.effort": "推理强度",
-  "settings.row.effort.desc": "Low 与 Extra high 的推理时长几乎相同：对话模板只接受 xhigh、medium 与 none。",
+  "settings.row.effort.desc": "自动采用所选模型发布的默认推理强度。Low 与 Extra high 的推理时长几乎相同：对话模板只接受 xhigh、medium 与 none。",
   "settings.row.nonThinking": "指令模式",
   "settings.row.nonThinking.desc": "改用 instruct 采样配置。模型实测质量来自思考模式。",
   "settings.row.maxTokens": "单次回复最大 token",
