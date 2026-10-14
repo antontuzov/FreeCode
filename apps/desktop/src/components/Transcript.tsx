@@ -163,7 +163,8 @@ function RowView({ row, locale }: { row: Row; locale: Locale }) {
   );
 }
 
-/** One prompt and the answer it got, addressed by the number the rail shows. */
+/** One prompt and the answer it got. `n` is the turn's position, spoken and titled but not drawn:
+ *  the marker itself is a dash, and a column of numbers would be the loudest thing on the screen. */
 type Checkpoint = { id: string; n: number; text: string };
 
 /**
@@ -180,7 +181,7 @@ function checkpointsOf(rows: Row[]): Checkpoint[] {
   return out;
 }
 
-/** The prompt in one line, for the chip's tooltip and accessible name. */
+/** The prompt in one line, for the marker's tooltip and accessible name. */
 function previewOf(text: string): string {
   const oneLine = text.replace(/\s+/g, " ").trim();
   return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine;
@@ -202,7 +203,7 @@ export function Transcript({ locale }: { locale: Locale }) {
 
   const checkpoints = useMemo(() => checkpointsOf(rows), [rows]);
 
-  // The chip marks the pair at the top of the column, which is the pair the user is looking at.
+  // The dash marks the pair at the top of the column, which is the pair the user is looking at.
   const spy = useCallback(() => {
     const box = scroll.current;
     if (!box) return;
@@ -257,33 +258,6 @@ export function Transcript({ locale }: { locale: Locale }) {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {checkpoints.length > 1 && (
-          <nav
-            aria-label={translate(locale, "transcript.checkpoints")}
-            className="min-h-0 w-[var(--space-8)] shrink-0 overflow-y-auto py-[var(--space-5)] pl-[var(--space-2)]"
-          >
-            <ol className="flex flex-col items-center gap-1">
-              {checkpoints.map((c) => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    onClick={() => jump(c.id)}
-                    data-active={c.id === active ? "true" : undefined}
-                    title={previewOf(c.text)}
-                    aria-label={translate(locale, "transcript.checkpoint", {
-                      n: c.n,
-                      text: previewOf(c.text),
-                    })}
-                    className="checkpoint"
-                  >
-                    {c.n}
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </nav>
-        )}
-
         <div
           ref={scroll}
           onScroll={() => {
@@ -326,6 +300,31 @@ export function Transcript({ locale }: { locale: Locale }) {
             </p>
           )}
         </div>
+
+        {checkpoints.length > 1 && (
+          <nav
+            aria-label={translate(locale, "transcript.checkpoints")}
+            className="min-h-0 w-10 shrink-0 overflow-y-auto py-[var(--space-4)]"
+          >
+            <ol className="flex flex-col">
+              {checkpoints.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => jump(c.id)}
+                    data-active={c.id === active ? "true" : undefined}
+                    title={previewOf(c.text)}
+                    aria-label={translate(locale, "transcript.checkpoint", {
+                      n: c.n,
+                      text: previewOf(c.text),
+                    })}
+                    className="checkpoint"
+                  />
+                </li>
+              ))}
+            </ol>
+          </nav>
+        )}
       </div>
 
       <Composer locale={locale} />

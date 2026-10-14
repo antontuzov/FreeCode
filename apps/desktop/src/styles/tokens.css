@@ -58,6 +58,8 @@
   --danger: #ff4d4f; /* 05: the stopped-subagent marker */
   --diff-added: #19321d; /* 06: added-line background */
   --diff-removed: #3a1a1a;
+  --checkpoint: #2c3632; /* 07: an inactive turn marker, one step off the column's own ground */
+  --checkpoint-active: #3c4c45; /* 07: the marker at the turn in view — same hue, one step up */
   color-scheme: dark;
 }
 
@@ -84,6 +86,9 @@
   --danger: #b3403f;
   --diff-added: #d8f0dc;
   --diff-removed: #f6dedd;
+  /* Derived: shot 07 is dark-only, so light mode takes the same two steps from its own neutrals. */
+  --checkpoint: var(--border-strong);
+  --checkpoint-active: var(--text-faint);
   color-scheme: light;
 }
 
