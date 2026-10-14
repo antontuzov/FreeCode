@@ -632,6 +632,11 @@ mod tests {
         let plan = f.plan(LaunchTuning::default());
         // KNOWN_ISSUES.md: `--reasoning on` overrides a client's `reasoning_effort: "none"`, and
         // `auto` is already llama.cpp's default — so the launcher sends neither.
+        //
+        // The same assertion is what keeps `--reasoning-preserve` out, which is the one the pinned
+        // build proposes on startup. Preserving a trace in the server's history is precisely the
+        // re-rendering Bonsai-demo#183 costs a prompt-cache miss per turn, so reasoning stays out of
+        // the replayed history and `real_bonsai_server` proves a second turn still has the first.
         assert!(
             !plan.args.iter().any(|a| a.starts_with("--reasoning")),
             "{:?}",

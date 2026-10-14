@@ -16,9 +16,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use smollm_llama::client::{stream_chat, ChatRequest, Message, ReplyDelta};
+use smollm_llama::client::{chat_body, stream_chat, ChatRequest, Message, Reply, ReplyDelta};
 use smollm_llama::load_guard::{self, FileState, GuardRequest};
-use smollm_llama::{EngineBinary, LaunchRequest, LaunchTuning};
+use smollm_llama::{EngineBinary, LaunchRequest, LaunchTuning, ServerHandle};
 use smollm_models::{gguf, Catalog, EngineLock, HostHardware};
 
 /// Loading the largest pack the catalog offers (5.9 GB of ternary weights into an M1's unified
@@ -273,6 +273,90 @@ async fn the_pinned_fork_server_loads_the_real_weights_and_streams_a_real_answer
     std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).unwrap_or_else(|e| {
         panic!("port {port} is still held — the server outlived its handle: {e}")
     });
+}
+
+/// One turn against the running server, with the same budget the host asks for.
+async fn ask(r: &Real, handle: &ServerHandle, history: &[Message]) -> Reply {
+    let req = ChatRequest {
+        max_tokens: 2_048,
+        ..ChatRequest::new(history.to_vec())
+    };
+    stream_chat(
+        handle.base_url(),
+        &req,
+        &r.model,
+        handle.context_tokens(),
+        |_| {},
+    )
+    .await
+    .expect("the server answers a replayed history")
+}
+
+/// The alternative the pinned server keeps proposing. Its startup log says "chat template supports
+/// preserving reasoning, consider enabling it via `--reasoning-preserve`", the flag is real, and the
+/// 1.7B's template does read `message.reasoning_content` — so declining it is a decision, not an
+/// omission: re-rendering an earlier thought into a later prompt is what misses the prompt cache on
+/// every turn of a tool loop (Bonsai-demo#183). The launch therefore carries no `--reasoning` flag at
+/// all, and [`Message`] has no field a thought could be replayed through.
+///
+/// What only the real server can settle is the price of that choice. Stripping reasoning is only
+/// harmless if the answer alone still carries the conversation — so this asks a second turn something
+/// the first turn is the only source for, and looks at the bytes that went out.
+#[tokio::test]
+#[ignore = "needs the pinned engine unpacked and real weights on disk"]
+async fn a_second_turn_remembers_the_first_without_replaying_its_reasoning() {
+    let r = real();
+    need!(
+        r.engine.installed,
+        "no fork engine at {}",
+        r.engine.server_path.display()
+    );
+    need!(r.weights.is_file(), "no weights at {}", r.weights.display());
+
+    let handle = smollm_llama::server::start(r.request(&r.engine), &r.lock, READY)
+        .await
+        .expect("the pinned server must become healthy");
+
+    let mut history = vec![Message::user(
+        "Remember one word for later: sparrow. Reply with the single word ok.",
+    )];
+    let first = ask(&r, &handle, &history).await;
+    println!("turn 1 answer: {:?}", first.text);
+    assert!(
+        !first.text.trim().is_empty(),
+        "the first turn answered with nothing"
+    );
+
+    // Replayed exactly the way the host replays it: the answer text, and nothing of the reasoning
+    // that came with it.
+    history.push(Message::assistant(first.text.clone()));
+    history.push(Message::user(
+        "Which word did I ask you to remember? Answer with that one word.",
+    ));
+
+    let wire = chat_body(
+        &ChatRequest::new(history.clone()),
+        &r.model,
+        handle.context_tokens(),
+    )
+    .expect("a replayed history is a request the template accepts")
+    .to_string();
+    assert!(
+        wire.contains("sparrow") || wire.contains(&first.text),
+        "the first turn never reached the request: {wire}"
+    );
+    assert!(
+        !wire.contains("reasoning_content"),
+        "an assistant turn replays as its answer only: {wire}"
+    );
+
+    let second = ask(&r, &handle, &history).await;
+    println!("turn 2 answer: {:?}", second.text);
+    assert!(
+        second.text.to_lowercase().contains("sparrow"),
+        "the second turn lost what the first was told: {:?}",
+        second.text
+    );
 }
 
 #[tokio::test]
