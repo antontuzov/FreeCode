@@ -35,13 +35,27 @@ reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "stream",
 ] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "process", "net"] }
+# "signal" is for the desktop host's shutdown hook: a SIGTERM or Ctrl-C that reaches the app must
+# kill the supervised llama-server before the host dies, or a 6 GB server is left holding the weights
+# with nobody to own it (see apps/desktop/src-tauri/src/lib.rs).
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "macros",
+  "fs",
+  "io-util",
+  "process",
+  "net",
+  "signal",
+] }
 futures = "0.3"
 dirs = "5"
 tempfile = "3"
 flate2 = "1"
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Only for `kill(2)`: the shutdown hook that keeps a spawned `llama-server` from outliving the host
+# has to signal a pid without a runtime to do it through. See `smollm_llama::server`.
+libc = "0.2"
 
 [profile.release]
 codegen-units = 1

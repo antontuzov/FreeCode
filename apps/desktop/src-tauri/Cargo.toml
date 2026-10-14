@@ -25,5 +25,10 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+# Only for the shutdown hook's SIGTERM/SIGINT listener; `tokio::signal::unix` does not exist on
+# Windows, so the dependency is gated to the platforms that have the signals.
+[target.'cfg(unix)'.dependencies]
+tokio = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -21,6 +21,7 @@ export default function App() {
   const [settingsPage, setSettingsPage] = useState<string | null>(query("settings"));
   const fixture = fixtureMode();
   const ask = query("ask");
+  const askRepeat = Math.max(1, Number(query("ask_repeat")) || 1);
 
   // The catalog language is the setting, so switching it in Settings repaints every label.
   const locale: Locale = language;
@@ -56,11 +57,16 @@ export default function App() {
     setContextUsed(40);
   }, [fixture, setRows, setContextUsed]);
 
-  // `?ask=<prompt>` sends that prompt on mount. The native window takes no injected clicks, so this
-  // is how a real answer from the local engine gets verified in the real app.
+  // `?ask=<prompt>` sends that prompt on mount; `?ask_repeat=<n>` sends it n times in a row. The
+  // native window takes no injected clicks, so this is how a real answer from the local engine gets
+  // verified in the real app — and how a second turn is verified, which is the one that has to reuse
+  // the running server, or restart it after it died between the two.
   useEffect(() => {
-    if (ask) void send(ask);
-  }, [ask, send]);
+    if (!ask) return;
+    void (async () => {
+      for (let i = 0; i < askRepeat; i += 1) await send(ask);
+    })();
+  }, [ask, askRepeat, send]);
 
   if (settingsPage !== null) {
     return <Settings locale={locale} page={settingsPage} onBack={() => setSettingsPage(null)} />;

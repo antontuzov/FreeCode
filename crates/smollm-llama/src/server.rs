@@ -12,7 +12,10 @@
 //!      "server exited" and "server exited: llama_init_from_gguf: unable to load ... PTQ1_0".
 //!
 //! The handle owns the child and kills it on drop, so a cancelled task, a panic, or a closed window
-//! cannot leave a 6 GB server holding the weights.
+//! cannot leave a 6 GB server holding the weights. What a handle cannot cover is a signal that stops
+//! the host process where it stands: during a load the child runs for seconds before any handle
+//! exists, because the handle is only built once `/health` is green. [`kill_spawned_servers`] is the
+//! registry for that window, so the host's shutdown hook has something to reach for on its way out.
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -37,6 +40,50 @@ const LOG_TAIL_LINES: usize = 120;
 const HEALTH_POLL: Duration = Duration::from_millis(250);
 /// A `--version` probe that has not answered in this long is a broken binary, not a slow one.
 const VERSION_PROBE: Duration = Duration::from_secs(10);
+
+/// The pids of the servers this process has spawned and not yet killed.
+static SPAWNED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+fn track(pid: u32) {
+    if let Ok(mut pids) = SPAWNED.lock() {
+        pids.push(pid);
+    }
+}
+
+fn untrack(pid: u32) {
+    if let Ok(mut pids) = SPAWNED.lock() {
+        pids.retain(|p| *p != pid);
+    }
+}
+
+/// SIGKILL every server this process spawned and has not released, and empty the registry.
+///
+/// The point is the process-exit path, so this deliberately does nothing that can fail or block: one
+/// `kill(2)` per pid, no runtime, no `wait()`. A killed child whose host then exits is reaped by the
+/// OS, which is the whole requirement — the weights stop occupying memory and the port is free.
+///
+/// Killing by pid is safe here because a pid is only in this list while its `Child` is unreaped, and
+/// the number cannot be handed to a new process until it is. `ServerHandle::kill` removes its own pid
+/// as it kills, so a normal shutdown never leaves a tracked-but-dead entry behind.
+///
+/// Returns how many processes were signalled, so a caller can tell whether it had anything to kill.
+pub fn kill_spawned_servers() -> usize {
+    let Ok(mut pids) = SPAWNED.lock() else {
+        return 0;
+    };
+    let count = pids.len();
+    for pid in pids.drain(..) {
+        #[cfg(unix)]
+        // Safety: `kill(2)` is a plain syscall on a pid this process spawned; a pid that is already
+        // gone is an `ESRCH`, which the return value we ignore here reports as nothing worth acting on.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
+        #[cfg(not(unix))]
+        let _ = pid;
+    }
+    count
+}
 
 /// The server's trailing output, kept so any later failure can quote the reason.
 #[derive(Debug, Default)]
@@ -97,6 +144,11 @@ impl ServerHandle {
     fn kill(&mut self) {
         if self.exited.is_none() {
             let _ = self.child.start_kill();
+        }
+        // The pid leaves the registry on the way out, so `kill_spawned_servers` only ever sees a
+        // server nobody owns any more.
+        if let Some(pid) = self.child.id() {
+            untrack(pid);
         }
     }
 
@@ -249,6 +301,11 @@ pub async fn start(
         program: plan.program.clone(),
         source,
     })?;
+    // Tracked from the instant it exists: the handle below only comes into being once `/health` is
+    // green, and a load is the longest window in which the host can be told to die.
+    if let Some(pid) = child.id() {
+        track(pid);
+    }
 
     let logs = Arc::new(Mutex::new(LogTail::default()));
     if let Some(stdout) = child.stdout.take() {
@@ -317,6 +374,35 @@ mod tests {
         assert!(port > 0);
         std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
             .unwrap_or_else(|e| panic!("port {port} should be bindable again: {e}"));
+    }
+
+    /// The window the registry exists for: a spawned server that has no `ServerHandle` yet, because
+    /// the handle is only built once `/health` answers. Flushing the registry has to be enough to
+    /// stop it, with no runtime and no owner involved.
+    #[cfg(unix)]
+    #[test]
+    fn a_tracked_child_dies_when_the_registry_is_flushed() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("120")
+            .spawn()
+            .expect("a placeholder for a server still paging weights in");
+        let others = SPAWNED.lock().map(|pids| pids.len()).unwrap_or(0);
+        track(child.id());
+
+        assert_eq!(kill_spawned_servers(), others + 1);
+        let status = child.wait().expect("the placeholder is reaped");
+        assert_eq!(
+            status.signal(),
+            Some(libc::SIGKILL),
+            "it must have been killed, not left to finish"
+        );
+        assert_eq!(
+            kill_spawned_servers(),
+            0,
+            "a flush empties the registry, so nothing is signalled twice"
+        );
     }
 
     #[tokio::test]

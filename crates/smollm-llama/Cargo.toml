@@ -19,6 +19,11 @@ tar = { workspace = true }
 tokio = { workspace = true }
 zip = { workspace = true }
 
+# `kill(2)` for the shutdown hook in `server`: it has to signal a pid from a path that may run after
+# the async runtime is gone. Windows has no such signal and would need a Job Object instead.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 # Only so the end-to-end probe can ask the settings which model the app actually ships with; the

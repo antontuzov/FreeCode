@@ -7,10 +7,16 @@
 //! the OpenAI wire — no mock, no second implementation. A refusal therefore also arrives here as the
 //! guard's own blocker with its install action, which is what the acceptance criteria ask to see.
 //!
-//! Three rules shape the state:
+//! The rules that shape the state:
 //!   * **one server at a time.** It is started with `-np 1` so a long run keeps its prompt cache
 //!     (Bonsai-demo#183), so a second launch would only fail on the port and a second request would
 //!     only queue. `launching` and `streaming` reserve those two slots.
+//!   * **a death is a fact, not a retry.** The server is started again when it exits between runs,
+//!     a bounded number of times per launch configuration ([`MAX_RESTARTS`]), and the reason it
+//!     stopped is announced rather than swallowed by a relaunch that looks like a slow answer.
+//!   * **the server never outlives this process.** [`release_engine`] runs on the app-exit path and
+//!     on SIGTERM/SIGINT/SIGHUP: a host that dies quietly would leave a bound port and a weight file
+//!     in RAM owned by nobody.
 //!   * **no lock is held across an `.await`.** A multi-GB load takes seconds and a reply takes
 //!     minutes; the window must still repaint. Callers take a snapshot and drop the guard.
 //!   * **reasoning is displayed, never replayed.** Only the answer text goes back into the history
@@ -41,6 +47,14 @@ pub const EVENT: &str = "agent-event";
 /// slack for the cold case, not a guess that loading is slow. The 463 MB pack the default entry selects
 /// answers `/health` in under a second here.
 const READY_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// How many times a server that died after answering `/health` is started again for one launch
+/// configuration. The bound exists because the usual reason for that death is one an identical
+/// relaunch fixes exactly as well as the first attempt — a context window larger than the memory
+/// behind it — and each attempt costs the window up to [`READY_TIMEOUT`] seconds of apparent freeze.
+/// Three is a generous reading of "the machine was briefly busy"; past it the host stops and quotes
+/// the server's own last lines, because the cause is something the user can see and the host cannot.
+const MAX_RESTARTS: u32 = 3;
 
 /// What a running server is, as the UI reports it. The command line is included because the whole
 /// point of Phase 2 is that these exact flags — not a paraphrase of them — reach the binary.
@@ -74,13 +88,21 @@ struct Turn {
 struct Running {
     handle: ServerHandle,
     turn: Turn,
+    /// What this server was started with, kept so a death can be compared against a *change*: the
+    /// restart budget is a budget per configuration, not per app run. See [`MAX_RESTARTS`].
+    tuning: LaunchTuning,
     /// Set when the model's effort contract replaced the saved choice, so the launch can announce it
     /// rather than the override looking like a silent default.
     effort_note: Option<String>,
 }
 
 impl Running {
-    fn new(handle: ServerHandle, assembly: &status::Assembly, settings: &Settings) -> Self {
+    fn new(
+        handle: ServerHandle,
+        assembly: &status::Assembly,
+        settings: &Settings,
+        tuning: LaunchTuning,
+    ) -> Self {
         let view = EngineView {
             base_url: handle.base_url().to_string(),
             backend: handle.plan.backend.label().to_string(),
@@ -100,9 +122,25 @@ impl Running {
                 effort,
                 max_tokens: settings.sampling.budget.clamped().max_tokens,
             },
+            tuning,
             effort_note,
         }
     }
+}
+
+/// One supervised server that was found dead: what it said last, and the configuration it died under.
+struct Crash {
+    log: String,
+    tuning: LaunchTuning,
+}
+
+/// What the host is about to do about the engine not running.
+#[derive(Debug, PartialEq)]
+enum Launch {
+    /// Nothing has died: an ordinary first start.
+    First,
+    /// The `attempt`th restart after a death, carrying that death's log so it can be announced.
+    Restart { attempt: u32, log: String },
 }
 
 #[derive(Default)]
@@ -112,6 +150,66 @@ struct Slot {
     launching: bool,
     /// A reply is streaming.
     streaming: bool,
+    /// Deaths that no completed answer has paid for, and the most recent one. See [`MAX_RESTARTS`].
+    deaths: u32,
+    crash: Option<Crash>,
+}
+
+impl Slot {
+    /// Decide whether a start may proceed, and reserve the slot if it may.
+    ///
+    /// A death under a *different* configuration is not the same failure, so changing what the
+    /// launcher actually uses (context size, GPU offload, thinking mode, flash attention) re-arms the
+    /// budget. That is the documented fix for the common cause, so the bound never traps a user who is
+    /// working the problem — it only stops the host from re-running a launch that just failed.
+    fn begin(&mut self, tuning: &LaunchTuning) -> Result<Launch, String> {
+        if self.launching {
+            return Err("the engine is already starting".into());
+        }
+        if self.crash.as_ref().is_some_and(|c| &c.tuning != tuning) {
+            self.deaths = 0;
+            self.crash = None;
+        }
+        let launch = match &self.crash {
+            None => Launch::First,
+            Some(crash) if self.deaths > MAX_RESTARTS => return Err(self.refused(crash)),
+            Some(crash) => Launch::Restart {
+                attempt: self.deaths,
+                log: crash.log.clone(),
+            },
+        };
+        self.launching = true;
+        Ok(launch)
+    }
+
+    /// Record a death observed between runs, so the next start is a restart with a log to quote.
+    fn note_death(&mut self, crash: Crash) {
+        self.deaths += 1;
+        self.crash = Some(crash);
+    }
+
+    /// Hand the whole restart budget back.
+    ///
+    /// Two things earn that: an answer that finished, which proves the current configuration works,
+    /// and an explicit Start or Stop, which is the user asking for another try at something the host
+    /// cannot see changed.
+    fn re_arm(&mut self) {
+        self.deaths = 0;
+        self.crash = None;
+    }
+
+    /// The refusal a spent budget produces.
+    fn refused(&self, crash: &Crash) -> String {
+        format!(
+            "The engine exited {} times in a row after {} automatic restarts, so it is not being \
+             started again. Its last lines:\n{}\n\nA server that stops after it became healthy \
+             usually cannot fit what it was asked to fit: lower Context window in Settings, or turn \
+             off Offload every layer to the GPU. Any change to those settings is tried again.",
+            self.deaths,
+            self.deaths - 1,
+            crash.log
+        )
+    }
 }
 
 /// Managed state: the supervised server and the conversation the next request is built from.
@@ -120,6 +218,27 @@ pub struct ChatState {
     slot: Mutex<Slot>,
     history: Mutex<Vec<Message>>,
     runs: AtomicU64,
+}
+
+/// Stop and release every server this process owns.
+///
+/// The kill is `ServerHandle`'s synchronous `Drop`, so it lands even when the caller is about to exit
+/// the process and even once the async runtime is gone. Both app-exit paths need it: a `llama-server`
+/// that outlives its host keeps the port bound and the weights resident, and nothing can reach it
+/// again. SIGKILL is the right signal here — the server has no state to flush, only memory to return.
+///
+/// The registry flush is the second half: while a server is loading it is a child with no handle yet
+/// (`start` builds the handle only once `/health` answers), so a signal that arrives mid-load would
+/// otherwise orphan exactly the process the slot cannot name.
+pub fn release_engine(state: &ChatState) -> bool {
+    let had_one = {
+        let mut slot = lock(&state.slot);
+        slot.streaming = false;
+        slot.launching = false;
+        slot.running.take().is_some()
+    };
+    smollm_llama::kill_spawned_servers();
+    had_one
 }
 
 /// A poisoned lock still holds a valid `Slot` — the only code that can panic while one is held
@@ -216,6 +335,7 @@ async fn launch(app: &AppHandle) -> Result<Running, String> {
         .as_ref()
         .ok_or("the load guard allowed a run with no resolved engine")?;
 
+    let tuning = tuning(&settings);
     let handle = start_server(
         LaunchRequest {
             root: &root,
@@ -224,7 +344,7 @@ async fn launch(app: &AppHandle) -> Result<Running, String> {
             defaults: &assembly.defaults,
             model_path: assembly.file.clone(),
             hardware: &assembly.host,
-            tuning: tuning(&settings),
+            tuning: tuning.clone(),
         },
         &assembly.lock,
         READY_TIMEOUT,
@@ -232,7 +352,7 @@ async fn launch(app: &AppHandle) -> Result<Running, String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    let running = Running::new(handle, &assembly, &settings);
+    let running = Running::new(handle, &assembly, &settings, tuning);
     if let Some(note) = &running.effort_note {
         emit(
             app,
@@ -247,9 +367,10 @@ async fn launch(app: &AppHandle) -> Result<Running, String> {
 
 /// The live server's snapshot, if the child is still alive.
 ///
-/// A server that exited since it answered `/health` is dropped here, which releases its port so the
-/// caller can start a clean one, and is announced: a silent relaunch would just look like a slow
-/// first answer. The bounded restart policy and the log tail it should carry are task #15.
+/// A server that exited since it answered `/health` is released here, which reaps the child and frees
+/// its port, and the death is parked in the slot with its log: whether another one gets started is
+/// [`Slot::begin`]'s decision, since that is the place which knows both the budget and the
+/// configuration the next launch would use.
 fn live_turn(app: &AppHandle) -> Option<Turn> {
     let state = app.state::<ChatState>();
     let mut slot = lock(&state.slot);
@@ -257,17 +378,12 @@ fn live_turn(app: &AppHandle) -> Option<Turn> {
     if running.handle.is_running() {
         return Some(running.turn.clone());
     }
-    let log = running.handle.log_tail();
+    let crash = Crash {
+        log: running.handle.log_tail(),
+        tuning: running.tuning.clone(),
+    };
     slot.running = None;
-    emit(
-        app,
-        AgentEvent::Warning {
-            code: "engine-exited".into(),
-            message: format!(
-                "The engine stopped between runs, so it is being started again. Its last lines:\n{log}"
-            ),
-        },
-    );
+    slot.note_death(crash);
     None
 }
 
@@ -275,13 +391,25 @@ async fn ensure_running(app: &AppHandle) -> Result<Turn, String> {
     if let Some(turn) = live_turn(app) {
         return Ok(turn);
     }
-    {
+    let settings = appearance::load_settings()?;
+    let kind = {
         let state = app.state::<ChatState>();
         let mut slot = lock(&state.slot);
-        if slot.launching {
-            return Err("the engine is already starting".into());
-        }
-        slot.launching = true;
+        slot.begin(&tuning(&settings))?
+    };
+    // Announced, not swallowed: a relaunch that said nothing would just look like a slow first
+    // answer, and the reason the last one died is the only clue to what to change.
+    if let Launch::Restart { attempt, log } = kind {
+        emit(
+            app,
+            AgentEvent::Warning {
+                code: "engine-restarted".into(),
+                message: format!(
+                    "The engine stopped between runs, so it is being started again (restart {attempt} \
+                     of {MAX_RESTARTS}). Its last lines:\n{log}"
+                ),
+            },
+        );
     }
     let outcome = launch(app).await;
     let state = app.state::<ChatState>();
@@ -338,14 +466,27 @@ async fn stream_turn(app: &AppHandle, turn: &Turn, request: &ChatRequest) -> Res
     .map_err(|e| e.to_string())
 }
 
+/// Start the engine on request. Explicit, so it re-arms the restart budget — a press is the user
+/// asking for another try at something the host cannot see changed.
 #[tauri::command]
 pub async fn start_engine(app: AppHandle) -> Result<EngineView, String> {
+    {
+        let state = app.state::<ChatState>();
+        lock(&state.slot).re_arm();
+    }
     Ok(ensure_running(&app).await?.view)
 }
 
+/// Stop the engine and release its port, and with it the restart budget: the same reasoning as
+/// [`start_engine`], and Stop is the control that is reachable while a run is in flight.
 #[tauri::command]
 pub async fn stop_engine(app: AppHandle) -> Result<(), String> {
-    let running = lock(&app.state::<ChatState>().slot).running.take();
+    let running = {
+        let state = app.state::<ChatState>();
+        let mut slot = lock(&state.slot);
+        slot.re_arm();
+        slot.running.take()
+    };
     match running {
         Some(running) => {
             running.handle.shutdown().await;
@@ -435,6 +576,9 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
                     total_diff: None,
                 },
             );
+            // A complete answer is the evidence that the configuration in use works, whatever killed
+            // the server before it: the budget starts over.
+            lock(&state.slot).re_arm();
             Ok(reply.text)
         }
         Err(message) => {
@@ -528,5 +672,110 @@ mod tests {
             drop(slot);
         }
         assert!(!lock(&state.slot).launching);
+    }
+
+    const DEAD: &str = "llama_init_from_gguf: unable to load the model";
+
+    fn death(tuning: &LaunchTuning) -> Crash {
+        Crash {
+            log: DEAD.to_string(),
+            tuning: tuning.clone(),
+        }
+    }
+
+    /// The whole budget, driven on a `Slot` directly: a real `Running` needs a real server.
+    /// `launching` is released first because the real `ensure_running` clears it as soon as a launch
+    /// resolves, and a death is only ever noticed between two resolved launches.
+    fn died_under(slot: &mut Slot, tuning: &LaunchTuning) -> Result<Launch, String> {
+        slot.launching = false;
+        slot.note_death(death(tuning));
+        slot.begin(tuning)
+    }
+
+    #[test]
+    fn a_server_that_dies_is_restarted_and_each_restart_is_counted() {
+        let tuning = tuning(&Settings::default());
+        let mut slot = Slot::default();
+        assert_eq!(slot.begin(&tuning), Ok(Launch::First));
+
+        for attempt in 1..=MAX_RESTARTS {
+            assert_eq!(
+                died_under(&mut slot, &tuning),
+                Ok(Launch::Restart {
+                    attempt,
+                    log: DEAD.to_string()
+                }),
+                "death {attempt} of the budget is a restart, not a refusal"
+            );
+        }
+    }
+
+    #[test]
+    fn a_budget_spent_on_the_same_configuration_is_a_refusal_that_quotes_the_server() {
+        let tuning = tuning(&Settings::default());
+        let mut slot = Slot::default();
+        slot.begin(&tuning).unwrap();
+        for _ in 1..=MAX_RESTARTS {
+            died_under(&mut slot, &tuning).expect("inside the budget");
+        }
+        let message = died_under(&mut slot, &tuning).expect_err("past the budget it is refused");
+        assert!(message.contains("not being started again"), "{message}");
+        // The count the user sees is deaths, and the restarts that were spent on them.
+        assert!(
+            message.contains(&format!(
+                "{} times in a row after {} automatic restarts",
+                MAX_RESTARTS + 1,
+                MAX_RESTARTS
+            )),
+            "{message}"
+        );
+        assert!(message.contains(DEAD), "the reason must be in the message");
+        assert!(
+            !slot.launching,
+            "a refusal must not reserve the launch slot"
+        );
+    }
+
+    #[test]
+    fn changing_the_launch_configuration_is_a_new_attempt_not_a_spent_budget() {
+        // The bound exists to stop the host retrying the same doomed launch, so the setting that
+        // changes what is launched has to re-arm it: that is the documented fix for the common cause.
+        let was_tried = tuning(&Settings::default());
+        let mut slot = Slot::default();
+        slot.begin(&was_tried).unwrap();
+        for _ in 1..=MAX_RESTARTS {
+            died_under(&mut slot, &was_tried).unwrap();
+        }
+        died_under(&mut slot, &was_tried).expect_err("budget spent");
+
+        let mut lowered = was_tried.clone();
+        lowered.context_tokens = Some(4_096);
+        assert_eq!(
+            slot.begin(&lowered),
+            Ok(Launch::First),
+            "a configuration that has never died has its own budget"
+        );
+    }
+
+    #[test]
+    fn an_answer_that_finished_pays_for_the_deaths_before_it() {
+        let tuning = tuning(&Settings::default());
+        let mut slot = Slot::default();
+        slot.begin(&tuning).unwrap();
+        died_under(&mut slot, &tuning).unwrap();
+        slot.launching = false;
+        slot.re_arm();
+        assert_eq!(slot.begin(&tuning), Ok(Launch::First));
+    }
+
+    #[test]
+    fn one_launch_can_be_in_flight_at_a_time() {
+        let tuning = tuning(&Settings::default());
+        let mut slot = Slot::default();
+        slot.begin(&tuning).expect("the first start is allowed");
+        assert_eq!(
+            slot.begin(&tuning),
+            Err("the engine is already starting".into())
+        );
     }
 }

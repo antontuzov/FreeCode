@@ -42,7 +42,7 @@ pub use load_guard::{
     caveat_matches, check, Blocker, CallToAction, FileState, GuardReport, GuardRequest, Warning,
     WarningCode,
 };
-pub use server::{pick_free_port, start, verify_version, ServerHandle};
+pub use server::{kill_spawned_servers, pick_free_port, start, verify_version, ServerHandle};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlamaError {

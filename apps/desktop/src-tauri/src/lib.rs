@@ -90,9 +90,50 @@ async fn save_settings(mut settings: Settings) -> Result<Settings, String> {
     Ok(settings)
 }
 
+/// The supervised server is a child process, and nothing on macOS makes a child die with its parent,
+/// so releasing it is this process's job on every way out of the run.
+fn release_engine(app: &AppHandle) {
+    let state = app.state::<chat::ChatState>();
+    chat::release_engine(&state);
+}
+
+/// SIGTERM, SIGINT and SIGHUP never reach [`RunEvent::Exit`]: their default action stops the process
+/// where it stands, which is how a supervised server is orphaned (observed 2026-10-13 — `kill -TERM`
+/// to the host left `llama-server` holding its port and its weights). Registering a listener takes
+/// those signals over, so the server dies first and the process then exits with the status the signal
+/// would have produced anyway.
+///
+/// `std::process::exit` rather than `AppHandle::exit`: a graceful teardown is precisely the thing that
+/// might not return, and the one promise this path makes is that the child does not outlive the host.
+#[cfg(unix)]
+fn watch_signals(app: AppHandle) {
+    use tokio::signal::unix::{signal, SignalKind};
+    for kind in [
+        SignalKind::terminate(),
+        SignalKind::interrupt(),
+        SignalKind::hangup(),
+    ] {
+        let app = app.clone();
+        let status = 128 + kind.as_raw_value();
+        // Registration needs the reactor, so it happens inside the task rather than in `setup`.
+        tauri::async_runtime::spawn(async move {
+            let Ok(mut stream) = signal(kind) else { return };
+            if stream.recv().await.is_some() {
+                release_engine(&app);
+                std::process::exit(status);
+            }
+        });
+    }
+}
+
+/// On Windows the equivalent is a Job Object; there is no signal to catch. The app-exit hook covers
+/// the paths that exist there.
+#[cfg(not(unix))]
+fn watch_signals(_: AppHandle) {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         // The supervised server and the conversation it is answering from. One window, one engine:
         // the state is here so a second `start_engine` cannot begin a second 6 GB load.
         .manage(chat::ChatState::default())
@@ -108,6 +149,16 @@ pub fn run() {
             chat::engine_status,
             chat::chat_send
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running SmoLLM Studio");
+        .setup(|app| {
+            watch_signals(app.handle().clone());
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building SmoLLM Studio");
+
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            release_engine(app_handle);
+        }
+    });
 }
