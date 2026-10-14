@@ -131,8 +131,9 @@ impl ServerHandle {
         self.logs.lock().map(|l| l.text()).unwrap_or_default()
     }
 
+    /// Whether the child is still there to answer a request.
     pub fn is_running(&mut self) -> bool {
-        self.exited.is_none() && self.child.try_wait().ok().flatten().is_none()
+        self.observe_exit().is_none()
     }
 
     /// Ask the server to stop and reap it. Idempotent: `Drop` does the same thing without the wait.
@@ -183,13 +184,22 @@ impl ServerHandle {
         }
     }
 
-    /// Reap a child that exited on its own, so `is_running` and the error paths agree.
+    /// Reap a child that exited on its own, so `is_running` and the error paths agree. Answers `None`
+    /// only while the child is positively still running.
+    ///
+    /// A status that cannot be read is an exit too, because the two mistakes are not equally
+    /// expensive: a false "running" points every later turn at a port nobody owns, which the user can
+    /// only escape by quitting the app, while a false "exited" costs one restart that the host
+    /// announces. On Unix a status becomes unreadable exactly when the pid stops being ours.
     fn observe_exit(&mut self) -> Option<String> {
         if let Some(status) = &self.exited {
             return Some(status.clone());
         }
-        let status = self.child.try_wait().ok().flatten()?;
-        let text = format!("{status}");
+        let text = match self.child.try_wait() {
+            Ok(None) => return None,
+            Ok(Some(status)) => format!("{status}"),
+            Err(e) => format!("its exit status could not be read ({e})"),
+        };
         self.exited = Some(text.clone());
         Some(text)
     }
@@ -403,6 +413,61 @@ mod tests {
             0,
             "a flush empties the registry, so nothing is signalled twice"
         );
+    }
+
+    /// The mechanism `live_turn` depends on: a server killed by something other than the handle —
+    /// `pkill`, a crash, the OOM killer — must stop reading as running, or the next turn is pointed at
+    /// a dead port instead of a restart.
+    ///
+    /// Built the way `start` builds it, because the pipes and the readers are part of the claim: a
+    /// child whose stdout is being drained is the child a real server is.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_child_killed_from_outside_is_reported_dead() {
+        use smollm_models::hardware::Backend;
+
+        let mut child = Command::new("/bin/sleep")
+            .arg("120")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("a placeholder for a running server");
+        let pid = child.id().expect("a child that has not been reaped");
+        let logs = Arc::new(Mutex::new(LogTail::default()));
+        if let Some(stdout) = child.stdout.take() {
+            pump(stdout, Arc::clone(&logs));
+        }
+        if let Some(stderr) = child.stderr.take() {
+            pump(stderr, Arc::clone(&logs));
+        }
+        let mut handle = ServerHandle {
+            plan: LaunchPlan {
+                program: "/bin/sleep".into(),
+                args: Vec::new(),
+                backend: Backend::Cpu,
+                layers_offloaded: 0,
+                context_tokens: 512,
+                base_url: "http://127.0.0.1:1".into(),
+                display: "sleep 120".into(),
+            },
+            child,
+            logs,
+            exited: None,
+        };
+        assert!(handle.is_running(), "a live child is running");
+
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
+        for _ in 0..40 {
+            if !handle.is_running() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the SIGKILL was never observed, so the slot would keep using a dead server");
     }
 
     #[tokio::test]

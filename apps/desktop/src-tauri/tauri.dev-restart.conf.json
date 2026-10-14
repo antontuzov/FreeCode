@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "devUrl": "http://localhost:5173/?ask=Count%20from%201%20to%20120%2C%20one%20number%20per%20line.&ask_repeat=3"
+  }
+}

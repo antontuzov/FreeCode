@@ -514,10 +514,19 @@ pub struct EngineStatus {
 
 #[tauri::command]
 pub fn engine_status(state: tauri::State<'_, ChatState>) -> EngineStatus {
-    let slot = lock(&state.slot);
+    // Asked of the child, not of the slot. A server that died since it answered `/health` is not
+    // running, and a status card that goes on naming its port is how a dead engine gets believed
+    // alive — the release and the restart stay with [`live_turn`], which is where a turn needs them.
+    let mut slot = lock(&state.slot);
+    let mut view = None;
+    if let Some(running) = slot.running.as_mut() {
+        if running.handle.is_running() {
+            view = Some(running.turn.view.clone());
+        }
+    }
     EngineStatus {
-        running: slot.running.is_some(),
-        engine: slot.running.as_ref().map(|r| r.turn.view.clone()),
+        running: view.is_some(),
+        engine: view,
     }
 }
 
