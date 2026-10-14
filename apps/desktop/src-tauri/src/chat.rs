@@ -56,6 +56,36 @@ const READY_TIMEOUT: Duration = Duration::from_secs(180);
 /// the server's own last lines, because the cause is something the user can see and the host cannot.
 const MAX_RESTARTS: u32 = 3;
 
+/// How many lines of a dead server's output a notice quotes.
+const NOTICE_LINES: usize = 12;
+
+/// The part of a crashed server's tail that can explain anything.
+///
+/// `llama-server` prints a timing block every few tokens, so a tail taken while it was decoding is
+/// heartbeat from end to end: the notice then fills the transcript without saying why the server
+/// stopped, which is the one job it has. Slot progress lines are dropped and what is left is capped,
+/// with the count of the lines that were set aside said out loud rather than the tail silently cut.
+///
+/// A server whose whole tail is heartbeat gets some of it anyway, because the alternative is a notice
+/// that quotes nothing at all.
+fn excerpt(log: &str) -> String {
+    let mut lines = log
+        .lines()
+        .filter(|line| !(line.contains("print_timing") || line.contains("get_available")))
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        lines = log.lines().collect();
+    }
+    let hidden = log.lines().count() - lines.len() + lines.len().saturating_sub(NOTICE_LINES);
+    let mut text = lines[lines.len().saturating_sub(NOTICE_LINES)..].join("\n");
+    if hidden > 0 {
+        text.push_str(&format!(
+            "\n({hidden} more lines of server output are not quoted.)"
+        ));
+    }
+    text
+}
+
 /// What a running server is, as the UI reports it. The command line is included because the whole
 /// point of Phase 2 is that these exact flags — not a paraphrase of them — reach the binary.
 #[derive(Debug, Clone, Serialize)]
@@ -207,7 +237,7 @@ impl Slot {
              off Offload every layer to the GPU. Any change to those settings is tried again.",
             self.deaths,
             self.deaths - 1,
-            crash.log
+            excerpt(&crash.log)
         )
     }
 }
@@ -415,7 +445,8 @@ async fn ensure_running(app: &AppHandle) -> Result<Turn, String> {
                 code: "engine-restarted".into(),
                 message: format!(
                     "The engine stopped between runs, so it is being started again (restart {attempt} \
-                     of {MAX_RESTARTS}). Its last lines:\n{log}"
+                     of {MAX_RESTARTS}). Its last lines:\n{}",
+                    excerpt(&log)
                 ),
             },
         );
@@ -709,6 +740,49 @@ mod tests {
             drop(slot);
         }
         assert!(!lock(&state.slot).launching);
+    }
+
+    /// The heartbeat `llama-server` prints every few tokens, which is all a tail holds when the server
+    /// was decoding at the time it died.
+    fn heartbeat(n: usize) -> String {
+        (0..n)
+            .map(|i| {
+                format!("0.{i:03} slot print_timing: id 0 | task 0 | n_gen = {i} | tg = 30.4 t/s")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The notice has one job — say why the server stopped — and 120 lines of timing block bury both
+    /// that sentence and the setting the message tells the user to change.
+    #[test]
+    fn a_notice_quotes_what_a_dead_server_could_have_said_not_its_heartbeat() {
+        let log = format!(
+            "0.001 srv  update_slots: all slots are idle\n0.050 load_model: loading model 'Bonsai.gguf'\n{}\n0.351 slot get_available: id 0 | task -1 | selected slot by LRU",
+            heartbeat(40)
+        );
+        let quoted = excerpt(&log);
+        assert!(quoted.contains("loading model"), "{quoted}");
+        assert!(quoted.contains("all slots are idle"), "{quoted}");
+        assert!(
+            !quoted.contains("print_timing") && !quoted.contains("get_available"),
+            "the slot chatter is not the clue: {quoted}"
+        );
+        assert!(
+            quoted.contains("(41 more lines of server output are not quoted.)"),
+            "cutting the tail is said out loud: {quoted}"
+        );
+    }
+
+    #[test]
+    fn a_short_log_is_quoted_whole_and_an_all_chatter_tail_is_quoted_anyway() {
+        assert_eq!(excerpt(DEAD), DEAD, "nothing to trim");
+        let only = heartbeat(3);
+        assert_eq!(
+            excerpt(&only),
+            only,
+            "a tail that is all heartbeat still says when it stopped"
+        );
     }
 
     const DEAD: &str = "llama_init_from_gguf: unable to load the model";

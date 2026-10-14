@@ -9,6 +9,8 @@ import { useTranscript } from "./transcript";
 type ChatStore = {
   engine: EngineView | null;
   sending: boolean;
+  /** A failure the transcript has no row for: a status poll that could not be answered, a Stop that
+   * refused. A send's own failure belongs to the transcript, and only to it. */
   error: string | null;
   /** Set once the host has announced anything about the current send. */
   announced: boolean;
@@ -42,12 +44,12 @@ export const useChat = create<ChatStore>((set, get) => ({
     try {
       await ipc.chatSend(trimmed);
     } catch (error) {
-      const message = String(error);
-      set({ error: message });
-      // A refusal or a dead stream already announced itself on the event channel. A command that
-      // refused before starting — a reply in flight, nothing to send — announces nothing, and would
-      // otherwise look like a click that did nothing at all.
-      if (!get().announced) useTranscript.getState().apply({ type: "failed", message });
+      // The transcript is where a send's failure belongs: the composer repeating it puts the same
+      // sentence on screen twice, 200 px apart. A refusal or a dead stream already announced itself on
+      // the event channel; a command that refused before starting — a reply in flight, nothing to send
+      // — announces nothing, and gets the row pushed here so the click is never silent.
+      if (!get().announced)
+        useTranscript.getState().apply({ type: "failed", message: String(error) });
     } finally {
       set({ sending: false });
       useTranscript.getState().setRunning(false);
