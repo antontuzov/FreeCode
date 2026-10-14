@@ -17,6 +17,7 @@ type ChatStore = {
   refresh: () => Promise<void>;
   send: (text: string) => Promise<void>;
   stop: () => Promise<void>;
+  newTask: () => Promise<void>;
 };
 
 export const useChat = create<ChatStore>((set, get) => ({
@@ -64,6 +65,20 @@ export const useChat = create<ChatStore>((set, get) => ({
     } finally {
       void get().refresh();
     }
+  },
+  newTask: async () => {
+    set({ error: null });
+    try {
+      await ipc.newTask();
+    } catch (error) {
+      // Refused mid-reply. The transcript keeps its rows, because the history the host did not
+      // clear is the history those rows were built from.
+      set({ error: String(error) });
+      return;
+    }
+    // The host forgot the history, so the rows built from it have to go with it: a transcript that
+    // still showed the last answer would claim a memory the engine no longer has.
+    useTranscript.getState().setRows([]);
   },
 }));
 

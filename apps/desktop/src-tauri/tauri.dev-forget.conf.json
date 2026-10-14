@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "devUrl": "http://localhost:5173/?ask=Remember%20the%20word%20sparrow%20for%20later.%20Reply%20with%20just%20ok.&new_task_between=1&ask_again=Which%20word%20did%20I%20ask%20you%20to%20remember%20earlier%3F%20Answer%20in%20one%20short%20sentence."
+  }
+}

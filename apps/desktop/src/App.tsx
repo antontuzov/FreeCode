@@ -18,10 +18,13 @@ export default function App() {
   const setContextUsed = useTranscript((s) => s.setContextUsed);
   const refreshEngine = useChat((s) => s.refresh);
   const send = useChat((s) => s.send);
+  const newTask = useChat((s) => s.newTask);
   const [settingsPage, setSettingsPage] = useState<string | null>(query("settings"));
   const fixture = fixtureMode();
   const ask = query("ask");
   const askRepeat = Math.max(1, Number(query("ask_repeat")) || 1);
+  const askAgain = query("ask_again");
+  const forgetBetween = query("new_task_between") === "1";
 
   // The catalog language is the setting, so switching it in Settings repaints every label.
   const locale: Locale = language;
@@ -61,12 +64,20 @@ export default function App() {
   // native window takes no injected clicks, so this is how a real answer from the local engine gets
   // verified in the real app — and how a second turn is verified, which is the one that has to reuse
   // the running server, or restart it after it died between the two.
+  //
+  // `?ask_again=<prompt>&new_task_between=1` sends a second prompt after pressing the sidebar's New
+  // task between them. It is the only way to check that the control forgot anything: the second
+  // prompt asks what the first one planted, and an answer that remembers is a history the host never
+  // dropped.
   useEffect(() => {
     if (!ask) return;
     void (async () => {
       for (let i = 0; i < askRepeat; i += 1) await send(ask);
+      if (!forgetBetween || !askAgain) return;
+      await newTask();
+      await send(askAgain);
     })();
-  }, [ask, askRepeat, send]);
+  }, [ask, askRepeat, askAgain, forgetBetween, newTask, send]);
 
   if (settingsPage !== null) {
     return <Settings locale={locale} page={settingsPage} onBack={() => setSettingsPage(null)} />;
@@ -79,6 +90,7 @@ export default function App() {
           locale={locale}
           fixture={fixture}
           onOpenSettings={() => setSettingsPage("appearance")}
+          actions={{ newTask: () => void newTask() }}
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <Transcript locale={locale} />

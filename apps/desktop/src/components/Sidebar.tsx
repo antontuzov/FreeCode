@@ -1,10 +1,10 @@
 import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
 
-type NavRow = { key: string; icon: IconName };
+type NavRow = { key: string; icon: IconName; onActivate?: (actions: SidebarActions) => void };
 
 const PRIMARY: NavRow[] = [
-  { key: "newTask", icon: "newTask" },
+  { key: "newTask", icon: "newTask", onActivate: (a) => a.newTask },
   { key: "search", icon: "search" },
 ];
 
@@ -27,17 +27,20 @@ function Row({
   label,
   active,
   indent,
+  onClick,
 }: {
   icon?: IconName;
   label: string;
   active?: boolean;
   indent?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <button
       type="button"
       data-active={active || undefined}
       className={`nav-item ${indent ? "pl-[34px] text-[calc(var(--font-ui)-1px)]" : ""}`}
+      onClick={onClick}
     >
       {icon && <Icon name={icon} />}
       <span className="truncate">{label}</span>
@@ -45,16 +48,32 @@ function Row({
   );
 }
 
+export type SidebarActions = {
+  /** Forget the conversation and keep the server: the one row this build can honour. */
+  newTask: () => void;
+};
+
 export function Sidebar({
   locale,
   fixture,
   onOpenSettings,
+  actions,
 }: {
   locale: Locale;
   fixture: boolean;
   onOpenSettings: () => void;
+  actions: SidebarActions;
 }) {
   const workspaces = fixture ? FIXTURE_WORKSPACES : [];
+
+  const row = (r: NavRow) => (
+    <Row
+      key={r.key}
+      icon={r.icon}
+      label={translate(locale, `sidebar.${r.key}`)}
+      onClick={r.onActivate ? () => r.onActivate?.(actions) : undefined}
+    />
+  );
 
   return (
     <nav
@@ -82,9 +101,7 @@ export function Sidebar({
           <Icon name="coding" />
           {translate(locale, "sidebar.coding")}
         </span>
-        {PRIMARY.map((row) => (
-          <Row key={row.key} icon={row.icon} label={translate(locale, `sidebar.${row.key}`)} />
-        ))}
+        {PRIMARY.map((r) => row(r))}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-[var(--space-3)] pb-[var(--space-3)]">
@@ -105,9 +122,7 @@ export function Sidebar({
         )}
 
         <p className="section-label">{translate(locale, "sidebar.places")}</p>
-        {PLACES.map((row) => (
-          <Row key={row.key} icon={row.icon} label={translate(locale, `sidebar.${row.key}`)} />
-        ))}
+        {PLACES.map((r) => row(r))}
       </div>
 
       <div className="flex items-center gap-2 border-t border-line p-[var(--space-3)]">

@@ -643,9 +643,57 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
     }
 }
 
+/// Start a new task: forget the conversation, keep the server running.
+///
+/// The history is the whole of what a second turn remembers the first by, so dropping it is all the
+/// control can mean. The loaded weights are not part of that, and someone starting a fresh question
+/// has no reason to pay another load for it.
+#[tauri::command]
+pub async fn new_task(app: AppHandle) -> Result<(), String> {
+    forget_conversation(&app.state::<ChatState>())
+}
+
+fn forget_conversation(state: &ChatState) -> Result<(), String> {
+    {
+        let slot = lock(&state.slot);
+        // `chat_send` appends the prompt before the stream opens, so clearing mid-reply would drop a
+        // prompt whose answer is still arriving and leave the next turn replaying half an exchange.
+        if slot.streaming {
+            return Err("a reply is still streaming; stop it before starting a new task".into());
+        }
+    }
+    lock(&state.history).clear();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_task_forgets_the_conversation_and_keeps_the_server() {
+        let state = ChatState::default();
+        lock(&state.history).push(Message::user("first question"));
+        lock(&state.history).push(Message::assistant("first answer"));
+        forget_conversation(&state).unwrap();
+        // The next request is built from this vector, so an empty one is a model that remembers
+        // nothing — which is the entire behaviour the control claims.
+        assert!(lock(&state.history).is_empty());
+    }
+
+    #[test]
+    fn a_new_task_refuses_while_a_reply_is_streaming() {
+        let state = ChatState::default();
+        lock(&state.history).push(Message::user("asked"));
+        lock(&state.slot).streaming = true;
+        let err = forget_conversation(&state).unwrap_err();
+        assert!(err.contains("streaming"), "{err}");
+        assert_eq!(
+            lock(&state.history).len(),
+            1,
+            "a refused clear left the history alone"
+        );
+    }
 
     #[test]
     fn leaving_the_gpu_switch_on_offloads_every_layer() {

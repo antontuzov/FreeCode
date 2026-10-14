@@ -272,6 +272,12 @@ export const ipc = {
    * over, with the finished text — so a listener that missed a delta can still close the turn.
    */
   chatSend: (text: string) => invoke<string>("chat_send", { text }),
+  /**
+   * Forget the conversation and keep the server up. This is what the sidebar's "New task" row is:
+   * the history the next request is built from is the only thing a new task resets, and reloading
+   * 5.95 GB of weights for it would be a cost the click never asked for.
+   */
+  newTask: () => invoke<void>("new_task"),
   onAgentEvent: (onEvent: (event: AgentEvent) => void): Promise<() => void> =>
     listen<AgentEvent>(AGENT_EVENT, (event) => onEvent(event.payload)),
 };

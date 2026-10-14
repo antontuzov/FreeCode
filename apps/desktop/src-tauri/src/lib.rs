@@ -169,7 +169,8 @@ pub fn run() {
             chat::start_engine,
             chat::stop_engine,
             chat::engine_status,
-            chat::chat_send
+            chat::chat_send,
+            chat::new_task
         ])
         .setup(|app| {
             // Before this process spawns a server of its own, so a leftover's port is free to be
