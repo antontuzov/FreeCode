@@ -106,8 +106,8 @@ export function Composer({ locale }: { locale: Locale }) {
             aria-label={translate(locale, running ? "composer.stop" : "composer.send")}
             className="grid size-8 place-items-center rounded-[var(--radius-md)] bg-accent text-accent-contrast disabled:opacity-60"
           >
-            {/* Stopping a run means stopping the server that is answering it: the stream dies with
-                its socket. The next prompt starts a fresh one. */}
+            {/* Interrupting a reply cuts its stream and keeps the server, so the next prompt is
+                answered without reloading the weights. */}
             <Icon name={running ? "stop" : "send"} size={15} />
           </button>
         </div>

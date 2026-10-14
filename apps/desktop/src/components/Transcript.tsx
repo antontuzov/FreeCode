@@ -151,6 +151,11 @@ function TurnRow({
           {translate(locale, "chat.starting")}
         </p>
       ) : null}
+      {turn.stopped && (
+        <p className="mt-1 text-[calc(var(--font-ui)-3px)] text-faint">
+          {translate(locale, "transcript.stopped")}
+        </p>
+      )}
     </li>
   );
 }

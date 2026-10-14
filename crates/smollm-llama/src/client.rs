@@ -412,13 +412,24 @@ fn apply_deltas(reply: &mut Reply, deltas: &[ReplyDelta]) {
     }
 }
 
-/// POST one chat completion and stream it, forwarding each batch of deltas as it arrives.
+/// What the caller watching a stream says about the rest of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamControl {
+    Continue,
+    /// Stop here. The text streamed so far is returned as the answer, because that is what the model
+    /// actually said before the caller stopped listening.
+    Stop,
+}
+
+/// POST one chat completion and stream it, forwarding each batch of deltas as it arrives. The
+/// callback answers [`StreamControl::Stop`] to end the run early; the request is then dropped, which
+/// closes the connection and lets the server abandon the generation too.
 pub async fn stream_chat(
     base_url: &str,
     req: &ChatRequest,
     model: &ModelEntry,
     context_tokens: u32,
-    mut on_delta: impl FnMut(&[ReplyDelta]),
+    mut on_delta: impl FnMut(&[ReplyDelta]) -> StreamControl,
 ) -> Result<Reply, LlamaError> {
     let body = chat_body(req, model, context_tokens)?;
     let response = reqwest::Client::new()
@@ -464,7 +475,9 @@ pub async fn stream_chat(
         }
         if !deltas.is_empty() {
             apply_deltas(&mut reply, &deltas);
-            on_delta(&deltas);
+            if on_delta(&deltas) == StreamControl::Stop {
+                break;
+            }
         }
         if decoder.is_finished() {
             break;

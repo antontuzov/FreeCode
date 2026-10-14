@@ -170,6 +170,7 @@ pub fn run() {
             chat::stop_engine,
             chat::engine_status,
             chat::chat_send,
+            chat::chat_stop,
             chat::new_task
         ])
         .setup(|app| {

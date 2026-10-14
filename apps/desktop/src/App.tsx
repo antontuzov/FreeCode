@@ -18,6 +18,7 @@ export default function App() {
   const setContextUsed = useTranscript((s) => s.setContextUsed);
   const refreshEngine = useChat((s) => s.refresh);
   const send = useChat((s) => s.send);
+  const stop = useChat((s) => s.stop);
   const newTask = useChat((s) => s.newTask);
   const [settingsPage, setSettingsPage] = useState<string | null>(query("settings"));
   const fixture = fixtureMode();
@@ -25,6 +26,7 @@ export default function App() {
   const askRepeat = Math.max(1, Number(query("ask_repeat")) || 1);
   const askAgain = query("ask_again");
   const forgetBetween = query("new_task_between") === "1";
+  const stopAfter = Math.max(0, Number(query("stop_after")) || 0);
 
   // The catalog language is the setting, so switching it in Settings repaints every label.
   const locale: Locale = language;
@@ -65,19 +67,29 @@ export default function App() {
   // verified in the real app — and how a second turn is verified, which is the one that has to reuse
   // the running server, or restart it after it died between the two.
   //
-  // `?ask_again=<prompt>&new_task_between=1` sends a second prompt after pressing the sidebar's New
-  // task between them. It is the only way to check that the control forgot anything: the second
-  // prompt asks what the first one planted, and an answer that remembers is a history the host never
-  // dropped.
+  // `?ask_again=<prompt>` sends it after the first one, and `&new_task_between=1` presses the
+  // sidebar's New task between them — the only way to check that the control forgot anything, since
+  // the second prompt asks what the first planted and an answer that remembers is a history the host
+  // never dropped.
   useEffect(() => {
     if (!ask) return;
     void (async () => {
       for (let i = 0; i < askRepeat; i += 1) await send(ask);
-      if (!forgetBetween || !askAgain) return;
-      await newTask();
+      if (!askAgain) return;
+      if (forgetBetween) await newTask();
       await send(askAgain);
     })();
   }, [ask, askRepeat, askAgain, forgetBetween, newTask, send]);
+
+  // `?stop_after=<ms>` presses the composer's Stop that far into a run. Measured from the run
+  // starting rather than from the window opening, because the engine spends seconds loading weights
+  // and a timer from mount would press Stop before there was a reply to stop.
+  const sending = useChat((s) => s.sending);
+  useEffect(() => {
+    if (!stopAfter || !sending) return;
+    const timer = setTimeout(() => void stop(), stopAfter);
+    return () => clearTimeout(timer);
+  }, [sending, stopAfter, stop]);
 
   if (settingsPage !== null) {
     return <Settings locale={locale} page={settingsPage} onBack={() => setSettingsPage(null)} />;

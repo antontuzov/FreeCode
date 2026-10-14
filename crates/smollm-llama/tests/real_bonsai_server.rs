@@ -16,7 +16,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use smollm_llama::client::{chat_body, stream_chat, ChatRequest, Message, Reply, ReplyDelta};
+use smollm_llama::client::{
+    chat_body, stream_chat, ChatRequest, Message, Reply, ReplyDelta, StreamControl,
+};
 use smollm_llama::load_guard::{self, FileState, GuardRequest};
 use smollm_llama::{EngineBinary, LaunchRequest, LaunchTuning, ServerHandle};
 use smollm_models::{gguf, Catalog, EngineLock, HostHardware};
@@ -222,6 +224,7 @@ async fn the_pinned_fork_server_loads_the_real_weights_and_streams_a_real_answer
                     ReplyDelta::ToolCall { .. } => {}
                 }
             }
+            StreamControl::Continue
         },
     )
     .await
@@ -286,7 +289,7 @@ async fn ask(r: &Real, handle: &ServerHandle, history: &[Message]) -> Reply {
         &req,
         &r.model,
         handle.context_tokens(),
-        |_| {},
+        |_| StreamControl::Continue,
     )
     .await
     .expect("the server answers a replayed history")
@@ -356,6 +359,67 @@ async fn a_second_turn_remembers_the_first_without_replaying_its_reasoning() {
         second.text.to_lowercase().contains("sparrow"),
         "the second turn lost what the first was told: {:?}",
         second.text
+    );
+}
+
+/// The other half of the Stop button: a stream the caller abandons part way through. The text it
+/// had already is the answer — a discarded partial reply is how a Stop comes to look like a crash —
+/// and the server has to still be there afterwards, because a Stop that took the engine with it
+/// would charge the next message a full model load.
+#[tokio::test]
+#[ignore = "needs the pinned engine unpacked and real weights on disk"]
+async fn a_stream_the_caller_stops_keeps_its_text_and_its_server() {
+    let r = real();
+    need!(
+        r.engine.installed,
+        "no fork engine at {}",
+        r.engine.server_path.display()
+    );
+    need!(r.weights.is_file(), "no weights at {}", r.weights.display());
+
+    let mut handle = smollm_llama::server::start(r.request(&r.engine), &r.lock, READY)
+        .await
+        .expect("the pinned server must become healthy");
+
+    // Long enough that three batches cannot be the whole answer.
+    let req = ChatRequest {
+        max_tokens: 2_048,
+        ..ChatRequest::new(vec![Message::user(
+            "Count from 1 to 200, separating the numbers with commas.",
+        )])
+    };
+    let mut batches = 0usize;
+    let stopped = stream_chat(
+        handle.base_url(),
+        &req,
+        &r.model,
+        handle.context_tokens(),
+        |_| {
+            batches += 1;
+            if batches >= 3 {
+                StreamControl::Stop
+            } else {
+                StreamControl::Continue
+            }
+        },
+    )
+    .await
+    .expect("a stopped stream is a reply, not a failure");
+
+    println!("stopped after {batches} batches: {:?}", stopped.text);
+    assert!(batches >= 3, "the answer never streamed at all");
+    assert!(
+        !stopped.text.trim().is_empty(),
+        "stopping threw away the text it already had"
+    );
+    assert!(
+        !stopped.text.contains("200"),
+        "the whole count arrived, so nothing was stopped: {:?}",
+        stopped.text
+    );
+    assert!(
+        handle.is_running(),
+        "stopping the reply took the server with it"
     );
 }
 

@@ -22,8 +22,8 @@
 //!   * **reasoning is displayed, never replayed.** Only the answer text goes back into the history
 //!     the next request is built from (`AgentConstraints::do_not_echo_reasoning_into_history`).
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -33,7 +33,7 @@ use smollm_config::{ReasoningEffort, Settings};
 use smollm_core::events::AgentEvent;
 use smollm_llama::{
     start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message, Reply, ReplyDelta,
-    ServerHandle,
+    ServerHandle, StreamControl,
 };
 use smollm_models::ModelEntry;
 
@@ -248,6 +248,10 @@ pub struct ChatState {
     slot: Mutex<Slot>,
     history: Mutex<Vec<Message>>,
     runs: AtomicU64,
+    /// Set by [`chat_stop`] and read by the run in flight at the next batch of deltas. A plain
+    /// flag rather than a dropped future because the answer streamed so far has to survive: the
+    /// request ends at a chunk boundary and returns what it had.
+    stop_requested: Arc<AtomicBool>,
 }
 
 /// Stop and release every server this process owns.
@@ -475,7 +479,13 @@ fn conversation(state: &ChatState, system_prompt: &str) -> Vec<Message> {
     messages
 }
 
-async fn stream_turn(app: &AppHandle, turn: &Turn, request: &ChatRequest) -> Result<Reply, String> {
+async fn stream_turn(
+    app: &AppHandle,
+    turn: &Turn,
+    request: &ChatRequest,
+    stop_requested: &AtomicBool,
+    stopped: &AtomicBool,
+) -> Result<Reply, String> {
     let sink = app.clone();
     let on_delta = move |deltas: &[ReplyDelta]| {
         for delta in deltas {
@@ -495,6 +505,13 @@ async fn stream_turn(app: &AppHandle, turn: &Turn, request: &ChatRequest) -> Res
             };
             emit(&sink, event);
         }
+        if !stop_requested.load(Ordering::Relaxed) {
+            return StreamControl::Continue;
+        }
+        // Recorded here instead of reading the request flag afterwards: a click that lands after the
+        // last chunk would otherwise label a complete answer as one that was stopped.
+        stopped.store(true, Ordering::Relaxed);
+        StreamControl::Stop
     };
     smollm_llama::stream_chat(
         &turn.view.base_url,
@@ -578,10 +595,13 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
             return Err("a reply is already streaming".into());
         }
         slot.streaming = true;
+        // This run's own stop signal, not the last one's.
+        state.stop_requested.store(false, Ordering::Relaxed);
     }
 
     let settings = appearance::load_settings()?;
     let run_id = format!("run-{}", state.runs.fetch_add(1, Ordering::Relaxed) + 1);
+    let stopped = AtomicBool::new(false);
     emit(
         &app,
         AgentEvent::RunStarted {
@@ -597,7 +617,7 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
     request.max_tokens = turn.max_tokens;
     request.reasoning_effort = Some(turn.effort.clone());
 
-    let outcome = stream_turn(&app, &turn, &request).await;
+    let outcome = stream_turn(&app, &turn, &request, &state.stop_requested, &stopped).await;
     lock(&state.slot).streaming = false;
 
     match outcome {
@@ -622,7 +642,9 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
                 &app,
                 AgentEvent::RunFinished {
                     run_id,
-                    stopped: false,
+                    // The transcript's "stopped" row is what tells the user the answer they see is
+                    // the one they cut short, so the flag has to come from the run itself.
+                    stopped: stopped.load(Ordering::Relaxed),
                     total_diff: None,
                 },
             );
@@ -641,6 +663,27 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
             Err(message)
         }
     }
+}
+
+/// Stop the reply in flight, and keep the server.
+///
+/// This is the composer's Stop. What it must not do is release the engine: interrupting one answer
+/// is not a request to pay another model load for the next one, and the half-finished text the run
+/// already streamed stays on screen either way.
+#[tauri::command]
+pub async fn chat_stop(app: AppHandle) -> Result<(), String> {
+    request_stop(&app.state::<ChatState>())
+}
+
+fn request_stop(state: &ChatState) -> Result<(), String> {
+    {
+        let slot = lock(&state.slot);
+        if !slot.streaming {
+            return Err("there is no reply in flight".into());
+        }
+    }
+    state.stop_requested.store(true, Ordering::Relaxed);
+    Ok(())
 }
 
 /// Start a new task: forget the conversation, keep the server running.
@@ -669,6 +712,19 @@ fn forget_conversation(state: &ChatState) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stop_names_the_reply_in_flight_and_nothing_else() {
+        let state = ChatState::default();
+        // Idle: the flag stays down, so a click that arrives after the answer finished cannot be
+        // mistaken for one that cut the answer short.
+        assert!(request_stop(&state).is_err());
+        assert!(!state.stop_requested.load(Ordering::Relaxed));
+
+        lock(&state.slot).streaming = true;
+        request_stop(&state).unwrap();
+        assert!(state.stop_requested.load(Ordering::Relaxed));
+    }
 
     #[test]
     fn a_new_task_forgets_the_conversation_and_keeps_the_server() {

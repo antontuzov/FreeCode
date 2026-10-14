@@ -59,12 +59,12 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   stop: async () => {
     try {
-      await ipc.stopEngine();
+      await ipc.chatStop();
     } catch (error) {
       set({ error: String(error) });
-    } finally {
-      void get().refresh();
     }
+    // No engine refresh: the server is the same process it was before the click, and the run's own
+    // `runFinished` is what closes the answer out in the transcript.
   },
   newTask: async () => {
     set({ error: null });

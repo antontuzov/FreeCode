@@ -90,6 +90,9 @@ export type Turn = {
   thought?: string;
   /** Deltas are still arriving for this turn. */
   streaming?: boolean;
+  /** Cut short by the stop button. The text is what streamed before the click, and saying so is the
+   * difference between a truncated answer and an answer the model chose to keep short. */
+  stopped?: boolean;
   /** The refusal badge on an answer that never came: the "Local" badge says what the run was. */
   local?: boolean;
 };
@@ -167,7 +170,11 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
     case "answerDelta":
       return onOpenTurn(rows, (turn) => ({ ...turn, text: `${turn.text}${event.text}` }));
     case "runFinished":
-      return onOpenTurn(rows, (turn) => ({ ...turn, streaming: false }));
+      return onOpenTurn(rows, (turn) => ({
+        ...turn,
+        streaming: false,
+        stopped: event.stopped || undefined,
+      }));
     case "engineBlocked":
       return [
         ...rows,

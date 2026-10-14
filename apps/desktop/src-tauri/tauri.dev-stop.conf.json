@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "devUrl": "http://localhost:5173/?ask=Count%20from%201%20to%20200%2C%20separating%20the%20numbers%20with%20commas.&stop_after=4000"
+  }
+}

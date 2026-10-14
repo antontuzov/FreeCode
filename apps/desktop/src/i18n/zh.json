@@ -30,6 +30,7 @@
   "transcript.checkpoints": "对话轮次",
   "transcript.checkpoint": "跳转到第 {{n}} 轮：{{text}}",
   "transcript.notice": "提示",
+  "transcript.stopped": "已停止——这条回答在你打断处结束",
   "chat.thinking": "思考中",
   "chat.starting": "正在启动本地引擎…",
   "statusbar.context": "已用上下文",

@@ -18,7 +18,8 @@
     "tauri:weights": "tauri dev --config src-tauri/tauri.dev-weights.conf.json",
     "tauri:checkpoints": "tauri dev --config src-tauri/tauri.dev-checkpoints.conf.json",
     "tauri:restart": "tauri dev --config src-tauri/tauri.dev-restart.conf.json",
-    "tauri:forget": "tauri dev --config src-tauri/tauri.dev-forget.conf.json"
+    "tauri:forget": "tauri dev --config src-tauri/tauri.dev-forget.conf.json",
+    "tauri:stop": "tauri dev --config src-tauri/tauri.dev-stop.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

@@ -30,6 +30,7 @@
   "transcript.checkpoints": "Turns",
   "transcript.checkpoint": "Jump to turn {{n}}: {{text}}",
   "transcript.notice": "Notice",
+  "transcript.stopped": "Stopped — this answer ends where you cut it off",
   "chat.thinking": "Thinking",
   "chat.starting": "Starting the local engine…",
   "statusbar.context": "Context used",

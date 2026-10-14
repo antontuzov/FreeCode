@@ -275,9 +275,14 @@ export const ipc = {
   /**
    * Forget the conversation and keep the server up. This is what the sidebar's "New task" row is:
    * the history the next request is built from is the only thing a new task resets, and reloading
-   * 5.95 GB of weights for it would be a cost the click never asked for.
+   * the weights for it would be a cost the click never asked for.
    */
   newTask: () => invoke<void>("new_task"),
+  /**
+   * Stop the reply that is streaming. The engine keeps its weights loaded, so the next message costs
+   * nothing — `stopEngine` is the one that releases them, and the composer's Stop is not that.
+   */
+  chatStop: () => invoke<void>("chat_stop"),
   onAgentEvent: (onEvent: (event: AgentEvent) => void): Promise<() => void> =>
     listen<AgentEvent>(AGENT_EVENT, (event) => onEvent(event.payload)),
 };
