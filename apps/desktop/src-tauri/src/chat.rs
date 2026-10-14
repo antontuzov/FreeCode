@@ -247,6 +247,10 @@ impl Slot {
 pub struct ChatState {
     slot: Mutex<Slot>,
     history: Mutex<Vec<Message>>,
+    /// The last run's fill as the server counted it, paired with the window it was counted against:
+    /// `(window, tokens)`. Only [`outgrew_window`] reads it, and a pairing is what keeps a Settings
+    /// change that doubles the slot from inheriting the old one's verdict.
+    last_fill: Mutex<Option<(u32, u64)>>,
     runs: AtomicU64,
     /// Set by [`chat_stop`] and read by the run in flight at the next batch of deltas. A plain
     /// flag rather than a dropped future because the answer streamed so far has to survive: the
@@ -585,6 +589,29 @@ pub fn engine_status(state: tauri::State<'_, ChatState>) -> EngineStatus {
     }
 }
 
+/// How full the window has to be before the next turn is certain not to fit.
+///
+/// A run that fills the slot to within this margin leaves no room for the one message the next turn
+/// adds on top of the replay, so the server has to drop something from the front to answer at all.
+/// The margin is generous on purpose: it is the distance the fork itself kept from the ceiling when
+/// it trimmed a 1090-token prompt into a 512-token slot (493 used), and a smaller one would let a
+/// conversation that genuinely still fits be reported as a trimmed one.
+const FULL_BY: u64 = 64;
+
+/// Whether the conversation this run replayed was already too big for the window it was answered in.
+///
+/// The fork has no flag for a trim: it drops the front of the prompt, reports the size it kept, and
+/// logs `truncated = 0` while it does it. What makes the drop provable anyway is that the host's
+/// history only grows — every turn replays the whole of the last one and adds to it — so once a run
+/// has measured the window as full, the turn after it cannot have fit.
+fn outgrew_window(last: Option<(u32, u64)>, window: u32) -> bool {
+    last.is_some_and(|(last_window, last_total)| {
+        // A different window is a different server: the measurement that filled the old one says
+        // nothing about the room in this one.
+        last_window == window && last_total + FULL_BY >= window as u64
+    })
+}
+
 /// How full the window is after a run, as a percent of what the server was started with.
 ///
 /// The server's own count is the only one that means anything: the host never sees the conversation
@@ -632,6 +659,10 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
         },
     );
     lock(&state.history).push(Message::user(&text));
+    // Read before the request goes out and acted on after it lands: the replay this turn is about to
+    // do is already too big for the window, but what the run did with that is only known once the
+    // server reports its own count.
+    let outgrew = outgrew_window(*lock(&state.last_fill), turn.view.context_tokens);
     let mut request = ChatRequest::new(conversation(&state, &settings.sampling.system_prompt));
     request.max_tokens = turn.max_tokens;
     request.reasoning_effort = Some(turn.effort.clone());
@@ -643,6 +674,24 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
         Ok(reply) => {
             if !reply.text.is_empty() {
                 lock(&state.history).push(Message::assistant(reply.text.clone()));
+            }
+            if let Some(total) = reply.total_tokens {
+                *lock(&state.last_fill) = Some((turn.view.context_tokens, total));
+            }
+            if outgrew {
+                emit(
+                    &app,
+                    AgentEvent::Warning {
+                        code: "context-trimmed".into(),
+                        message:
+                            "This conversation has outgrown the context window, so the server \
+                                  could not replay all of it: the model answered from the most \
+                                  recent turns, with the earliest ones dropped before it saw them. \
+                                  Start a new task to answer from a clean window, or raise Context \
+                                  window in Settings if the machine has the room."
+                                .into(),
+                    },
+                );
             }
             if reply.ran_out_of_budget() {
                 emit(
@@ -731,6 +780,9 @@ fn forget_conversation(state: &ChatState) -> Result<(), String> {
         }
     }
     lock(&state.history).clear();
+    // The measurement was of the conversation this just threw away: the next request replays
+    // nothing, so there is no overflow left to announce.
+    *lock(&state.last_fill) = None;
     Ok(())
 }
 

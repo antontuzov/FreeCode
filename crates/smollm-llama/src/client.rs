@@ -58,6 +58,10 @@ pub struct Reply {
     /// What the window holds after this run: the whole prompt plus the whole answer, as the server
     /// counted them. `None` when the stream never reported a usage frame.
     pub total_tokens: Option<u64>,
+    /// How much of that window the prompt alone took, as the server counted it. `None` with no usage
+    /// frame. This is the number that cannot be inferred from the request: a server that trimmed the
+    /// conversation to fit reports what it kept, not what it was handed.
+    pub prompt_tokens: Option<u64>,
 }
 
 impl Reply {
@@ -389,14 +393,24 @@ pub fn chunk_deltas(chunk: &Value) -> (Vec<ReplyDelta>, Option<String>) {
     (out, finish)
 }
 
+/// What the server counted for one finished run. Both numbers are the server's own, and both are
+/// counted *after* it decided what to do with an oversized prompt — a prompt it trimmed reports the
+/// trimmed size, which is the only way the host learns the model did not see the whole conversation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub prompt_tokens: u64,
+    pub total_tokens: u64,
+}
+
 /// The usage frame: the fork reports it once, in a chunk whose `choices` is empty, after the answer
-/// is done. `total_tokens` is the whole prompt plus the whole answer, which is what the window now
-/// holds for the next turn.
-fn chunk_usage(chunk: &Value) -> Option<u64> {
-    chunk
-        .get("usage")
-        .and_then(|u| u.get("total_tokens"))
-        .and_then(|t| t.as_u64())
+/// is done.
+fn chunk_usage(chunk: &Value) -> Option<Usage> {
+    let usage = chunk.get("usage")?;
+    let read = |key: &str| usage.get(key).and_then(|t| t.as_u64());
+    Some(Usage {
+        prompt_tokens: read("prompt_tokens")?,
+        total_tokens: read("total_tokens")?,
+    })
 }
 
 fn apply_deltas(reply: &mut Reply, deltas: &[ReplyDelta]) {
@@ -477,8 +491,9 @@ pub async fn stream_chat(
                     if let Some(f) = finish {
                         reply.finish_reason = Some(f);
                     }
-                    if let Some(total) = chunk_usage(&value) {
-                        reply.total_tokens = Some(total);
+                    if let Some(usage) = chunk_usage(&value) {
+                        reply.total_tokens = Some(usage.total_tokens);
+                        reply.prompt_tokens = Some(usage.prompt_tokens);
                     }
                 }
                 SseEvent::Done => break,
@@ -726,7 +741,9 @@ mod tests {
 
     #[test]
     fn the_usage_frame_is_what_says_how_full_the_window_now_is() {
-        // The frame the pinned fork really sent, verbatim apart from the timings it also carries.
+        // The frame the pinned fork really sent, verbatim apart from the timings it also carries. The
+        // prompt half is read alongside the total because it is the only evidence of a trim: a server
+        // that dropped the front of the conversation reports what it kept, not what it was handed.
         assert_eq!(
             chunk_usage(&json!({
                 "choices": [],
@@ -737,7 +754,10 @@ mod tests {
                     "prompt_tokens_details": { "cached_tokens": 14 }
                 }
             })),
-            Some(31)
+            Some(Usage {
+                prompt_tokens: 15,
+                total_tokens: 31
+            })
         );
         assert_eq!(
             chunk_usage(&json!({ "choices": [{ "delta": { "content": "hi" } }] })),
