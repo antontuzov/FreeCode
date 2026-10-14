@@ -38,7 +38,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     if (!trimmed || get().sending) return;
     const transcript = useTranscript.getState();
     // The bubble appears on the click, not on the reply: the engine may be about to spend ten
-    // seconds paging 5.95 GB of weights in, and a window that shows nothing looks frozen.
+    // seconds paging the pack into memory, and a window that shows nothing looks frozen.
     transcript.pushPrompt(trimmed);
     transcript.setRunning(true);
     set({ sending: true, error: null, announced: false });
@@ -78,7 +78,11 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
     // The host forgot the history, so the rows built from it have to go with it: a transcript that
     // still showed the last answer would claim a memory the engine no longer has.
-    useTranscript.getState().setRows([]);
+    const transcript = useTranscript.getState();
+    transcript.setRows([]);
+    // And the meter has no measurement to carry over: the window the last run filled is not the one
+    // this conversation will be answered from.
+    transcript.setContextUsed(null);
   },
 }));
 

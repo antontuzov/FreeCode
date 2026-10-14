@@ -164,6 +164,10 @@ pub enum AgentEvent {
     RunFinished {
         run_id: String,
         stopped: bool,
+        /// Percent of the server's context window the finished run left filled, counted by the server
+        /// itself. `None` when the stream never reported its usage: the meter shows unknown rather than
+        /// a number nobody measured.
+        context_used: Option<f32>,
         total_diff: Option<DiffStat>,
     },
     Failed {

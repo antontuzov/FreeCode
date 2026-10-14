@@ -55,6 +55,9 @@ pub struct Reply {
     pub tool_calls: Vec<ToolCall>,
     /// `stop`, `length`, `tool_calls` … — `length` means the budget ran out mid-reply.
     pub finish_reason: Option<String>,
+    /// What the window holds after this run: the whole prompt plus the whole answer, as the server
+    /// counted them. `None` when the stream never reported a usage frame.
+    pub total_tokens: Option<u64>,
 }
 
 impl Reply {
@@ -260,6 +263,9 @@ pub fn chat_body(
             .collect::<Vec<_>>(),
         "max_tokens": clamp_budget(req.max_tokens, context_tokens, &model.agent_constraints),
         "stream": true,
+        // The fork sends a usage frame only when asked for one, and the frame is where the context
+        // meter's number comes from; without it the stream ends and says nothing about its size.
+        "stream_options": { "include_usage": true },
     });
     if let Some(effort) = effort {
         body["reasoning_effort"] = json!(effort);
@@ -383,6 +389,16 @@ pub fn chunk_deltas(chunk: &Value) -> (Vec<ReplyDelta>, Option<String>) {
     (out, finish)
 }
 
+/// The usage frame: the fork reports it once, in a chunk whose `choices` is empty, after the answer
+/// is done. `total_tokens` is the whole prompt plus the whole answer, which is what the window now
+/// holds for the next turn.
+fn chunk_usage(chunk: &Value) -> Option<u64> {
+    chunk
+        .get("usage")
+        .and_then(|u| u.get("total_tokens"))
+        .and_then(|t| t.as_u64())
+}
+
 fn apply_deltas(reply: &mut Reply, deltas: &[ReplyDelta]) {
     for d in deltas {
         match d {
@@ -460,6 +476,9 @@ pub async fn stream_chat(
                     deltas.append(&mut d);
                     if let Some(f) = finish {
                         reply.finish_reason = Some(f);
+                    }
+                    if let Some(total) = chunk_usage(&value) {
+                        reply.total_tokens = Some(total);
                     }
                 }
                 SseEvent::Done => break,
@@ -693,6 +712,39 @@ mod tests {
         )
         .expect("body");
         assert_eq!(body["max_tokens"], 4_096);
+    }
+
+    /// The fork answers a stream with no usage frame unless the request asks for one, and the meter
+    /// has nothing to read without it — so the ask is part of every request, not an option.
+    #[test]
+    fn every_request_asks_the_server_to_report_its_token_usage() {
+        let m = model();
+        let body = chat_body(&ChatRequest::new(vec![Message::user("x")]), &m, CTX).expect("body");
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["stream_options"]["include_usage"], true);
+    }
+
+    #[test]
+    fn the_usage_frame_is_what_says_how_full_the_window_now_is() {
+        // The frame the pinned fork really sent, verbatim apart from the timings it also carries.
+        assert_eq!(
+            chunk_usage(&json!({
+                "choices": [],
+                "usage": {
+                    "completion_tokens": 16,
+                    "prompt_tokens": 15,
+                    "total_tokens": 31,
+                    "prompt_tokens_details": { "cached_tokens": 14 }
+                }
+            })),
+            Some(31)
+        );
+        assert_eq!(
+            chunk_usage(&json!({ "choices": [{ "delta": { "content": "hi" } }] })),
+            None
+        );
+        // A server that never answers the ask leaves the meter unknown rather than guessing a size.
+        assert_eq!(chunk_usage(&json!({ "choices": [], "timings": {} })), None);
     }
 
     #[test]

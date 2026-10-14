@@ -23,8 +23,9 @@ use smollm_llama::load_guard::{self, FileState, GuardRequest};
 use smollm_llama::{EngineBinary, LaunchRequest, LaunchTuning, ServerHandle};
 use smollm_models::{gguf, Catalog, EngineLock, HostHardware};
 
-/// Loading the largest pack the catalog offers (5.9 GB of ternary weights into an M1's unified
-/// memory) is not instantaneous, and the server answers `/health` only once the model is resident.
+/// A real pack has to become resident before `/health` answers, and the wait is priced for the
+/// largest one this host could be pointed at rather than the 0.46 GB one the default model picks —
+/// a timeout that expires while a model is still loading just re-runs the same load.
 const READY: Duration = Duration::from_secs(420);
 
 fn root() -> PathBuf {
@@ -120,7 +121,7 @@ impl Real {
 }
 
 #[tokio::test]
-#[ignore = "needs the pinned engine unpacked and ~6 GB of real weights on disk"]
+#[ignore = "needs the pinned engine unpacked and the default model's weights on disk"]
 async fn the_pinned_fork_server_loads_the_real_weights_and_streams_a_real_answer() {
     let r = real();
     need!(
@@ -359,6 +360,25 @@ async fn a_second_turn_remembers_the_first_without_replaying_its_reasoning() {
         second.text.to_lowercase().contains("sparrow"),
         "the second turn lost what the first was told: {:?}",
         second.text
+    );
+
+    // The context meter reads these counts, so they have to be real ones: the request asks for the
+    // usage frame, and the replayed history is the same window measured a second later — bigger,
+    // because the first turn is now part of what the server was given.
+    println!(
+        "usage: turn 1 {:?} tokens, turn 2 {:?}",
+        first.total_tokens, second.total_tokens
+    );
+    let (Some(before), Some(after)) = (first.total_tokens, second.total_tokens) else {
+        panic!(
+            "the pinned server sent no usage frame for a request that asked for one (turn 1 {:?}, \
+             turn 2 {:?})",
+            first.total_tokens, second.total_tokens
+        );
+    };
+    assert!(
+        after > before,
+        "the second turn's window did not grow with the replayed first: {before} -> {after}"
     );
 }
 

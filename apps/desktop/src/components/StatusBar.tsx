@@ -5,6 +5,15 @@ import { useTranscript } from "../state/transcript";
 import { Icon } from "./icons";
 
 /**
+ * The server counts tokens, so the figure arrives as a fraction of the window and 31 tokens of a
+ * 32k one is 0.09%. Rounded to whole percent that reads "0%" — an empty meter for a window that is
+ * not empty — so the low end keeps a decimal instead.
+ */
+function percentLabel(used: number): string {
+  return used > 0 && used < 10 ? `${used.toFixed(1)}%` : `${Math.round(used)}%`;
+}
+
+/**
  * The strip the reference puts under the composer. Its badge is the same guard verdict the status
  * card uses, so the bottom of the window cannot claim "Local" while the top refuses to run.
  */
@@ -28,9 +37,8 @@ export function StatusBar({ locale }: { locale: Locale }) {
       ? `${status.packing} · ${status.backend}`
       : null;
 
-  // Context usage is only meaningful once something has measured it. A real run reports none yet —
-  // the fork only tells us after the reply — so the meter reads as unknown instead of inventing a
-  // percentage, which would be the one number in this window the user might act on.
+  // The meter shows what the last finished run measured and nothing before that. A real run reports
+  // its own token count, so the figure is the server's, not an estimate made from the text.
   const used = contextUsed;
 
   return (
@@ -51,7 +59,7 @@ export function StatusBar({ locale }: { locale: Locale }) {
       >
         <span className="block h-full bg-accent" style={{ width: `${used ?? 0}%` }} aria-hidden />
       </span>
-      <span className="w-8 text-right font-mono">{used === null ? "—" : `${used}%`}</span>
+      <span className="w-8 text-right font-mono">{used === null ? "—" : percentLabel(used)}</span>
     </footer>
   );
 }

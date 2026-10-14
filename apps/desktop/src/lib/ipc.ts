@@ -153,8 +153,16 @@ export type AgentEvent =
   | { type: "answerDelta"; text: string }
   | { type: "engineBlocked"; info: BlockedInfo }
   | { type: "warning"; code: string; message: string }
-  /** `totalDiff` is the "+N −M" pill's running total, which the tool loop is what produces. */
-  | { type: "runFinished"; runId: string; stopped: boolean; totalDiff: null }
+  /** `totalDiff` is the "+N −M" pill's running total, which the tool loop is what produces.
+   * `contextUsed` is the percent of the window the finished run left filled, counted by the server;
+   * null when the stream never reported its usage frame. */
+  | {
+      type: "runFinished";
+      runId: string;
+      stopped: boolean;
+      contextUsed: number | null;
+      totalDiff: null;
+    }
   | { type: "failed"; message: string };
 
 /** Host event carrying `AgentEvent`; must match `chat::EVENT` in Rust. */

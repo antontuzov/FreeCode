@@ -210,7 +210,7 @@ type TranscriptStore = {
   contextUsed: number | null;
   setRows: (rows: Row[]) => void;
   setRunning: (running: boolean) => void;
-  /** Only the fixture sets this; a real run has nothing to measure the context with yet. */
+  /** Presets the meter for the fixture, and clears it when the conversation is thrown away. */
   setContextUsed: (percent: number | null) => void;
   /** The prompt's own row, added on send so the bubble appears before the engine answers. */
   pushPrompt: (text: string) => void;
@@ -235,6 +235,11 @@ export const useTranscript = create<TranscriptStore>((set) => ({
           : event.type === "runFinished" || event.type === "failed"
             ? false
             : s.running,
+      // The server counted the tokens; this is the one place that learns them. A run that reported
+      // no usage leaves the last measured figure standing rather than blanking a meter that was
+      // already telling the truth about the same window.
+      contextUsed:
+        event.type === "runFinished" ? (event.contextUsed ?? s.contextUsed) : s.contextUsed,
     })),
 }));
 

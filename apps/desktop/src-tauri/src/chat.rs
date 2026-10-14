@@ -579,6 +579,19 @@ pub fn engine_status(state: tauri::State<'_, ChatState>) -> EngineStatus {
     }
 }
 
+/// How full the window is after a run, as a percent of what the server was started with.
+///
+/// The server's own count is the only one that means anything: the host never sees the conversation
+/// after the chat template expands it. A stream that reported no usage answers `None`, which is what
+/// keeps the meter from showing a number nobody measured.
+fn context_percent(total_tokens: Option<u64>, window: u32) -> Option<f32> {
+    let tokens = total_tokens?;
+    if window == 0 {
+        return None;
+    }
+    Some(((tokens as f64 * 100.0) / window as f64).clamp(0.0, 100.0) as f32)
+}
+
 /// Send one prompt to the local engine and stream the answer as `agent-event`s. The return value is
 /// the finished answer, so a listener that missed a delta can still close the turn.
 #[tauri::command]
@@ -645,6 +658,7 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
                     // The transcript's "stopped" row is what tells the user the answer they see is
                     // the one they cut short, so the flag has to come from the run itself.
                     stopped: stopped.load(Ordering::Relaxed),
+                    context_used: context_percent(reply.total_tokens, turn.view.context_tokens),
                     total_diff: None,
                 },
             );
@@ -749,6 +763,18 @@ mod tests {
             1,
             "a refused clear left the history alone"
         );
+    }
+
+    #[test]
+    fn the_window_is_measured_in_the_tokens_the_server_counted() {
+        // A quarter of a 32k window, and the same count read against the window it was asked for.
+        assert_eq!(context_percent(Some(8_192), 32_768), Some(25.0));
+        assert_eq!(context_percent(Some(31), 100), Some(31.0));
+        // A reply that filled the window says so at the top of the scale, not past it.
+        assert_eq!(context_percent(Some(40_000), 32_768), Some(100.0));
+        // Nothing counted, and nothing to count against: the meter stays unknown.
+        assert_eq!(context_percent(None, 32_768), None);
+        assert_eq!(context_percent(Some(31), 0), None);
     }
 
     #[test]
