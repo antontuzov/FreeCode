@@ -37,7 +37,7 @@
     "active": true,
     "targets": "all",
     "category": "DeveloperTool",
-    "shortDescription": "Local-first coding agent for Ternary Bonsai 2 27B",
+    "shortDescription": "Local-first desktop chat that runs Ternary Bonsai models on your machine",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

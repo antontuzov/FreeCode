@@ -117,8 +117,9 @@ export const WEIGHTS_DOWNLOAD_EVENT = "weights-download";
 
 /**
  * `smollm_desktop_lib::chat::EngineView`: the supervised `llama-server` as the host reports it.
- * `command` is the argument vector that actually went to the binary, so the verified flags are
- * checkable on screen instead of claimed.
+ * `command` is the argument vector that actually went to the binary. No control shows it — the
+ * reference layout has nowhere for a command line — so it is what a failure can quote rather than
+ * what the window claims.
  */
 export type EngineView = {
   baseUrl: string;

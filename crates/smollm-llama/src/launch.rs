@@ -111,7 +111,8 @@ pub struct LaunchPlan {
     /// request whose generation budget does not fit the loaded context.
     pub context_tokens: u32,
     pub base_url: String,
-    /// The whole command line, for the log and the diagnostics view.
+    /// The whole command line, as launched. It reaches the host's `EngineView` and the real-server
+    /// test's output; no part of the window renders it, whatever the field used to claim.
     pub display: String,
 }
 

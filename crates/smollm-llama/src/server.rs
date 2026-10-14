@@ -246,7 +246,8 @@ impl ServerHandle {
         self.plan.context_tokens
     }
 
-    /// Trailing server output. Surfaced in the diagnostics view and in every launch error.
+    /// Trailing server output. There is no view that shows a log: this reaches the user only as part
+    /// of a launch error or a restart notice, and both excerpt it rather than printing it whole.
     pub fn log_tail(&self) -> String {
         self.logs.lock().map(|l| l.text()).unwrap_or_default()
     }
