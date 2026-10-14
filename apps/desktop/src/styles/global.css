@@ -149,6 +149,50 @@ body {
   font-size: calc(var(--font-ui) - 1px);
 }
 
+/* ---- turn checkpoints ---- */
+
+/* The rail left of the column: one numbered chip per prompt, so a long run is jumped back through
+   rather than scrolled back through. Quiet until hovered, like the nav rows. */
+.checkpoint {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  color: var(--text-faint);
+  font-size: calc(var(--font-ui) - 3px);
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.checkpoint:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.checkpoint[data-active="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--text-strong);
+}
+
+/* The pair that was just jumped to, marked for as long as the jump is the newest thing done. */
+.turn-anchor[data-flash="true"] {
+  border-radius: var(--radius-md);
+  animation: checkpoint-flash 1.4s ease-out;
+}
+
+@keyframes checkpoint-flash {
+  from {
+    background: var(--accent-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+
 /* ---- Settings surface, shots 01–03 ---- */
 
 /* A row is title-over-description on the left with the control held to the right edge. */

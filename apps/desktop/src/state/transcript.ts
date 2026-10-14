@@ -66,6 +66,13 @@ export type Step = {
   seconds?: number;
   /** For a `blocked` row: the single action that clears the refusal, in the row's own words. */
   cta?: { label: string; url: string };
+  /**
+   * A `blocked` row that reports something the run did anyway — an effort the model substituted, a
+   * server that was restarted — rather than one that refuses it. It reads as a notice because a row
+   * headed "Blocked" under an answer that streamed fine tells the user the answer is not to be
+   * trusted, which is the opposite of what happened.
+   */
+  notice?: boolean;
 };
 
 /** One side of the conversation. The reference renders the prompt as a right-aligned bubble and the
@@ -100,6 +107,7 @@ export function stepLabel(locale: Locale, step: Step): string {
   if (step.kind === "running") {
     return translate(locale, I18N_KEYS.running, { seconds: step.seconds ?? 0 });
   }
+  if (step.notice) return translate(locale, "transcript.notice");
   return translate(locale, I18N_KEYS[step.kind]);
 }
 
@@ -111,6 +119,11 @@ function nextId(prefix: string): string {
 
 function blockedRow(message: string, cta?: { label: string; url: string }): Step {
   return { id: nextId("blocked"), kind: "blocked", detail: message, status: "error", cta };
+}
+
+/** Something the run worked around, on the same quiet footing as the answer it did not stop. */
+function noticeRow(message: string): Step {
+  return { id: nextId("notice"), kind: "blocked", detail: message, status: "error", notice: true };
 }
 
 /** The turn the next delta belongs to: the assistant turn the current run opened. */
@@ -164,7 +177,10 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
         }),
       ];
     case "warning":
-      return [...rows, blockedRow(event.message)];
+      // Warnings are what the run adapted to, not what it refused: `failed` and `engineBlocked`
+      // carry the refusals, and this case takes the substitutions and relaunches that left the
+      // answer standing.
+      return [...rows, noticeRow(event.message)];
     case "failed": {
       const last = rows[rows.length - 1];
       // The host both emits `failed` and rejects the command with the same text, and a refusal
