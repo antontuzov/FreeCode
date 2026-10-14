@@ -60,6 +60,7 @@
   "composer.approve.auto": "自动批准",
   "composer.approve.ask": "每次询问",
   "composer.approve.plan": "仅规划",
+  "composer.approve.inert": "审批模式暂不影响回答",
   "composer.add": "添加上下文",
   "composer.attach": "附加文件",
   "composer.model": "模型",

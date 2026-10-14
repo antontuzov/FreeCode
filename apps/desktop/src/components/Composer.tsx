@@ -86,6 +86,9 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
                   APPROVAL_MODES[(APPROVAL_MODES.indexOf(m) + 1) % APPROVAL_MODES.length] ?? "ask",
               )
             }
+            // The dial works and the label changes; what it dials into does not answer differently
+            // yet, and a control that quietly rewrites its own name would claim otherwise.
+            title={translate(locale, "composer.approve.inert")}
             className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-[calc(var(--font-ui)-2px)] text-muted hover:bg-hover hover:text-fg"
           >
             <Icon name="review" size={13} />

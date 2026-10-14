@@ -60,6 +60,7 @@
   "composer.approve.auto": "Auto approve",
   "composer.approve.ask": "Ask every time",
   "composer.approve.plan": "Plan only",
+  "composer.approve.inert": "Approval modes do not change the answers yet",
   "composer.add": "Add context",
   "composer.attach": "Attach a file",
   "composer.model": "Model",
