@@ -1,18 +1,25 @@
 import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
 
-type NavRow = { key: string; icon: IconName; onActivate?: (actions: SidebarActions) => void };
+type NavRow = {
+  key: string;
+  icon: IconName;
+  onActivate?: (actions: SidebarActions) => void;
+  /** A row the reference layout draws and this build has nothing behind. It stays on screen — the
+   * layout is the contract — but a click on it says so rather than looking like a lost one. */
+  placeholder?: true;
+};
 
 const PRIMARY: NavRow[] = [
   { key: "newTask", icon: "newTask", onActivate: (a) => a.newTask },
-  { key: "search", icon: "search" },
+  { key: "search", icon: "search", placeholder: true },
 ];
 
 const PLACES: NavRow[] = [
-  { key: "knowledge", icon: "knowledge" },
-  { key: "sites", icon: "sites" },
-  { key: "automations", icon: "automations" },
-  { key: "extensions", icon: "extensions" },
+  { key: "knowledge", icon: "knowledge", placeholder: true },
+  { key: "sites", icon: "sites", placeholder: true },
+  { key: "automations", icon: "automations", placeholder: true },
+  { key: "extensions", icon: "extensions", placeholder: true },
 ];
 
 type Workspace = { name: string; tasks: string[] };
@@ -28,17 +35,23 @@ function Row({
   active,
   indent,
   onClick,
+  hint,
 }: {
   icon?: IconName;
   label: string;
   active?: boolean;
   indent?: boolean;
   onClick?: () => void;
+  hint?: string;
 }) {
   return (
     <button
       type="button"
       data-active={active || undefined}
+      // Not `disabled`: a disabled button swallows the hover that carries the sentence explaining
+      // why it does nothing, which is the one thing the row still has to say.
+      aria-disabled={hint ? true : undefined}
+      title={hint}
       className={`nav-item ${indent ? "pl-[34px] text-[calc(var(--font-ui)-1px)]" : ""}`}
       onClick={onClick}
     >
@@ -65,12 +78,14 @@ export function Sidebar({
   actions: SidebarActions;
 }) {
   const workspaces = fixture ? FIXTURE_WORKSPACES : [];
+  const notInBuild = translate(locale, "sidebar.notInBuild");
 
   const row = (r: NavRow) => (
     <Row
       key={r.key}
       icon={r.icon}
       label={translate(locale, `sidebar.${r.key}`)}
+      hint={r.placeholder ? notInBuild : undefined}
       onClick={r.onActivate ? () => r.onActivate?.(actions) : undefined}
     />
   );
@@ -85,13 +100,33 @@ export function Sidebar({
         className="flex items-center gap-3 px-[var(--space-3)] pt-[var(--space-3)] pb-1"
         style={{ paddingLeft: "max(var(--space-3), var(--traffic-light-inset))" }}
       >
-        <button type="button" aria-label={translate(locale, "sidebar.toggle")} className="icon-btn">
+        {/* The three arrows above are the reference chrome: one window, one conversation, so there
+            is nothing to collapse and nowhere to go back to. They are drawn and named as such. */}
+        <button
+          type="button"
+          aria-label={translate(locale, "sidebar.toggle")}
+          aria-disabled
+          title={notInBuild}
+          className="icon-btn"
+        >
           <Icon name="sidebar" />
         </button>
-        <button type="button" aria-label={translate(locale, "nav.back")} className="icon-btn">
+        <button
+          type="button"
+          aria-label={translate(locale, "nav.back")}
+          aria-disabled
+          title={notInBuild}
+          className="icon-btn"
+        >
           <Icon name="back" />
         </button>
-        <button type="button" aria-label={translate(locale, "nav.forward")} className="icon-btn">
+        <button
+          type="button"
+          aria-label={translate(locale, "nav.forward")}
+          aria-disabled
+          title={notInBuild}
+          className="icon-btn"
+        >
           <Icon name="forward" />
         </button>
       </div>

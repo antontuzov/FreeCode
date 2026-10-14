@@ -11,6 +11,7 @@
   "sidebar.coding": "编码",
   "sidebar.newTask": "新建任务",
   "sidebar.search": "搜索",
+  "sidebar.notInBuild": "当前版本尚未提供",
   "sidebar.places": "内容库",
   "sidebar.emptyWorkspaces": "暂无工作区",
   "sidebar.localUser": "本机",

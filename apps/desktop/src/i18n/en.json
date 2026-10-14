@@ -11,6 +11,7 @@
   "sidebar.coding": "Coding",
   "sidebar.newTask": "New task",
   "sidebar.search": "Search",
+  "sidebar.notInBuild": "Not in this build yet",
   "sidebar.places": "Library",
   "sidebar.emptyWorkspaces": "No workspaces yet",
   "sidebar.localUser": "This machine",
