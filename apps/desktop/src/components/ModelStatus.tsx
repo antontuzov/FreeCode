@@ -109,6 +109,8 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   } = useModel();
   const engine = useChat((s) => s.engine);
   const release = useChat((s) => s.release);
+  const start = useChat((s) => s.start);
+  const starting = useChat((s) => s.starting);
   const running = useTranscript((s) => s.running);
 
   useEffect(() => {
@@ -116,17 +118,21 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   }, [refresh]);
 
   // `?install-engine=1` runs the Install action and `?download-weights=1` the Download one on mount.
-  // The native window takes no injected clicks, so these are how the two fetches and their progress
-  // bars get verified in the real app.
+  // `?start-server=1` presses the card's own Start. The native window takes no injected clicks, so
+  // these are how the two fetches and the engine load get verified in the real app.
   const params = new URLSearchParams(window.location.search);
   const autoInstall = params.get("install-engine") === "1";
   const autoDownload = params.get("download-weights") === "1";
+  const autoStart = params.get("start-server") === "1";
   useEffect(() => {
     if (autoInstall) void installEngine();
   }, [autoInstall, installEngine]);
   useEffect(() => {
     if (autoDownload) void downloadWeights();
   }, [autoDownload, downloadWeights]);
+  useEffect(() => {
+    if (autoStart) void start();
+  }, [autoStart, start]);
 
   if (loading && !status) {
     return <p className="transcript-row">{translate(locale, "model.status.checking")}</p>;
@@ -217,6 +223,21 @@ export function ModelStatus({ locale }: { locale: Locale }) {
           </div>
         )}
       </dl>
+      {!engine && !status.blocked && (
+        // The mirror of the release below: without it the only way back to a warm server is sending a
+        // message and waiting through the load it triggered.
+        <button
+          type="button"
+          onClick={() => void start()}
+          disabled={starting || running}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-2.5 py-1 text-[calc(var(--font-ui)-2px)] text-muted hover:bg-hover hover:text-fg disabled:opacity-60"
+        >
+          <Icon name="bolt" size={13} />
+          {starting
+            ? translate(locale, "model.server.starting")
+            : translate(locale, "model.server.start")}
+        </button>
+      )}
       {engine && !status.blocked && (
         // This is the app's only way back: the composer's Stop ends an answer and keeps the server,
         // so without this control the weights stay resident until the window closes. The next

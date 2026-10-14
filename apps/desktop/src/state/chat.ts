@@ -9,6 +9,8 @@ import { useTranscript } from "./transcript";
 type ChatStore = {
   engine: EngineView | null;
   sending: boolean;
+  /** A server start is in flight: the load takes seconds, and a card that shows nothing looks frozen. */
+  starting: boolean;
   /** A failure the transcript has no row for: a status poll that could not be answered, a release
    * the host refused. A send's own failure belongs to the transcript, and only to it. */
   error: string | null;
@@ -17,6 +19,7 @@ type ChatStore = {
   refresh: () => Promise<void>;
   send: (text: string) => Promise<void>;
   stop: () => Promise<void>;
+  start: () => Promise<void>;
   release: () => Promise<void>;
   newTask: () => Promise<void>;
 };
@@ -24,6 +27,7 @@ type ChatStore = {
 export const useChat = create<ChatStore>((set, get) => ({
   engine: null,
   sending: false,
+  starting: false,
   error: null,
   announced: false,
   refresh: async () => {
@@ -66,6 +70,22 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
     // No engine refresh: the server is the same process it was before the click, and the run's own
     // `runFinished` is what closes the answer out in the transcript.
+  },
+  /**
+   * Put the weights back, from the status card's own control. The host answers with the server it
+   * started, so the card needs no second poll to know the address it is about to print.
+   */
+  start: async () => {
+    set({ error: null, starting: true });
+    try {
+      set({ engine: await ipc.startEngine() });
+    } catch (error) {
+      // A load the machine refused — no pack, a window too large for the memory behind it — is the
+      // card's sentence to say, and the composer is where the card's failures already land.
+      set({ error: String(error) });
+    } finally {
+      set({ starting: false });
+    }
   },
   /**
    * Release the weights, from the status card's own control. The next message starts a fresh server,

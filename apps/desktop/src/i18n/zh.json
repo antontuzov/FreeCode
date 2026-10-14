@@ -41,6 +41,8 @@
   "model.engine": "引擎",
   "model.server": "本地服务",
   "model.server.stop": "停止服务",
+  "model.server.start": "启动服务",
+  "model.server.starting": "正在启动…",
   "model.status.checking": "正在检查本地模型…",
   "model.status.ready": "本地模型已就绪",
   "model.status.noEngine": "未安装 PrismML 引擎",
