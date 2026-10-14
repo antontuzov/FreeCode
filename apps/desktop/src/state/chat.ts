@@ -9,8 +9,8 @@ import { useTranscript } from "./transcript";
 type ChatStore = {
   engine: EngineView | null;
   sending: boolean;
-  /** A failure the transcript has no row for: a status poll that could not be answered, a Stop that
-   * refused. A send's own failure belongs to the transcript, and only to it. */
+  /** A failure the transcript has no row for: a status poll that could not be answered, a release
+   * the host refused. A send's own failure belongs to the transcript, and only to it. */
   error: string | null;
   /** Set once the host has announced anything about the current send. */
   announced: boolean;

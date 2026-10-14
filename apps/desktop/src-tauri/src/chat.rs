@@ -692,18 +692,23 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
 /// already streamed stays on screen either way.
 #[tauri::command]
 pub async fn chat_stop(app: AppHandle) -> Result<(), String> {
-    request_stop(&app.state::<ChatState>())
+    request_stop(&app.state::<ChatState>());
+    Ok(())
 }
 
-fn request_stop(state: &ChatState) -> Result<(), String> {
-    {
-        let slot = lock(&state.slot);
-        if !slot.streaming {
-            return Err("there is no reply in flight".into());
-        }
+/// Raise this run's stop flag, if there is a run to stop.
+///
+/// Nothing in flight is a success, not a refusal: the control is only drawn while an answer is
+/// arriving, so the one way to land there is a second click that lost the race to the last chunk —
+/// and a double-click is not something to put an error line on screen for.
+fn request_stop(state: &ChatState) -> bool {
+    if !lock(&state.slot).streaming {
+        return false;
     }
+    // Set here and read by the run at its next batch of deltas; a click that lands after the last
+    // chunk must not label a complete answer as one that was stopped.
     state.stop_requested.store(true, Ordering::Relaxed);
-    Ok(())
+    true
 }
 
 /// Start a new task: forget the conversation, keep the server running.
@@ -736,13 +741,13 @@ mod tests {
     #[test]
     fn a_stop_names_the_reply_in_flight_and_nothing_else() {
         let state = ChatState::default();
-        // Idle: the flag stays down, so a click that arrives after the answer finished cannot be
-        // mistaken for one that cut the answer short.
-        assert!(request_stop(&state).is_err());
+        // Idle: nothing is stopped, and the flag stays down, so a click that arrives after the
+        // answer finished cannot be mistaken for one that cut the answer short.
+        assert!(!request_stop(&state));
         assert!(!state.stop_requested.load(Ordering::Relaxed));
 
         lock(&state.slot).streaming = true;
-        request_stop(&state).unwrap();
+        assert!(request_stop(&state));
         assert!(state.stop_requested.load(Ordering::Relaxed));
     }
 
