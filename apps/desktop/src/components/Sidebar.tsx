@@ -78,7 +78,7 @@ export function Sidebar({
   actions: SidebarActions;
 }) {
   const workspaces = fixture ? FIXTURE_WORKSPACES : [];
-  const notInBuild = translate(locale, "sidebar.notInBuild");
+  const notInBuild = translate(locale, "common.notInBuild");
 
   const row = (r: NavRow) => (
     <Row

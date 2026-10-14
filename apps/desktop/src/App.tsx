@@ -105,7 +105,7 @@ export default function App() {
           actions={{ newTask: () => void newTask() }}
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Transcript locale={locale} />
+          <Transcript locale={locale} onPickModel={() => setSettingsPage("model")} />
           <StatusBar locale={locale} />
         </div>
         <div className="flex flex-col">

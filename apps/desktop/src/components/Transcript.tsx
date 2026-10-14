@@ -194,7 +194,7 @@ function previewOf(text: string): string {
 
 const NEAR_BOTTOM_PX = 48;
 
-export function Transcript({ locale }: { locale: Locale }) {
+export function Transcript({ locale, onPickModel }: { locale: Locale; onPickModel: () => void }) {
   const rows = useTranscript((s) => s.rows);
   const running = useTranscript((s) => s.running);
   const scroll = useRef<HTMLDivElement>(null);
@@ -253,10 +253,13 @@ export function Transcript({ locale }: { locale: Locale }) {
         <h1 className="min-w-0 flex-1 truncate text-sm font-medium text-fg">
           {translate(locale, "transcript.title")}
         </h1>
+        {/* The skills and extensions this button would manage are not in this build. */}
         <button
           type="button"
           className="icon-btn"
           aria-label={translate(locale, "transcript.more")}
+          aria-disabled
+          title={translate(locale, "common.notInBuild")}
         >
           <Icon name="skills" />
         </button>
@@ -332,7 +335,7 @@ export function Transcript({ locale }: { locale: Locale }) {
         )}
       </div>
 
-      <Composer locale={locale} />
+      <Composer locale={locale} onPickModel={onPickModel} />
     </main>
   );
 }

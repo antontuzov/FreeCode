@@ -13,13 +13,14 @@ type ApprovalMode = (typeof APPROVAL_MODES)[number];
  * conservative one and every mode is named out loud rather than shown as an icon the user has to
  * decode. Wiring it to the loop is Phase 4; until then it holds state and nothing more.
  */
-export function Composer({ locale }: { locale: Locale }) {
+export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel: () => void }) {
   const running = useTranscript((s) => s.running);
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
   const error = useChat((s) => s.error);
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<ApprovalMode>("ask");
+  const notInBuild = translate(locale, "common.notInBuild");
 
   const submit = () => {
     if (!draft.trim()) return;
@@ -57,13 +58,23 @@ export function Composer({ locale }: { locale: Locale }) {
           </p>
         )}
         <div className="flex items-center gap-2 px-[var(--space-3)] pb-[var(--space-3)]">
-          <button type="button" className="icon-btn" aria-label={translate(locale, "composer.add")}>
+          {/* Nothing this build can add to a prompt yet: attachments wait on the vision path, voice
+              on the input it would transcribe into. Named on hover, like the sidebar's unbuilt rows. */}
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={translate(locale, "composer.add")}
+            aria-disabled
+            title={notInBuild}
+          >
             <Icon name="plus" />
           </button>
           <button
             type="button"
             className="icon-btn"
             aria-label={translate(locale, "composer.attach")}
+            aria-disabled
+            title={notInBuild}
           >
             <Icon name="attach" />
           </button>
@@ -86,6 +97,7 @@ export function Composer({ locale }: { locale: Locale }) {
 
           <button
             type="button"
+            onClick={onPickModel}
             className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-[calc(var(--font-ui)-2px)] text-muted hover:bg-hover hover:text-fg"
           >
             <Icon name="bolt" size={13} />
@@ -96,6 +108,8 @@ export function Composer({ locale }: { locale: Locale }) {
             type="button"
             className="icon-btn"
             aria-label={translate(locale, "composer.mic", { shortcut: "⌥V" })}
+            aria-disabled
+            title={notInBuild}
           >
             <Icon name="mic" />
           </button>
