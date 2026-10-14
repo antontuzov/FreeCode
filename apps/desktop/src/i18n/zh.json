@@ -40,6 +40,7 @@
   "model.packing": "量化方案",
   "model.engine": "引擎",
   "model.server": "本地服务",
+  "model.server.stop": "停止服务",
   "model.status.checking": "正在检查本地模型…",
   "model.status.ready": "本地模型已就绪",
   "model.status.noEngine": "未安装 PrismML 引擎",

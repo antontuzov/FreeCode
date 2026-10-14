@@ -17,6 +17,7 @@ type ChatStore = {
   refresh: () => Promise<void>;
   send: (text: string) => Promise<void>;
   stop: () => Promise<void>;
+  release: () => Promise<void>;
   newTask: () => Promise<void>;
 };
 
@@ -65,6 +66,23 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
     // No engine refresh: the server is the same process it was before the click, and the run's own
     // `runFinished` is what closes the answer out in the transcript.
+  },
+  /**
+   * Release the weights, from the status card's own control. The next message starts a fresh server,
+   * which is the price of the click and the reason this is not what Stop does.
+   */
+  release: async () => {
+    set({ error: null });
+    try {
+      await ipc.stopEngine();
+    } catch (error) {
+      set({ error: String(error) });
+      return;
+    }
+    // The window the last run filled is gone with the server that held it, so the meter has nothing
+    // left to report.
+    useTranscript.getState().setContextUsed(null);
+    await get().refresh();
   },
   newTask: async () => {
     set({ error: null });

@@ -535,23 +535,29 @@ pub async fn start_engine(app: AppHandle) -> Result<EngineView, String> {
     Ok(ensure_running(&app).await?.view)
 }
 
-/// Stop the engine and release its port, and with it the restart budget: the same reasoning as
-/// [`start_engine`], and Stop is the control that is reachable while a run is in flight.
+/// Release the engine and its port, so the weights stop occupying memory until something asks for
+/// them again, and with it the restart budget: the same reasoning as [`start_engine`].
+///
+/// Refused while an answer is streaming. Interrupting a reply is [`chat_stop`], which keeps the
+/// server; pulling the socket out from under a run in flight is a different and more expensive act,
+/// and the control that offers it is disabled until the answer lands.
 #[tauri::command]
 pub async fn stop_engine(app: AppHandle) -> Result<(), String> {
-    let running = {
-        let state = app.state::<ChatState>();
-        let mut slot = lock(&state.slot);
-        slot.re_arm();
-        slot.running.take()
-    };
-    match running {
-        Some(running) => {
-            running.handle.shutdown().await;
-            Ok(())
-        }
-        None => Err("the local engine is not running".into()),
+    let running = take_running(&app.state::<ChatState>())?;
+    running.handle.shutdown().await;
+    Ok(())
+}
+
+/// The server the slot owns, if one may be released right now.
+fn take_running(state: &ChatState) -> Result<Running, String> {
+    let mut slot = lock(&state.slot);
+    if slot.streaming {
+        return Err("an answer is still streaming".into());
     }
+    slot.re_arm();
+    slot.running
+        .take()
+        .ok_or_else(|| "the local engine is not running".into())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -763,6 +769,19 @@ mod tests {
             1,
             "a refused clear left the history alone"
         );
+    }
+
+    /// The card's release is not the composer's Stop: it may not pull the socket out from under a
+    /// reply that is still arriving.
+    #[test]
+    fn releasing_the_engine_waits_for_the_answer_in_flight() {
+        let state = ChatState::default();
+        let idle = take_running(&state).err().unwrap();
+        assert!(idle.contains("not running"), "{idle}");
+
+        lock(&state.slot).streaming = true;
+        let busy = take_running(&state).err().unwrap();
+        assert!(busy.contains("streaming"), "{busy}");
     }
 
     #[test]

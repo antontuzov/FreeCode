@@ -4,6 +4,7 @@ import { translate, type Locale } from "../i18n";
 import type { EngineInstallProgress, WeightsProgress } from "../lib/ipc";
 import { useChat } from "../state/chat";
 import { useModel } from "../state/model";
+import { useTranscript } from "../state/transcript";
 import { Icon } from "./icons";
 
 /** The lock records sizes in bytes; a download label that needs three digits to read is no use. */
@@ -107,6 +108,8 @@ export function ModelStatus({ locale }: { locale: Locale }) {
     downloadWeights,
   } = useModel();
   const engine = useChat((s) => s.engine);
+  const release = useChat((s) => s.release);
+  const running = useTranscript((s) => s.running);
 
   useEffect(() => {
     void refresh();
@@ -214,6 +217,20 @@ export function ModelStatus({ locale }: { locale: Locale }) {
           </div>
         )}
       </dl>
+      {engine && !status.blocked && (
+        // This is the app's only way back: the composer's Stop ends an answer and keeps the server,
+        // so without this control the weights stay resident until the window closes. The next
+        // message starts a fresh server, and paying that load is what the click is for.
+        <button
+          type="button"
+          onClick={() => void release()}
+          disabled={running}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-2.5 py-1 text-[calc(var(--font-ui)-2px)] text-muted hover:bg-hover hover:text-fg disabled:opacity-60"
+        >
+          <Icon name="stop" size={13} />
+          {translate(locale, "model.server.stop")}
+        </button>
+      )}
       {status.blocked ? (
         <div className="mt-3 rounded-[var(--radius-md)] border border-danger/40 p-3">
           <p className="text-[calc(var(--font-ui)-1px)] font-medium text-danger">

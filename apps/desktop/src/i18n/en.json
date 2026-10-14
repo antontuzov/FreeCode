@@ -40,6 +40,7 @@
   "model.packing": "Packing",
   "model.engine": "Engine",
   "model.server": "Local server",
+  "model.server.stop": "Stop server",
   "model.status.checking": "Checking the local model…",
   "model.status.ready": "Local model ready",
   "model.status.noEngine": "PrismML engine not installed",
