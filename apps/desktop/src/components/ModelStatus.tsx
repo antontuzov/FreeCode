@@ -186,7 +186,7 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   return (
     <section
       aria-label={translate(locale, "model.packing")}
-      className="w-[var(--inspector-width)] shrink-0 border-b border-line bg-elevated p-[var(--space-4)]"
+      className="w-[var(--inspector-width)] shrink-0 border-b border-line bg-elevated p-[var(--space-4)] shadow-raised"
     >
       <div className="flex items-center gap-2">
         <Icon name="bolt" size={15} className="text-accent" />

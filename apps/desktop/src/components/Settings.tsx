@@ -207,7 +207,7 @@ function Help({ t }: { t: T }) {
   return (
     <div className="absolute bottom-[var(--space-6)] right-[var(--space-6)] flex flex-col items-end gap-[var(--space-2)]">
       {open && (
-        <dl className="card w-[300px] p-[var(--space-4)] text-[calc(var(--font-ui)-1px)]">
+        <dl className="card w-[300px] p-[var(--space-4)] text-[calc(var(--font-ui)-1px)] shadow-raised">
           {status ? (
             <>
               <dt className="text-faint">{t("help.model")}</dt>

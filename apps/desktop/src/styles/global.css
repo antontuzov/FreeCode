@@ -27,6 +27,9 @@
   --color-diff-removed: var(--diff-removed);
   --font-sans: var(--font-family-ui);
   --font-mono: var(--font-family-code);
+  /* Both modes state a shadow and nothing spent one, so every floating surface sat at the same
+     height as the page it was lifted off. `shadow-raised` is the consumer. */
+  --shadow-raised: var(--shadow);
 }
 
 html,
