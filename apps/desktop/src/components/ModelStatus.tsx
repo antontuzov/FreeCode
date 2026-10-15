@@ -308,7 +308,7 @@ export function ModelStatus({ locale }: { locale: Locale }) {
               count: status.uncheckedWarnings.length,
             })}
           </summary>
-          <ul className="mt-1 list-disc pl-5">
+          <ul className="disclosure-panel mt-1 list-disc pl-5">
             {status.uncheckedWarnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}

@@ -40,11 +40,15 @@ function Section({ group, items, locale }: { group: Group; items: Item[]; locale
         aria-expanded={open}
         className="flex w-full items-center gap-2 px-[var(--space-4)] py-[var(--space-3)] text-muted hover:bg-hover hover:text-fg"
       >
-        <Icon name="chevronDown" size={13} className={open ? "" : "-rotate-90"} />
+        <Icon
+          name="chevronDown"
+          size={13}
+          className={`disclosure-icon ${open ? "" : "-rotate-90"}`}
+        />
         <span className="text-quiet">{label}</span>
       </button>
       {open && (
-        <ul className="px-[var(--space-4)] pb-[var(--space-3)]">
+        <ul className="disclosure-panel px-[var(--space-4)] pb-[var(--space-3)]">
           {items.length === 0 ? (
             <li className="py-1 text-fine text-faint">
               {translate(locale, "inspector.empty", { group: label })}

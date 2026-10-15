@@ -37,6 +37,11 @@
   /* Both modes state a shadow and nothing spent one, so every floating surface sat at the same
      height as the page it was lifted off. `shadow-raised` is the consumer. */
   --shadow-raised: var(--shadow);
+  /* Tailwind's bare `transition-*` utilities default to 150ms/`ease`; pointing the defaults at the
+     scale above means a utility-written transition and a hand-written one in this file move at the
+     same speed. */
+  --default-transition-duration: var(--dur-quick);
+  --default-transition-timing-function: var(--ease-standard);
 }
 
 html,
@@ -67,6 +72,71 @@ body {
   outline-offset: 2px;
 }
 
+/* ---- motion ----
+ * The durations and the curve are in tokens.css. What follows is the rest of the vocabulary: the
+ * four things that move without being hovered. */
+
+/* Press feedback. A click that starts a two-second model load otherwise feels like nothing
+ * happened, because its only acknowledgement lands somewhere else on the screen. */
+:where(button, .style-card) {
+  transition: transform var(--dur-quick) var(--ease-standard);
+}
+:where(button, .style-card):active:not([disabled], [aria-disabled="true"]) {
+  transform: translateY(1px);
+}
+
+/* A row arrives at the bottom of the column and pushes everything else up; showing the arrival is
+ * what makes that read as an addition rather than the column jumping. */
+@keyframes row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.row-enter {
+  animation: row-enter var(--dur-steady) var(--ease-standard);
+}
+
+/* The answer lands token by token, and a block at the end of what has arrived so far is the
+ * shortest way to say "this is not finished yet". Hard on/off, the way a terminal caret is. */
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.caret-streaming::after {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: caret-blink 1.1s infinite;
+}
+
+/* A disclosure's panel fades into place under a chevron that turns. Sliding it open would mean
+ * measuring it first, and a transcript panel's height is not knowable until the run fills it. */
+@keyframes disclosure-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+.disclosure-panel {
+  animation: disclosure-enter var(--dur-quick) var(--ease-standard);
+}
+.disclosure-icon {
+  transition:
+    rotate var(--dur-quick) var(--ease-standard),
+    transform var(--dur-quick) var(--ease-standard);
+}
+
 /* ---- the repeated shapes in the reference shots ---- */
 
 /* Nav rows are icon + label, quiet until hovered; the active one is an outlined pill, not a fill. */
@@ -79,11 +149,12 @@ body {
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   color: var(--text-muted);
-  font-size: var(--font-ui);
+  font-size: var(--size-ui);
   text-align: left;
   transition:
-    background-color 120ms ease,
-    color 120ms ease;
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard),
+    transform var(--dur-quick) var(--ease-standard);
 }
 .nav-item:hover {
   background: var(--bg-hover);
@@ -142,8 +213,9 @@ body {
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   transition:
-    background-color 120ms ease,
-    color 120ms ease;
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard),
+    transform var(--dur-quick) var(--ease-standard);
 }
 .icon-btn:hover {
   background: var(--bg-hover);
@@ -179,17 +251,18 @@ body {
   width: 6px;
   height: 2px;
   background: var(--checkpoint);
-  transition: background-color 120ms ease;
+  transition: background-color var(--dur-quick) var(--ease-standard);
 }
 .checkpoint:hover::after,
 .checkpoint[data-active="true"]::after {
   background: var(--checkpoint-active);
 }
 
-/* The pair that was just jumped to, marked for as long as the jump is the newest thing done. */
+/* The pair that was just jumped to, marked for as long as the jump is the newest thing done. The
+ * 1.4s is the same window Transcript.tsx holds the flash flag for; the two move together. */
 .turn-anchor[data-flash="true"] {
   border-radius: var(--radius-md);
-  animation: checkpoint-flash 1.4s ease-out;
+  animation: checkpoint-flash 1.4s var(--ease-standard);
 }
 
 @keyframes checkpoint-flash {
@@ -212,7 +285,7 @@ body {
 }
 .row-title {
   color: var(--text-strong);
-  font-size: var(--font-ui);
+  font-size: var(--size-ui);
 }
 .row-desc {
   color: var(--text-muted);
@@ -286,7 +359,7 @@ select.field-input {
   border: none;
   border-radius: var(--radius-pill);
   background: var(--border-strong);
-  transition: background-color 140ms ease;
+  transition: background-color var(--dur-quick) var(--ease-standard);
 }
 .toggle::after {
   content: "";
@@ -298,7 +371,7 @@ select.field-input {
   border-radius: 50%;
   background: var(--bg-elevated);
   box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
-  transition: transform 140ms ease;
+  transition: transform var(--dur-quick) var(--ease-standard);
 }
 .toggle[data-on="true"] {
   background: var(--accent);
@@ -406,6 +479,8 @@ select.field-input {
   --preview: var(--style-parchment);
 }
 
+/* A run in flight says so with a breathing dot. Its 1.2s is an attention loop, not feedback under
+ * the pointer, so it deliberately sits outside the interaction scale above. */
 .dot-running {
   width: 8px;
   height: 8px;
@@ -421,5 +496,19 @@ select.field-input {
   }
   50% {
     opacity: 1;
+  }
+}
+
+/* tokens.css collapses `--dur-*`, which only transitions read. These are the keyframe animations,
+ * and a blinking caret or a pulsing dot is exactly what the setting asks to stop. The static end
+ * state still carries the meaning: a solid dot is still a running row, a solid caret is still an
+ * answer being written. */
+@media (prefers-reduced-motion: reduce) {
+  .dot-running,
+  .caret-streaming::after,
+  .row-enter,
+  .disclosure-panel,
+  .turn-anchor[data-flash="true"] {
+    animation: none;
   }
 }

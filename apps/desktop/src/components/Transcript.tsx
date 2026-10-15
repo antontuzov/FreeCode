@@ -38,7 +38,7 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
   }
 
   return (
-    <li>
+    <li className="row-enter">
       <div className="flex items-center gap-2 py-1.5">
         {hasChildren ? (
           <button
@@ -48,7 +48,11 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
             className="icon-btn size-5"
             aria-label={stepLabel(locale, step)}
           >
-            <Icon name="chevronRight" size={13} className={open ? "rotate-90" : ""} />
+            <Icon
+              name="chevronRight"
+              size={13}
+              className={`disclosure-icon ${open ? "rotate-90" : ""}`}
+            />
           </button>
         ) : (
           <StatusMark step={step} />
@@ -85,7 +89,7 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
         )}
       </div>
       {hasChildren && open && (
-        <ul className="ml-3 border-l border-line pl-3">
+        <ul className="disclosure-panel ml-3 border-l border-line pl-3">
           {step.children!.map((child) => (
             <StepRow key={child.id} step={child} locale={locale} />
           ))}
@@ -116,7 +120,7 @@ function TurnRow({
       <li
         ref={anchor}
         data-flash={flash ? "true" : undefined}
-        className="turn-anchor flex justify-end py-1.5"
+        className="turn-anchor row-enter flex justify-end py-1.5"
       >
         <p className="max-w-[80%] whitespace-pre-wrap break-words rounded-[var(--radius-lg)] bg-accent-soft px-[var(--space-3)] py-1.5 text-quiet text-fg-strong">
           {turn.text}
@@ -126,7 +130,7 @@ function TurnRow({
   }
   const waiting = turn.streaming && !turn.text && !turn.thought;
   return (
-    <li className="py-1.5">
+    <li className="row-enter py-1.5">
       {turn.thought && (
         // Open while it is the only thing there, folded once the answer arrives.
         <details className="mb-1.5" open={!turn.text}>
@@ -134,13 +138,17 @@ function TurnRow({
             <Icon name="thought" size={13} />
             {translate(locale, turn.text ? "transcript.step.thought" : "chat.thinking")}
           </summary>
-          <p className="mt-1 whitespace-pre-wrap break-words border-l border-line pl-3 text-fine text-muted">
+          <p className="disclosure-panel mt-1 whitespace-pre-wrap break-words border-l border-line pl-3 text-fine text-muted">
             {turn.thought}
           </p>
         </details>
       )}
       {turn.text ? (
-        <p className="whitespace-pre-wrap break-words text-quiet leading-relaxed text-fg">
+        <p
+          className={`whitespace-pre-wrap break-words text-quiet leading-relaxed text-fg ${
+            turn.streaming ? "caret-streaming" : ""
+          }`}
+        >
           {turn.text}
         </p>
       ) : waiting ? (

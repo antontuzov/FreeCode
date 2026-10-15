@@ -45,6 +45,14 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-6: 24px;
+  /* Motion. Two durations, one curve: `quick` is feedback under the pointer — hover, press, a
+     chevron turning — and `steady` is a region arriving or leaving. Components used to write
+     120ms/140ms/`ease` per site, which meant a control's feedback speed was a coincidence of who
+     typed it. Attention loops (the running dot, the streaming caret) are their own rhythm and stay
+     literal: they are not interaction feedback. */
+  --dur-quick: 120ms;
+  --dur-steady: 240ms;
+  --ease-standard: cubic-bezier(0.2, 0.7, 0.25, 1);
 }
 
 /* ---- mode: dark ----
@@ -184,5 +192,10 @@
 @media (prefers-reduced-motion: reduce) {
   :root {
     --blur-amount: 0px;
+    /* A state change still resolves, just instantly. Durations are only read by transitions; the
+     * keyframe animations are named in global.css's own guard, because a blinking caret is exactly
+     * the thing this setting exists to stop. */
+    --dur-quick: 1ms;
+    --dur-steady: 1ms;
   }
 }
