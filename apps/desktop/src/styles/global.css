@@ -61,12 +61,6 @@ body {
   overflow: hidden;
 }
 
-.surface {
-  background: var(--surface-bg);
-  backdrop-filter: var(--surface-blur);
-  border-color: var(--surface-border);
-}
-
 /* Every interactive element is reachable: focus is a ring in the accent, not a color swap. */
 :focus-visible {
   outline: 2px solid var(--accent);
@@ -184,6 +178,14 @@ body {
   background: var(--bg-elevated);
   overflow: hidden;
 }
+/* The Glass toggle is about the one card that floats over something scrolling rather than sitting in
+ * a column of its own: the page shows through it in glass mode and does not in solid mode. Named as
+ * a pair because `.card` would otherwise win the cascade and the choice would paint nothing. */
+.card.surface {
+  border-color: var(--surface-border);
+  background: var(--surface-bg);
+  backdrop-filter: var(--surface-blur);
+}
 .card-row {
   display: flex;
   align-items: center;
@@ -294,6 +296,21 @@ body {
 .row-desc {
   color: var(--text-muted);
   font-size: var(--size-quiet);
+}
+/* A row's own admission that this build saves the choice and does not act on it. It rides one step
+ * down the ink ladder from the description under it, which is the same distance the description sits
+ * below the title — the page has one ladder, and an admission is not the loudest thing on a row. */
+.row-inert {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-faint);
+  font-size: var(--size-micro);
+  font-weight: 400;
+  vertical-align: 1px;
+  white-space: nowrap;
 }
 
 /* One bordered trigger for the select, the number box and the text field. */

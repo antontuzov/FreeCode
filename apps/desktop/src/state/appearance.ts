@@ -61,8 +61,8 @@ export function applyToDocument(a: AppearanceState): void {
   root.dataset.platform = platform();
 }
 
-/** Dev-only URL levers — `?mode=light`, `?font=serif`, `?width=wide`, `?lines=off`, `?wrap=on` —
- * honoured only by a dev build.
+/** Dev-only URL levers — `?mode=light`, `?font=serif`, `?width=wide`, `?lines=off`, `?wrap=on`,
+ * `?glass=off` — honoured only by a dev build.
  * A screenshot comparison needs a state the native window cannot be clicked into, and the alternative
  * was rewriting the settings file the user's own instance reads, which would have flipped their window
  * to get a picture of ours. Production has no such lever: the appearance comes off disk or from
@@ -84,6 +84,10 @@ function devOverrides(): Partial<AppearanceState> {
   if (lines === "on" || lines === "off") forced.showLineNumbers = lines === "on";
   const wrap = q.get("wrap");
   if (wrap === "on" || wrap === "off") forced.wrapLongLines = wrap === "on";
+  // The one lever here that is not about ink: glass is a surface treatment, and the difference
+  // between the two states is a floating card that either lets the page show through it or does not.
+  const glass = q.get("glass");
+  if (glass === "on" || glass === "off") forced.glass = glass === "on";
   return forced;
 }
 

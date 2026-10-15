@@ -27,16 +27,24 @@ export function Section({
 export function Row({
   title,
   description,
+  inert,
   children,
 }: {
   title: string;
   description?: string;
+  /** Set when this row writes a choice nothing in the window reads yet. The control stays live — the
+   * document it saves is the same one a later build will render — but the row does not get to imply
+   * an effect it does not have. */
+  inert?: string;
   children: ReactNode;
 }) {
   return (
     <div className="card-row">
       <div className="row-copy">
-        <span className="row-title">{title}</span>
+        <span className="row-title">
+          {title}
+          {inert && <span className="row-inert">{inert}</span>}
+        </span>
         {description && <span className="row-desc">{description}</span>}
       </div>
       {children}

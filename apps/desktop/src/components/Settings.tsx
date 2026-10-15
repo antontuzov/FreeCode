@@ -188,7 +188,7 @@ function Page({
 }) {
   switch (page) {
     case "appearance":
-      return <Appearance doc={doc} set={set} t={t} />;
+      return <Appearance doc={doc} set={set} t={t} locale={locale} />;
     case "voice":
       return <Voice doc={doc} set={set} t={t} locale={locale} />;
     case "agent":
@@ -205,11 +205,16 @@ function Page({
  * documentation that does not exist yet. */
 function Help({ t }: { t: T }) {
   const status = useModel((s) => s.status);
-  const [open, setOpen] = useState(false);
+  // `?help=open` stands in for the click this window cannot be given, exactly as `?settings=` does:
+  // the card it opens is the one surface on screen that glass paints, and a picture of it closed
+  // would show nothing of the toggle that decides whether the page shows through it.
+  const [open, setOpen] = useState(
+    new URLSearchParams(window.location.search).get("help") === "open",
+  );
   return (
     <div className="absolute bottom-[var(--space-6)] right-[var(--space-6)] flex flex-col items-end gap-[var(--space-2)]">
       {open && (
-        <dl className="card w-[300px] p-[var(--space-4)] text-quiet shadow-raised">
+        <dl className="card surface w-[300px] p-[var(--space-4)] text-quiet shadow-raised">
           {status ? (
             <>
               <dt className="text-faint">{t("help.model")}</dt>
@@ -245,9 +250,26 @@ function Help({ t }: { t: T }) {
   );
 }
 
-function Appearance({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
+function Appearance({
+  doc,
+  set,
+  t,
+  locale,
+}: {
+  doc: SettingsDoc;
+  set: SetFn;
+  t: T;
+  locale: Locale;
+}) {
   const a = doc.appearance;
   const opt = (v: string) => t(`opt.${v}`);
+  // Five of these rows write a field the window never reads: there is no terminal surface to theme,
+  // no built-in browser to route a link through, no file list to icon, and the answer's code is
+  // painted from the app's own colour tokens rather than from a bundled highlight stylesheet. They
+  // stay because the reference shows them and the document they save is the one a later build
+  // renders — but a row that changes nothing on screen says so, in the words the sidebar already
+  // uses for the same case.
+  const inert = translate(locale, "common.notInBuild");
   return (
     <>
       <Section label={t("section.interfaceStyle")}>
@@ -274,7 +296,7 @@ function Appearance({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
             />
           ))}
         </div>
-        <Row title={t("row.terminalTheme")} description={t("row.terminalTheme.desc")}>
+        <Row title={t("row.terminalTheme")} description={t("row.terminalTheme.desc")} inert={inert}>
           <Select
             label={t("row.terminalTheme")}
             value={a.terminalTheme}
@@ -285,7 +307,11 @@ function Appearance({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
             onChange={(v) => set((d) => void (d.appearance.terminalTheme = v))}
           />
         </Row>
-        <Row title={t("row.builtInBrowser")} description={t("row.builtInBrowser.desc")}>
+        <Row
+          title={t("row.builtInBrowser")}
+          description={t("row.builtInBrowser.desc")}
+          inert={inert}
+        >
           <Toggle
             on={a.useBuiltInBrowserForTerminalLinks}
             label={t("row.builtInBrowser")}
@@ -319,7 +345,7 @@ function Appearance({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
             onChange={(v) => set((d) => void (d.appearance.contentWidth = v))}
           />
         </Row>
-        <Row title={t("row.fileIcons")} description={t("row.fileIcons.desc")}>
+        <Row title={t("row.fileIcons")} description={t("row.fileIcons.desc")} inert={inert}>
           <Select
             label={t("row.fileIcons")}
             value={a.fileIcons}
@@ -340,14 +366,18 @@ function Appearance({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
       </Section>
 
       <Section label={t("section.code")} description={t("section.code.desc")}>
-        <Row title={t("row.lightCodeTheme")} description={t("row.lightCodeTheme.desc")}>
+        <Row
+          title={t("row.lightCodeTheme")}
+          description={t("row.lightCodeTheme.desc")}
+          inert={inert}
+        >
           <TextField
             label={t("row.lightCodeTheme")}
             value={a.lightCodeTheme}
             onChange={(v) => set((d) => void (d.appearance.lightCodeTheme = v))}
           />
         </Row>
-        <Row title={t("row.darkCodeTheme")} description={t("row.darkCodeTheme.desc")}>
+        <Row title={t("row.darkCodeTheme")} description={t("row.darkCodeTheme.desc")} inert={inert}>
           <TextField
             label={t("row.darkCodeTheme")}
             value={a.darkCodeTheme}
