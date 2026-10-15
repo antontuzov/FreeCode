@@ -265,7 +265,9 @@ export const FIXTURE_ROWS: Row[] = [
     id: "f1t",
     kind: "turn",
     role: "assistant",
-    text: "Picking up the next phase rather than waiting: wiring the loop, since that is what makes everything so far actually runnable.",
+    // Markdown and LaTeX on purpose: this is also the row that proves the answer parser runs on
+    // real model output rather than on a paragraph that happened to need no formatting.
+    text: "Picking up the next phase rather than waiting: wiring the loop, since that is what makes everything so far actually runnable.\n\nThe budget per turn is $O(n^2)$ in the replayed history, so the cache does most of the work:\n\n```rust\nlet ratio = cached as f32 / prompt as f32;\n```",
   },
   {
     id: "f2",

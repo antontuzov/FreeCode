@@ -9,6 +9,7 @@ import {
   type Step,
   type Turn,
 } from "../state/transcript";
+import { Answer } from "./Answer";
 import { BrandMark } from "./BrandMark";
 import { Composer } from "./Composer";
 import { Icon } from "./icons";
@@ -145,13 +146,7 @@ function TurnRow({
         </details>
       )}
       {turn.text ? (
-        <p
-          className={`whitespace-pre-wrap break-words text-quiet leading-relaxed text-fg ${
-            turn.streaming ? "caret-streaming" : ""
-          }`}
-        >
-          {turn.text}
-        </p>
+        <Answer text={turn.text} streaming={turn.streaming} />
       ) : waiting ? (
         <p className="flex items-center gap-2 text-fine text-muted">
           <span className="dot-running" aria-hidden />

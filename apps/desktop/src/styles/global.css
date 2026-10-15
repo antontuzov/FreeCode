@@ -109,7 +109,10 @@ body {
     opacity: 0;
   }
 }
-.caret-streaming::after {
+/* The caret belongs at the end of the text being written. In a parsed answer that text is the last
+ * block of the document, so the caret is hung off it rather than off the container — otherwise a
+ * streaming answer shows the cursor on a line of its own, below the paragraph it is still inside. */
+.caret-streaming > :last-child::after {
   content: "";
   display: inline-block;
   width: 0.5em;
@@ -515,10 +518,195 @@ select.field-input {
 @media (prefers-reduced-motion: reduce) {
   .dot-running,
   .skeleton-line,
-  .caret-streaming::after,
+  .caret-streaming > :last-child::after,
   .row-enter,
   .disclosure-panel,
   .turn-anchor[data-flash="true"] {
     animation: none;
   }
+}
+
+/* ---- the answer ---------------------------------------------------------------------------
+ * A model's markdown is content, not a component, so it is styled once here: the parser hands back
+ * plain `h3` and `li` nodes that no className can be passed to. Every value below is a token, which
+ * is the only reason one answer can read correctly in light, dark and all four accents at once —
+ * the transcript does not get its own palette, and neither does the code inside it.
+ */
+.answer {
+  font-size: var(--size-quiet);
+  line-height: 1.65;
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+.answer > * + * {
+  margin-top: var(--space-3);
+}
+.answer h1,
+.answer h2,
+.answer h3,
+.answer h4 {
+  margin-top: var(--space-4);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+/* The answer's own headings stay inside the column's scale: a model that opens with `#` is
+ * emphasising, not asking for the page title's size. */
+.answer h1,
+.answer h2,
+.answer h3 {
+  font-size: var(--size-ui);
+}
+.answer h4 {
+  font-size: var(--size-quiet);
+}
+.answer p,
+.answer ul,
+.answer ol,
+.answer blockquote {
+  margin: 0;
+}
+.answer ul,
+.answer ol {
+  padding-left: 1.35em;
+}
+.answer ul {
+  list-style: disc;
+}
+.answer ol {
+  list-style: decimal;
+}
+.answer li + li {
+  margin-top: 2px;
+}
+.answer li::marker {
+  color: var(--text-faint);
+}
+.answer a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.answer blockquote {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.answer hr {
+  height: 1px;
+  margin-block: var(--space-4);
+  border: 0;
+  background: var(--border);
+}
+.answer table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.answer th,
+.answer td {
+  padding: 4px var(--space-2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.answer th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* Inline code sits on the gutter colour the tokens already name for it, at the code size the
+ * Appearance page drives — which is a separate axis from the UI scale, so it is not a `text-*` step. */
+.answer :not(pre) > code {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-family: var(--font-family-code);
+  font-size: var(--size-code);
+  color: var(--text-strong);
+}
+.answer-code {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+}
+.answer-code pre {
+  margin: 0;
+  padding: var(--space-4);
+  overflow-x: auto;
+}
+.answer-code code {
+  font-family: var(--font-family-code);
+  font-size: var(--size-code);
+  line-height: 1.6;
+}
+.answer-code-lang {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 2px var(--space-2);
+  border-bottom-left-radius: var(--radius-sm);
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
+  font-family: var(--font-family-code);
+  font-size: var(--size-micro);
+  color: var(--text-faint);
+}
+
+/* Display math scrolls across rather than widening the column, and keeps its own baseline. */
+.answer .katex {
+  font-size: 1.06em;
+}
+.answer .katex-display {
+  margin-block: var(--space-3);
+  padding: 2px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* The highlighter's classes, painted from the theme rather than from a bundled code stylesheet: a
+ * `github-dark.css` in the bundle would put a second palette in the window and make the Appearance
+ * page a lie. Six faces, each one already used somewhere else in the app. */
+.answer .hljs-comment,
+.answer .hljs-quote {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.answer .hljs-keyword,
+.answer .hljs-selector-tag,
+.answer .hljs-literal,
+.answer .hljs-doctag {
+  color: var(--style-parchment);
+}
+.answer .hljs-string,
+.answer .hljs-regexp,
+.answer .hljs-addition,
+.answer .hljs-symbol,
+.answer .hljs-bullet {
+  color: var(--success);
+}
+.answer .hljs-number,
+.answer .hljs-formula {
+  color: var(--warning);
+}
+.answer .hljs-title,
+.answer .hljs-section {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.answer .hljs-attr,
+.answer .hljs-attribute,
+.answer .hljs-variable,
+.answer .hljs-template-variable,
+.answer .hljs-property {
+  color: var(--style-mint);
+}
+.answer .hljs-type,
+.answer .hljs-built_in,
+.answer .hljs-class {
+  color: var(--style-bee);
+}
+.answer .hljs-meta,
+.answer .hljs-name,
+.answer .hljs-tag {
+  color: var(--text-muted);
 }
