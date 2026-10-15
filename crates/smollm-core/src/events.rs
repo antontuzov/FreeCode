@@ -169,10 +169,31 @@ pub enum AgentEvent {
         /// a number nobody measured.
         context_used: Option<f32>,
         total_diff: Option<DiffStat>,
+        /// What the run cost. `None` when its stream never answered the usage ask, because a rate
+        /// divided out of token counts nobody timed is a number that gets believed, not a gap.
+        #[serde(default)]
+        run: Option<RunReport>,
     },
     Failed {
         message: String,
     },
+}
+
+/// What one finished run cost, every field of it read out of the stream's own usage and timing
+/// frames. The rates are the server's — measured on its clock, over the tokens it counted — and
+/// `elapsed_ms` is the host's wall clock, so it is the longer number and the one the user felt.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunReport {
+    pub generated_tokens: u64,
+    pub prompt_tokens: u64,
+    /// Prompt tokens the server took from its prefix cache instead of re-evaluating. The replayed
+    /// history across a conversation is what makes this number grow, and it is the only visible
+    /// proof that the design works.
+    pub cached_tokens: u64,
+    pub generated_per_second: f64,
+    pub prompt_per_second: f64,
+    pub elapsed_ms: u64,
 }
 
 #[cfg(test)]

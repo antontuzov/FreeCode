@@ -143,6 +143,20 @@ export type BlockedInfo = {
 };
 
 /**
+ * What one finished run cost. Mirrors `smollm_core::events::RunReport`. The rates are the server's
+ * own — its clock over the tokens it counted — while `elapsedMs` is the host's wall clock, so the
+ * wait shown is always at least as long as the model time.
+ */
+export type RunReport = {
+  generatedTokens: number;
+  promptTokens: number;
+  cachedTokens: number;
+  generatedPerSecond: number;
+  promptPerSecond: number;
+  elapsedMs: number;
+};
+
+/**
  * `smollm_core::AgentEvent` on the `agent-event` channel. Only the variants this host can emit are
  * listed: the tool-step variants arrive with the agent loop, and their payloads are Rust
  * `TranscriptStep`s rather than the UI's own row shape, so they get their mapping then.
@@ -155,13 +169,15 @@ export type AgentEvent =
   | { type: "warning"; code: string; message: string }
   /** `totalDiff` is the "+N −M" pill's running total, which the tool loop is what produces.
    * `contextUsed` is the percent of the window the finished run left filled, counted by the server;
-   * null when the stream never reported its usage frame. */
+   * null when the stream never reported its usage frame. `run` is what the run cost, and it is null
+   * unless the server timed it — a stopped stream never gets that far. */
   | {
       type: "runFinished";
       runId: string;
       stopped: boolean;
       contextUsed: number | null;
       totalDiff: null;
+      run: RunReport | null;
     }
   | { type: "failed"; message: string };
 

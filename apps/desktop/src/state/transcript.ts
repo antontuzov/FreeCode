@@ -10,7 +10,7 @@
 import { create } from "zustand";
 
 import { translate, type Locale } from "../i18n";
-import type { AgentEvent } from "../lib/ipc";
+import type { AgentEvent, RunReport } from "../lib/ipc";
 
 export type StepKind =
   | "processed"
@@ -208,10 +208,15 @@ type TranscriptStore = {
    * an em dash rather than a made-up number, because a real run is now the thing being shown.
    */
   contextUsed: number | null;
+  /** What the last finished run cost, or null while none has reported. The inspector says "no run
+   * has been timed yet" rather than showing rates for a run that never sent its timings frame. */
+  lastRun: RunReport | null;
   setRows: (rows: Row[]) => void;
   setRunning: (running: boolean) => void;
   /** Presets the meter for the fixture, and clears it when the conversation is thrown away. */
   setContextUsed: (percent: number | null) => void;
+  /** Presets the run report for the fixture; a real run fills it from its own timings. */
+  setLastRun: (run: RunReport | null) => void;
   /** The prompt's own row, added on send so the bubble appears before the engine answers. */
   pushPrompt: (text: string) => void;
   apply: (event: AgentEvent) => void;
@@ -221,9 +226,11 @@ export const useTranscript = create<TranscriptStore>((set) => ({
   rows: [],
   running: false,
   contextUsed: null,
+  lastRun: null,
   setRows: (rows) => set({ rows }),
   setRunning: (running) => set({ running }),
   setContextUsed: (contextUsed) => set({ contextUsed }),
+  setLastRun: (lastRun) => set({ lastRun }),
   pushPrompt: (text) =>
     set((s) => ({ rows: [...s.rows, { id: nextId("turn"), kind: "turn", role: "user", text }] })),
   apply: (event) =>
@@ -240,6 +247,9 @@ export const useTranscript = create<TranscriptStore>((set) => ({
       // already telling the truth about the same window.
       contextUsed:
         event.type === "runFinished" ? (event.contextUsed ?? s.contextUsed) : s.contextUsed,
+      // Unlike the meter, the report is about one run rather than about the window, so a run that
+      // never timed itself replaces the last one's numbers instead of leaving them up.
+      lastRun: event.type === "runFinished" ? event.run : s.lastRun,
     })),
 }));
 

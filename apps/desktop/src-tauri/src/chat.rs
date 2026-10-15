@@ -24,13 +24,13 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use smollm_config::{ReasoningEffort, Settings};
-use smollm_core::events::AgentEvent;
+use smollm_core::events::{AgentEvent, RunReport};
 use smollm_llama::{
     start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message, Reply, ReplyDelta,
     ServerHandle, StreamControl,
@@ -625,6 +625,23 @@ fn context_percent(total_tokens: Option<u64>, window: u32) -> Option<f32> {
     Some(((tokens as f64 * 100.0) / window as f64).clamp(0.0, 100.0) as f32)
 }
 
+/// What the run cost, from the two frames the stream answers with beside the usage one. `None`
+/// unless both landed: token counts without the server's own clock give rates nobody measured, and
+/// the inspector then has nothing to report rather than something invented.
+fn run_report(reply: &Reply, elapsed: Duration) -> Option<RunReport> {
+    let timings = reply.timings?;
+    Some(RunReport {
+        generated_tokens: timings.generated_tokens,
+        prompt_tokens: reply.prompt_tokens?,
+        cached_tokens: timings.cached_tokens,
+        generated_per_second: timings.generated_per_second,
+        prompt_per_second: timings.prompt_per_second,
+        // The host's wall clock rather than the server's sum of its two phases: this is the wait the
+        // user sat through, round trip, queue and every delta over the IPC boundary included.
+        elapsed_ms: elapsed.as_millis() as u64,
+    })
+}
+
 /// Send one prompt to the local engine and stream the answer as `agent-event`s. The return value is
 /// the finished answer, so a listener that missed a delta can still close the turn.
 #[tauri::command]
@@ -667,6 +684,7 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
     request.max_tokens = turn.max_tokens;
     request.reasoning_effort = Some(turn.effort.clone());
 
+    let started = Instant::now();
     let outcome = stream_turn(&app, &turn, &request, &state.stop_requested, &stopped).await;
     lock(&state.slot).streaming = false;
 
@@ -715,6 +733,7 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
                     stopped: stopped.load(Ordering::Relaxed),
                     context_used: context_percent(reply.total_tokens, turn.view.context_tokens),
                     total_diff: None,
+                    run: run_report(&reply, started.elapsed()),
                 },
             );
             // A complete answer is the evidence that the configuration in use works, whatever killed

@@ -121,6 +121,8 @@ export const useChat = create<ChatStore>((set, get) => ({
     // And the meter has no measurement to carry over: the window the last run filled is not the one
     // this conversation will be answered from.
     transcript.setContextUsed(null);
+    // Same for the run report — it describes an answer this transcript no longer holds.
+    transcript.setLastRun(null);
   },
 }));
 

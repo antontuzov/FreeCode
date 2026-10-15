@@ -62,6 +62,10 @@ pub struct Reply {
     /// frame. This is the number that cannot be inferred from the request: a server that trimmed the
     /// conversation to fit reports what it kept, not what it was handed.
     pub prompt_tokens: Option<u64>,
+    /// What the server measured about the run, from the `timings` object that rides with the usage
+    /// frame. `None` when the stream never sent one — the inspector then reports nothing rather than
+    /// dividing a token count by a clock it did not have.
+    pub timings: Option<Timings>,
 }
 
 impl Reply {
@@ -413,6 +417,33 @@ fn chunk_usage(chunk: &Value) -> Option<Usage> {
     })
 }
 
+/// What the fork timed on the run it just answered. The rates are the server's own, measured on the
+/// server's own clock, so they exclude the round trip and any queue in front of the model — the wall
+/// clock a user waited is a larger number, and the host measures that one separately rather than
+/// dividing these counts by a clock it did not have.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Timings {
+    pub prompt_per_second: f64,
+    pub generated_per_second: f64,
+    pub generated_tokens: u64,
+    /// Prompt tokens the server took from its own prefix cache instead of re-evaluating. This is the
+    /// number the replayed-history design is trying to keep large.
+    pub cached_tokens: u64,
+}
+
+/// The `timings` object that rides with the usage frame. All-or-nothing on purpose: a report missing
+/// its cache count would read as a run that cached nothing, which is a claim rather than a gap.
+fn chunk_timings(chunk: &Value) -> Option<Timings> {
+    let timings = chunk.get("timings")?;
+    let num = |key: &str| timings.get(key).and_then(Value::as_f64);
+    Some(Timings {
+        prompt_per_second: num("prompt_per_second")?,
+        generated_per_second: num("predicted_per_second")?,
+        generated_tokens: num("predicted_n")? as u64,
+        cached_tokens: num("cache_n")? as u64,
+    })
+}
+
 fn apply_deltas(reply: &mut Reply, deltas: &[ReplyDelta]) {
     for d in deltas {
         match d {
@@ -494,6 +525,9 @@ pub async fn stream_chat(
                     if let Some(usage) = chunk_usage(&value) {
                         reply.total_tokens = Some(usage.total_tokens);
                         reply.prompt_tokens = Some(usage.prompt_tokens);
+                    }
+                    if let Some(timings) = chunk_timings(&value) {
+                        reply.timings = Some(timings);
                     }
                 }
                 SseEvent::Done => break,
@@ -765,6 +799,45 @@ mod tests {
         );
         // A server that never answers the ask leaves the meter unknown rather than guessing a size.
         assert_eq!(chunk_usage(&json!({ "choices": [], "timings": {} })), None);
+    }
+
+    /// The same frame's other half. The fork sends the timings object beside the usage one, and it is
+    /// the only place the app can learn how fast this machine actually ran the model.
+    #[test]
+    fn the_timings_frame_is_what_says_how_fast_the_run_was() {
+        // Verbatim shape from the pinned fork, with the counts a 1.7B pack on Metal produces.
+        assert_eq!(
+            chunk_timings(&json!({
+                "choices": [],
+                "timings": {
+                    "cache_n": 14,
+                    "prompt_n": 15,
+                    "prompt_ms": 96.4,
+                    "prompt_per_token_ms": 6.4,
+                    "prompt_per_second": 155.6,
+                    "predicted_n": 168,
+                    "predicted_ms": 8412.7,
+                    "predicted_per_token_ms": 50.1,
+                    "predicted_per_second": 19.97
+                }
+            })),
+            Some(Timings {
+                prompt_per_second: 155.6,
+                generated_per_second: 19.97,
+                generated_tokens: 168,
+                cached_tokens: 14,
+            })
+        );
+        // Half a report is not a report: a missing cache count would read as a run that cached
+        // nothing, which is a claim about the model rather than a gap in the numbers.
+        assert_eq!(
+            chunk_timings(&json!({ "timings": { "predicted_per_second": 20.0 } })),
+            None
+        );
+        assert_eq!(
+            chunk_timings(&json!({ "usage": { "total_tokens": 31 } })),
+            None
+        );
     }
 
     #[test]
