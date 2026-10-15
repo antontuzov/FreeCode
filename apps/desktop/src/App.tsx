@@ -7,6 +7,7 @@ import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { Transcript } from "./components/Transcript";
 import type { Locale } from "./i18n";
+import { useShortcuts } from "./lib/shortcuts";
 import { useAppearance } from "./state/appearance";
 import { connectAgentEvents, useChat } from "./state/chat";
 import { FIXTURE_ROWS, useTranscript } from "./state/transcript";
@@ -90,6 +91,25 @@ export default function App() {
     const timer = setTimeout(() => void stop(), stopAfter);
     return () => clearTimeout(timer);
   }, [sending, stopAfter, stop]);
+
+  // The keys the hints on the controls name. Settings is a full-window surface rather than a modal,
+  // so while it is up it owns the keyboard: Esc gives the window back and the chat keys hold until
+  // it does, rather than firing something the user cannot see.
+  const running = useTranscript((s) => s.running);
+  useShortcuts({
+    newTask: () => {
+      if (settingsPage !== null) return;
+      void newTask();
+    },
+    settings: () => setSettingsPage((page) => page ?? "appearance"),
+    escape: () => {
+      if (settingsPage !== null) {
+        setSettingsPage(null);
+      } else if (running) {
+        void stop();
+      }
+    },
+  });
 
   if (settingsPage !== null) {
     return <Settings locale={locale} page={settingsPage} onBack={() => setSettingsPage(null)} />;

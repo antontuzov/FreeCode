@@ -399,6 +399,13 @@ select.field-input {
   font-size: var(--size-fine);
 }
 
+/* A chip no handler answers drops one step on the ink ladder rather than fading. Opacity here would
+ * put 12px text under the contrast floor on the surface it sits on, which is the bug the tokens file
+ * exists to prevent; the faint step is measured against that surface and still reads. */
+.kbd-inert {
+  color: var(--text-faint);
+}
+
 /* The four interface-style cards. Each paints the style it advertises through `--preview`, so the
  * row stays readable whichever accent is live. */
 /* Shot 02: the tinted preview box carries the selection outline, and the style name sits below it

@@ -78,7 +78,7 @@
   "composer.model": "模型",
   "composer.send": "发送",
   "composer.stop": "停止",
-  "composer.mic": "语音输入（{{shortcut}}）",
+  "composer.mic": "语音输入",
   "settings.title": "设置",
   "settings.back": "返回应用",
   "settings.search": "搜索设置…",

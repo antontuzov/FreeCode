@@ -166,7 +166,17 @@ export function TextField({
 }
 
 /** `⌘ ⇧ L` as chips rather than one string, so each modifier reads as a key. */
-export function ShortcutChips({ shortcut }: { shortcut: ShortcutDoc }) {
+export function ShortcutChips({
+  shortcut,
+  hint,
+}: {
+  shortcut: ShortcutDoc;
+  /** Set when no key handler in this build answers the combination. The chips stay — the binding is
+   * a stored preference the user may have set deliberately — but they stop reading as a promise, and
+   * they do it by dropping one step on the ink ladder rather than by fading: an opacity here would
+   * put the smallest text in the app back under the contrast floor. */
+  hint?: string;
+}) {
   const chips = [
     shortcut.cmd && "⌘",
     shortcut.ctrl && "⌃",
@@ -175,9 +185,9 @@ export function ShortcutChips({ shortcut }: { shortcut: ShortcutDoc }) {
     shortcut.key.toUpperCase(),
   ].filter((c): c is string => Boolean(c));
   return (
-    <span className="flex items-center gap-1">
+    <span className="flex items-center gap-1" title={hint} aria-disabled={hint ? true : undefined}>
       {chips.map((c) => (
-        <kbd key={c} className="kbd">
+        <kbd key={c} className={hint ? "kbd kbd-inert" : "kbd"}>
           {c}
         </kbd>
       ))}

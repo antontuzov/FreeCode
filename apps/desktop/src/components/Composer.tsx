@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { translate, type Locale } from "../i18n";
+import { shortcutLabel } from "../lib/shortcuts";
 import { useChat } from "../state/chat";
 import { useTranscript } from "../state/transcript";
 import { Icon } from "./icons";
@@ -107,7 +108,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           <button
             type="button"
             className="icon-btn"
-            aria-label={translate(locale, "composer.mic", { shortcut: "⌥V" })}
+            aria-label={translate(locale, "composer.mic")}
             aria-disabled
             title={notInBuild}
           >
@@ -118,6 +119,8 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
             onClick={() => (running ? void stop() : submit())}
             disabled={!running && !draft.trim()}
             aria-label={translate(locale, running ? "composer.stop" : "composer.send")}
+            // The key the interrupt answers to, named only while there is a reply to interrupt.
+            title={running ? shortcutLabel("escape") : undefined}
             className="grid size-8 place-items-center rounded-[var(--radius-md)] bg-accent text-accent-contrast disabled:opacity-60"
           >
             {/* Interrupting a reply cuts its stream and keeps the server, so the next prompt is

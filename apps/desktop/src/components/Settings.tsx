@@ -16,6 +16,7 @@ import {
 import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
 import type { Accent, SettingsDoc } from "../lib/ipc";
+import { shortcutLabel } from "../lib/shortcuts";
 import { useModel } from "../state/model";
 import { useSettings } from "../state/settings";
 
@@ -90,7 +91,12 @@ export function Settings({
           className="pt-[var(--space-3)] pb-1 pr-[var(--space-3)]"
           style={{ paddingLeft: "max(var(--space-4), var(--traffic-light-inset))" }}
         >
-          <button type="button" className="nav-item" onClick={onBack}>
+          <button
+            type="button"
+            title={shortcutLabel("escape")}
+            className="nav-item"
+            onClick={onBack}
+          >
             <Icon name="back" />
             <span>{t("back")}</span>
           </button>
@@ -435,7 +441,10 @@ function Voice({ doc, set, t, locale }: { doc: SettingsDoc; set: SetFn; t: T; lo
         </Row>
         <Corrections terms={v.commonWordCorrections} set={set} t={t} />
         <Row title={t("row.liveVoiceShortcut")} description={t("row.liveVoiceShortcut.desc")}>
-          <ShortcutChips shortcut={v.liveVoiceShortcut} />
+          <ShortcutChips
+            shortcut={v.liveVoiceShortcut}
+            hint={translate(locale, "common.notInBuild")}
+          />
         </Row>
       </Section>
 

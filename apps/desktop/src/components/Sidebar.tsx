@@ -1,17 +1,21 @@
 import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
+import { shortcutLabel, type ShortcutId } from "../lib/shortcuts";
 
 type NavRow = {
   key: string;
   icon: IconName;
   onActivate?: (actions: SidebarActions) => void;
+  /** The key that fires this row from anywhere in the window, named on hover. Only ever a shortcut
+   * `lib/shortcuts.ts` answers, so the hint cannot get ahead of the handler. */
+  shortcut?: ShortcutId;
   /** A row the reference layout draws and this build has nothing behind. It stays on screen — the
    * layout is the contract — but a click on it says so rather than looking like a lost one. */
   placeholder?: true;
 };
 
 const PRIMARY: NavRow[] = [
-  { key: "newTask", icon: "newTask", onActivate: (a) => a.newTask },
+  { key: "newTask", icon: "newTask", shortcut: "newTask", onActivate: (a) => a.newTask },
   { key: "search", icon: "search", placeholder: true },
 ];
 
@@ -36,6 +40,7 @@ function Row({
   indent,
   onClick,
   hint,
+  shortcut,
 }: {
   icon?: IconName;
   label: string;
@@ -43,6 +48,7 @@ function Row({
   indent?: boolean;
   onClick?: () => void;
   hint?: string;
+  shortcut?: string;
 }) {
   return (
     <button
@@ -51,7 +57,7 @@ function Row({
       // Not `disabled`: a disabled button swallows the hover that carries the sentence explaining
       // why it does nothing, which is the one thing the row still has to say.
       aria-disabled={hint ? true : undefined}
-      title={hint}
+      title={hint ?? shortcut}
       className={`nav-item ${indent ? "pl-[34px] text-quiet" : ""}`}
       onClick={onClick}
     >
@@ -86,6 +92,7 @@ export function Sidebar({
       icon={r.icon}
       label={translate(locale, `sidebar.${r.key}`)}
       hint={r.placeholder ? notInBuild : undefined}
+      shortcut={r.shortcut ? shortcutLabel(r.shortcut) : undefined}
       onClick={r.onActivate ? () => r.onActivate?.(actions) : undefined}
     />
   );
@@ -173,6 +180,7 @@ export function Sidebar({
         <button
           type="button"
           aria-label={translate(locale, "sidebar.settings")}
+          title={shortcutLabel("settings")}
           className="icon-btn"
           onClick={onOpenSettings}
         >

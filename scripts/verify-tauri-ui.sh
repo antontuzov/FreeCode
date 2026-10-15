@@ -4,7 +4,8 @@
 #   2. every StepKind i18n key is translated in every locale, with matching {{parameters}}
 #   3. no component states a colour literally — the theme is a token swap or it is broken
 #   4. every token colour is actually legible: 4.5:1 for small text, on every surface it is used on
-#   5. the bundle that ships is the bundle that was type-checked
+#   5. every key the UI prints is a key the window answers
+#   6. the bundle that ships is the bundle that was type-checked
 source "$(dirname "$0")/_env.sh"
 
 IPC=apps/desktop/src/lib/ipc.ts
@@ -39,6 +40,9 @@ pnpm_cmd lint
 
 step "every ink clears WCAG AA on the surfaces it is read against"
 node scripts/check-contrast.mjs
+
+step "every advertised key has a handler behind it"
+node scripts/check-shortcuts.mjs
 
 step "typecheck and build"
 pnpm_cmd typecheck

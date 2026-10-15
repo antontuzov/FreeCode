@@ -78,7 +78,7 @@
   "composer.model": "Model",
   "composer.send": "Send",
   "composer.stop": "Stop",
-  "composer.mic": "Voice input ({{shortcut}})",
+  "composer.mic": "Voice input",
   "settings.title": "Settings",
   "settings.back": "Back to app",
   "settings.search": "Search settings…",
