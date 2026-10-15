@@ -102,7 +102,7 @@ function StatusSkeleton({ locale }: { locale: Locale }) {
       className="w-[var(--inspector-width)] shrink-0 border-b border-line bg-elevated p-[var(--space-4)] shadow-raised"
     >
       <div className="flex items-center gap-2">
-        <Icon name="bolt" size={15} className="text-accent" />
+        <Icon name="bolt" size={15} className="text-accent-ink" />
         <span className="skeleton-line w-32" />
         <span className="skeleton-line ml-auto h-5 w-14" />
       </div>
@@ -221,7 +221,7 @@ export function ModelStatus({ locale }: { locale: Locale }) {
       className="w-[var(--inspector-width)] shrink-0 border-b border-line bg-elevated p-[var(--space-4)] shadow-raised"
     >
       <div className="flex items-center gap-2">
-        <Icon name="bolt" size={15} className="text-accent" />
+        <Icon name="bolt" size={15} className="text-accent-ink" />
         <h2 className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">
           {status.displayName}
         </h2>

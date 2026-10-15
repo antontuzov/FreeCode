@@ -47,17 +47,31 @@ export function applyToDocument(a: AppearanceState): void {
   root.dataset.platform = platform();
 }
 
+/** `?mode=light` on the dev URL, honoured only by a dev build. A screenshot comparison needs the
+ * other mode, and the alternative was rewriting the settings file the user's own instance reads —
+ * which would have flipped their window to get a picture of ours. Production has no such lever: the
+ * theme comes off disk or from nowhere else. */
+function devForcedMode(): "light" | "dark" | null {
+  if (!import.meta.env.DEV) return null;
+  const mode = new URLSearchParams(window.location.search).get("mode");
+  return mode === "light" || mode === "dark" ? mode : null;
+}
+
 export const useAppearance = create<AppearanceStore>((set, get) => ({
   ...FALLBACK,
   loaded: false,
   load: async () => {
+    // The override paints the window and nothing else: the store keeps what is on disk, so a later
+    // settings write cannot persist a mode the user never chose.
+    const forced = devForcedMode();
+    const paint = (a: AppearanceState) => applyToDocument(forced ? { ...a, themeMode: forced } : a);
     try {
       const loaded = await ipc.loadAppearance();
-      applyToDocument(loaded);
+      paint(loaded);
       set({ ...loaded, loaded: true });
     } catch {
       // No host yet (plain `vite dev`): keep the fallback so the shell still renders.
-      applyToDocument(get());
+      paint(get());
       set({ loaded: true });
     }
   },

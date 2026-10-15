@@ -3,7 +3,8 @@
 #   1. every command the UI invokes exists in the host, and every host command is registered
 #   2. every StepKind i18n key is translated in every locale, with matching {{parameters}}
 #   3. no component states a colour literally — the theme is a token swap or it is broken
-#   4. the bundle that ships is the bundle that was type-checked
+#   4. every token colour is actually legible: 4.5:1 for small text, on every surface it is used on
+#   5. the bundle that ships is the bundle that was type-checked
 source "$(dirname "$0")/_env.sh"
 
 IPC=apps/desktop/src/lib/ipc.ts
@@ -35,6 +36,9 @@ node scripts/check-i18n.mjs
 
 step "no hardcoded colours"
 pnpm_cmd lint
+
+step "every ink clears WCAG AA on the surfaces it is read against"
+node scripts/check-contrast.mjs
 
 step "typecheck and build"
 pnpm_cmd typecheck

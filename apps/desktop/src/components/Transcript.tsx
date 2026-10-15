@@ -22,7 +22,7 @@ function StatusMark({ step }: { step: Step }) {
   if (step.notice) return <Icon name="warning" size={13} className="text-muted" />;
   if (step.status === "error" || step.status === "stopped")
     return <Icon name="warning" size={13} className="text-danger" />;
-  return <Icon name="review" size={13} className="text-accent" />;
+  return <Icon name="review" size={13} className="text-accent-ink" />;
 }
 
 /**
@@ -319,7 +319,7 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
             // The one screen in the app with nothing on it, so it is the one carrying the name. The
             // mark is drawn in the live accent rather than shipped as an image, which is why it can
             // be here in all eight theme combinations without a second palette.
-            <div className="flex flex-col items-center gap-2 pt-[var(--space-6)] text-accent">
+            <div className="flex flex-col items-center gap-2 pt-[var(--space-6)] text-accent-ink">
               <BrandMark />
               <p className="text-ui font-medium text-fg-strong">{translate(locale, "app.name")}</p>
               <p className="max-w-[360px] text-center text-quiet text-muted">

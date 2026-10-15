@@ -66,8 +66,18 @@
   --bg-hover: #1a3a30;
   --text: #e8f0e8; /* 05: primary text */
   --text-strong: #cfe9d8;
-  --text-muted: #93a89c; /* 05: row labels and descriptions */
-  --text-faint: #6d8278; /* 05: timestamps and section headers */
+  /* Three greys for text, and all three have to clear WCAG AA at the size they are read, which is
+     11-13px for the bottom two. The shots measure #93a89c and #6d8278; #6d8278 is 3.3:1 on a card
+     (`--bg-elevated`), and the smallest text in the window is exactly what sits on it — turn meta,
+     disclosure labels, the language chip on a code fence. So the ladder is re-spaced from the same
+     hues: `--text-faint` rises to the floor (4.6:1 on every surface in this mode) and `--text-muted`
+     one step above it, so the two stay distinguishable instead of meeting at the floor. */
+  --text-muted: #a4b9ad; /* derived from 05's #93a89c, one rung above the faint below */
+  --text-faint: #899a92; /* derived from 05's #6d8278, which read 3.3:1 on a card */
+  /* The measured greys are not thrown away. A skeleton line, a preview rule and the inactive turn
+     dash are not information, and at the readable grey they would outshine the text around them —
+     WCAG itself puts non-text decoration outside the contrast rule for exactly that reason. */
+  --ink-quiet: #6d8278; /* 05: the measurement, for marks and fills that carry no words */
   --border: #1e3a30;
   --border-strong: #2b4c40;
   --shadow: 0 12px 32px rgb(0 0 0 / 45%);
@@ -75,7 +85,9 @@
   --code-theme: "github-dark";
   --success: #4caf7d;
   --warning: #d8a13f;
-  --danger: #ff4d4f; /* 05: the stopped-subagent marker */
+  --danger: #ff5e60; /* derived from 05's #ff4d4f, the stopped-subagent marker: as an icon it clears
+     3:1, but the same red carries sentences — the alert under a failed download, the delete warning
+     on a Settings card — and on `--bg-elevated` it read 4.2:1. Lifted to 4.6:1 there. */
   --diff-added: #19321d; /* 06: added-line background */
   --diff-removed: #3a1a1a;
   --checkpoint: #2c3632; /* 07: an inactive turn marker, one step off the column's own ground */
@@ -94,15 +106,21 @@
   --bg-hover: #d5e9e0;
   --text: #1b2420;
   --text-strong: #284828; /* 04: headings and the active nav label are dark green, not black */
-  --text-muted: #5c6862;
-  --text-faint: #98a098;
+  /* Light mode has the worse problem: on a near-white ground there is no room under 4.5:1, and
+     #98a098 measured 2.3:1 on the sidebar's own mint wash — the de-emphasis was really an erasure.
+     Same re-spacing as dark mode, from the same measured hues. */
+  --text-muted: #4b5650; /* derived from 04's #5c6862, one rung above the faint below */
+  --text-faint: #666c66; /* derived from 04's #98a098, which read 2.3:1 on --bg-panel */
+  --ink-quiet: #98a098; /* 04: the measurement, for marks and fills that carry no words */
   --border: #d5e0d9;
   --border-strong: #c0cfc6;
   --shadow: 0 10px 28px rgb(20 40 30 / 12%);
   --code-bg: #f4f6f5;
   --code-theme: "github-light";
-  --success: #2c7a4b;
-  --warning: #9a6b12;
+  --success: #2c794a; /* 04's #2c7a4b, one unit down: the gate below holds every ink to AA on every
+     surface in its mode, and the mint sidebar wash was the one ground it missed by 0.01. */
+  --warning: #8f6311; /* derived from 04's #9a6b12: the caveats list and the numbers in a code fence
+     are both set at 12px, and on the mint sidebar wash and `--code-bg` that read 4.0:1 and 4.3:1. */
   --danger: #b3403f;
   --diff-added: #d8f0dc;
   --diff-removed: #f6dedd;
@@ -126,26 +144,40 @@
   --style-mint-contrast: #08130f;
   --style-bee-contrast: #1b1608;
   --style-parchment-contrast: #1f120d;
+  /* The accent as INK. The four families above are measured off a card in shot 02, where they sit
+     against white as a swatch and never have to be read as words; used as text they are far too
+     light for the near-white ground — Mint, the default, puts a 12px link at 2.4:1 on its own soft
+     fill and Bee at 1.8:1. Each `-ink` is the same hue taken down to 4.5:1 on every light surface
+     AND on `--accent-soft`, which is the ground a link chip paints for itself. */
+  --style-forest-ink: #446952;
+  --style-mint-ink: #357060;
+  --style-bee-ink: #73683c;
+  --style-parchment-ink: #9a4d33;
 
   --accent: var(--style-mint);
   --accent-contrast: var(--style-mint-contrast);
+  --accent-ink: var(--style-mint-ink);
 }
 
 [data-accent="forest"] {
   --accent: var(--style-forest);
   --accent-contrast: var(--style-forest-contrast);
+  --accent-ink: var(--style-forest-ink);
 }
 [data-accent="mint"] {
   --accent: var(--style-mint);
   --accent-contrast: var(--style-mint-contrast);
+  --accent-ink: var(--style-mint-ink);
 }
 [data-accent="bee"] {
   --accent: var(--style-bee);
   --accent-contrast: var(--style-bee-contrast);
+  --accent-ink: var(--style-bee-ink);
 }
 [data-accent="parchment"] {
   --accent: var(--style-parchment);
   --accent-contrast: var(--style-parchment-contrast);
+  --accent-ink: var(--style-parchment-ink);
 }
 
 /* On the near-black green a light-mode accent sinks in; the same hue lifted ~14% is what shots 05
@@ -159,6 +191,14 @@
   --style-mint-contrast: #08130f;
   --style-bee-contrast: #1b1608;
   --style-parchment-contrast: #1f120d;
+  /* Dark mostly needs no ink step — the lifted accents are already the readable ones against every
+     surface — but a link chip paints `--accent-soft` for itself, and that fill composited over a
+     card is LIGHTER than the card, which costs a pale ink contrast rather than gaining it. Forest
+     and Parchment needed the lift; Mint and Bee clear 4.5:1 as measured. */
+  --style-forest-ink: #77ba92;
+  --style-mint-ink: var(--style-mint);
+  --style-bee-ink: var(--style-bee);
+  --style-parchment-ink: #e59374;
 }
 
 /* Soft fills carry the accent without claiming its contrast budget: selected rows, the user's

@@ -17,6 +17,7 @@
   --color-line: var(--border);
   --color-line-strong: var(--border-strong);
   --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
   --color-accent-soft: var(--accent-soft);
   --color-accent-line: var(--accent-line);
   --color-accent-contrast: var(--accent-contrast);
@@ -466,7 +467,7 @@ select.field-input {
 .style-line {
   height: 5px;
   border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--text-faint) 45%, transparent);
+  background: color-mix(in oklab, var(--ink-quiet) 45%, transparent);
 }
 
 .swatch-forest {
@@ -489,7 +490,7 @@ select.field-input {
 .skeleton-line {
   height: 9px;
   border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--text-faint) 35%, transparent);
+  background: color-mix(in oklab, var(--ink-quiet) 35%, transparent);
   animation: pulse 1.2s ease-in-out infinite;
 }
 
@@ -591,7 +592,9 @@ select.field-input {
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
-  color: var(--accent);
+  /* The ink step, not the raw accent: a chip paints its own soft fill, and Mint at 12px on that
+     ground measures 2.4:1 — the one colour in the app a user is asked to read and click. */
+  color: var(--accent-ink);
   font-size: var(--size-fine);
   line-height: 1.4;
   text-decoration: underline;
@@ -719,7 +722,7 @@ select.field-input {
 .answer .hljs-selector-tag,
 .answer .hljs-literal,
 .answer .hljs-doctag {
-  color: var(--style-parchment);
+  color: var(--style-parchment-ink);
 }
 .answer .hljs-string,
 .answer .hljs-regexp,
@@ -742,12 +745,12 @@ select.field-input {
 .answer .hljs-variable,
 .answer .hljs-template-variable,
 .answer .hljs-property {
-  color: var(--style-mint);
+  color: var(--style-mint-ink);
 }
 .answer .hljs-type,
 .answer .hljs-built_in,
 .answer .hljs-class {
-  color: var(--style-bee);
+  color: var(--style-bee-ink);
 }
 .answer .hljs-meta,
 .answer .hljs-name,
