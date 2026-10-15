@@ -581,10 +581,54 @@ select.field-input {
 .answer li::marker {
   color: var(--text-faint);
 }
-.answer a {
+/* A link that leaves the app. Rendered as a button because the webview must never navigate itself:
+ * the address goes to the system, and only the system's own scope decides what answers. */
+.external-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px var(--space-2);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
   color: var(--accent);
+  font-size: var(--size-fine);
+  line-height: 1.4;
   text-decoration: underline;
   text-underline-offset: 2px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    border-color var(--dur-quick) var(--ease-standard);
+}
+.external-link:hover {
+  border-color: var(--accent);
+}
+.external-link-inline {
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+}
+.external-link-inline:hover {
+  color: var(--text-strong);
+}
+/* The shape a link degrades to when pressing it cannot work: the address, in monospace, so the row
+ * still hands over something a person can copy. */
+.external-stuck {
+  font-family: var(--font-family-code);
+  font-size: var(--size-micro);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+.refusal-card {
+  margin-block: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
 }
 .answer blockquote {
   padding-left: var(--space-3);

@@ -23,7 +23,11 @@ use crate::transcript::{DiffStat, TranscriptStep};
 #[serde(rename_all = "camelCase")]
 pub struct BlockedInfo {
     pub title: String,
+    /// What to do about it, in the app's own words. This is the sentence the user reads.
     pub detail: String,
+    /// Paths, key names, pins and upstream issue numbers behind the refusal, kept for the disclosure
+    /// a user opens when the sentence above was not enough to act on.
+    pub technical: String,
     pub cta_label: String,
     pub cta_url: String,
 }
@@ -36,6 +40,7 @@ impl BlockedInfo {
         Self {
             title: blocker.title().to_string(),
             detail: blocker.detail(),
+            technical: blocker.technical(),
             cta_label: cta.label.to_string(),
             cta_url: cta.url,
         }
@@ -242,12 +247,14 @@ mod tests {
         };
         let info =
             BlockedInfo::from_blocker(&blocker, &lock(), "prism-ml/Ternary-Bonsai-2-27B-gguf");
-        assert_eq!(info.title, "This model cannot run on standard llama.cpp");
+        assert_eq!(info.title, "This model can't run on standard llama.cpp");
         assert_eq!(info.cta_label, "Install the PrismML engine");
         assert!(info
             .cta_url
-            .starts_with("https://github.com/PrismML-Eng/llama.cpp/releases/"));
-        assert!(info.detail.contains("no automatic fallback"));
+            .starts_with("https://github.com/PrismML-Eng/llama.cpp/releases/"),);
+        // The sentence the user reads says what to press; the evidence sits beside it, not in it.
+        assert!(info.detail.contains("Installing the build this app pins"));
+        assert!(info.technical.contains("no automatic fallback"));
         let wire = serde_json::to_value(&info).unwrap();
         assert_eq!(wire["ctaUrl"], json!(info.cta_url));
     }

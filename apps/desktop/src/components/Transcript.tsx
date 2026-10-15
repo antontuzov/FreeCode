@@ -12,6 +12,7 @@ import {
 import { Answer } from "./Answer";
 import { BrandMark } from "./BrandMark";
 import { Composer } from "./Composer";
+import { ExternalLink } from "./ExternalLink";
 import { Icon } from "./icons";
 
 function StatusMark({ step }: { step: Step }) {
@@ -22,6 +23,43 @@ function StatusMark({ step }: { step: Step }) {
   if (step.status === "error" || step.status === "stopped")
     return <Icon name="warning" size={13} className="text-danger" />;
   return <Icon name="review" size={13} className="text-accent" />;
+}
+
+/**
+ * A refusal: what is wrong in one sentence, the one action that clears it, and the evidence folded
+ * underneath. The row used to be a line of `· {title} · {detail}` with a bare URL at the end, which
+ * reads like a panic log — so the headline carries the row, the reason sits under it at full width,
+ * and paths and key names only appear when the user asks for the technical view.
+ */
+function RefusalRow({ step, locale }: { step: Step; locale: Locale }) {
+  return (
+    <li className="refusal-card row-enter">
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 shrink-0">
+          <StatusMark step={step} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-quiet font-medium text-fg">{stepLabel(locale, step)}</p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-fine text-muted">{step.detail}</p>
+          {step.cta && (
+            <div className="mt-2">
+              <ExternalLink url={step.cta.url} label={step.cta.label} locale={locale} />
+            </div>
+          )}
+          {step.technical && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-micro text-faint">
+                {translate(locale, "transcript.refusal.technical")}
+              </summary>
+              <p className="disclosure-panel mt-1 break-words font-mono text-micro text-muted">
+                {step.technical}
+              </p>
+            </details>
+          )}
+        </div>
+      </div>
+    </li>
+  );
 }
 
 function StepRow({ step, locale }: { step: Step; locale: Locale }) {
@@ -37,6 +75,11 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
         <span className="h-px flex-1 bg-line" />
       </div>
     );
+  }
+
+  // A notice is a one-liner beside the answer it did not stop; a refusal is its own block.
+  if (step.kind === "blocked" && !step.notice) {
+    return <RefusalRow step={step} locale={locale} />;
   }
 
   return (
@@ -74,19 +117,14 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
         {step.detail && (
           <span
             className={
-              step.kind === "blocked"
-                ? // A refusal or a substitution is read, not skimmed: it wraps, and the action that
-                  // clears a refusal follows the reason rather than replacing it.
+              step.notice
+                ? // A notice says what the run worked around, and that sentence is the row's whole
+                  // payload — it wraps rather than trailing off under a clip.
                   "min-w-0 flex-1 whitespace-pre-wrap break-words text-fine text-muted"
                 : "min-w-0 flex-1 truncate text-fine text-faint"
             }
           >
             · {step.detail}
-            {step.cta && (
-              <span className="mt-1 block text-fg">
-                {step.cta.label}: <span className="font-mono">{step.cta.url}</span>
-              </span>
-            )}
           </span>
         )}
       </div>
@@ -146,7 +184,7 @@ function TurnRow({
         </details>
       )}
       {turn.text ? (
-        <Answer text={turn.text} streaming={turn.streaming} />
+        <Answer text={turn.text} streaming={turn.streaming} locale={locale} />
       ) : waiting ? (
         <p className="flex items-center gap-2 text-fine text-muted">
           <span className="dot-running" aria-hidden />

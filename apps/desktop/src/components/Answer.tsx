@@ -20,6 +20,9 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 
+import type { Locale } from "../i18n";
+import { ExternalLink } from "./ExternalLink";
+
 /** The fence's language rides on the inner `<code>`; the chip has to reach past `<pre>` for it. */
 type Fenced = { props?: { className?: string } };
 
@@ -38,7 +41,29 @@ const COMPONENTS: Components = {
   },
 };
 
-export function Answer({ text, streaming }: { text: string; streaming?: boolean }) {
+/**
+ * A link in an answer is the same control as a refusal's action, so it gets the same treatment: the
+ * address leaves through the system opener, and the webview never navigates. Without this, a model
+ * that writes `[the fork](https://github.com/…)` would take the app's own window away with it.
+ */
+function linkComponents(locale: Locale): Components {
+  return {
+    ...COMPONENTS,
+    a: ({ href, children }) => (
+      <ExternalLink url={href ?? ""} label={children} locale={locale} inline />
+    ),
+  };
+}
+
+export function Answer({
+  text,
+  streaming,
+  locale,
+}: {
+  text: string;
+  streaming?: boolean;
+  locale: Locale;
+}) {
   return (
     <div className={`answer ${streaming ? "caret-streaming" : ""}`}>
       <Markdown
@@ -47,7 +72,7 @@ export function Answer({ text, streaming }: { text: string; streaming?: boolean 
           [rehypeHighlight, { detect: true, ignoreMissing: true }],
           [rehypeKatex, { throwOnError: false, errorColor: "inherit", output: "htmlAndMathml" }],
         ]}
-        components={COMPONENTS}
+        components={linkComponents(locale)}
       >
         {text}
       </Markdown>

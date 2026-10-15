@@ -87,17 +87,61 @@ pub struct CallToAction {
 }
 
 impl Blocker {
+    /// What is wrong, in the words a person who did not write this app would use. One of these is
+    /// the whole screen the user gets, so it says the cause and the way out and stops there.
     pub fn title(&self) -> &'static str {
         match self {
-            Blocker::EngineNotInstalled { .. } => "PrismML engine not installed",
-            Blocker::StockEngineRejected { .. } => "This model cannot run on standard llama.cpp",
-            Blocker::IntegrityFailed { .. } => "Model file failed verification",
-            Blocker::RotationMetadataMissing { .. } => "Model file is not a Prism export",
-            Blocker::EnginePinTooOld { .. } => "Pinned engine build is too old",
+            Blocker::EngineNotInstalled { .. } => "The engine isn't on this machine yet",
+            Blocker::StockEngineRejected { .. } => "This model can't run on standard llama.cpp",
+            Blocker::IntegrityFailed { .. } => "The model file isn't the one that was published",
+            Blocker::RotationMetadataMissing { .. } => "This file wasn't exported by Prism",
+            Blocker::EnginePinTooOld { .. } => "The pinned engine build has no downloadable files",
         }
     }
 
+    /// The same refusal as an instruction: what the user can actually press, in the order the app
+    /// offers it. No paths, no key names, no issue numbers — [`Blocker::technical`] holds those.
     pub fn detail(&self) -> String {
+        match self {
+            Blocker::EngineNotInstalled { .. } => {
+                "SmoLLM Studio runs models with one specific build \
+                 of llama.cpp, and this machine doesn't have it yet. Installing it fetches exactly \
+                 the build this app was pinned to — nothing else is chosen for you."
+                    .into()
+            }
+            Blocker::StockEngineRejected { .. } => "The llama.cpp on this machine is the standard \
+                 one, which can't read these weights. Installing the build this app pins is what \
+                 fixes it; the app will never quietly fall back to a build that answers wrongly."
+                .into(),
+            Blocker::IntegrityFailed { file, status } => {
+                // A file that has never arrived is not a forged file, and telling the user their
+                // download disagrees with the publisher would send them looking for corruption.
+                if status == "not downloaded" {
+                    format!("{file} hasn't been downloaded yet, and nothing can run without it.")
+                } else {
+                    format!(
+                        "{file} isn't byte-for-byte the file that was published, so the app won't \
+                         load it — an interrupted download is the usual cause. Downloading it \
+                         again clears this."
+                    )
+                }
+            }
+            Blocker::RotationMetadataMissing { .. } => "This file came from somewhere other than \
+                 the official Prism release, and a ternary model without its rotation settings \
+                 answers confidently and wrongly rather than failing loudly. Get the file from the \
+                 model's own page."
+                .into(),
+            Blocker::EnginePinTooOld { .. } => "The engine build this app is pinned to was \
+                 published without any files to download, so there is nothing here the app can \
+                 fetch. Moving the pin to the next build that ships binaries clears this."
+                .into(),
+        }
+    }
+
+    /// The evidence behind the refusal: paths, hashes, metadata prefixes, pins, upstream issues. It
+    /// goes under a disclosure rather than in the sentence above it, because a user who is trying to
+    /// get an answer needs the instruction first — and a user who is filing a bug needs exactly this.
+    pub fn technical(&self) -> String {
         match self {
             Blocker::EngineNotInstalled { message, .. } => message.clone(),
             Blocker::StockEngineRejected { path } => format!(
@@ -450,7 +494,7 @@ mod tests {
             report
                 .blockers
                 .iter()
-                .map(|b| format!("{} — {}", b.title(), b.detail()))
+                .map(|b| format!("{} — {}", b.title(), b.technical()))
                 .collect::<Vec<_>>()
         );
     }
@@ -475,11 +519,12 @@ mod tests {
             report.first_blocker(),
             Some(Blocker::RotationMetadataMissing { .. })
         ));
-        // The copy must name the prefix, so the user can check their download.
+        // The evidence must name the prefix, so a user who opens the disclosure can check their
+        // download against the file themselves.
         assert!(report
             .first_blocker()
             .unwrap()
-            .detail()
+            .technical()
             .contains("prism.hadamard."));
     }
 
@@ -605,7 +650,7 @@ mod tests {
         ));
         assert!(report.blockers.iter().any(|b| {
             matches!(b, Blocker::StockEngineRejected { .. })
-                && b.detail().contains("no automatic fallback")
+                && b.technical().contains("no automatic fallback")
         }));
     }
 

@@ -24,6 +24,7 @@ smollm-core = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tauri-plugin-opener = "2.7.2"
 
 # Only for the shutdown hook's SIGTERM/SIGINT listener; `tokio::signal::unix` does not exist on
 # Windows, so the dependency is gated to the platforms that have the signals.

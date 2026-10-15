@@ -158,6 +158,10 @@ pub fn run() {
         // The supervised server and the conversation it is answering from. One window, one engine:
         // the state is here so a second `start_engine` cannot begin a second 6 GB load.
         .manage(chat::ChatState::default())
+        // The one way this app leaves the machine for the user's browser: refusal links and the links
+        // in an answer. The UI cannot reach it directly — the capability scopes it to `http` and
+        // `https`, so a `file://` or a `javascript:` address in a model's own text never launches.
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             model_status,
             install_engine,

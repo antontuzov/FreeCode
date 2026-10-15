@@ -5,6 +5,7 @@ import type { EngineInstallProgress, WeightsProgress } from "../lib/ipc";
 import { useChat } from "../state/chat";
 import { useModel } from "../state/model";
 import { useTranscript } from "../state/transcript";
+import { ExternalLink } from "./ExternalLink";
 import { Icon } from "./icons";
 
 /** The lock records sizes in bytes; a download label that needs three digits to read is no use. */
@@ -308,11 +309,24 @@ export function ModelStatus({ locale }: { locale: Locale }) {
               )}
             </>
           ) : (
-            <p className="mt-2 text-fine text-fg">
-              {status.blocked.ctaLabel}:{" "}
-              <span className="font-mono text-muted">{status.blocked.ctaUrl}</span>
-            </p>
+            // No button in this app can clear this one, so the link is the action — and it is a link,
+            // not an address to read out to a browser.
+            <div className="mt-2">
+              <ExternalLink
+                url={status.blocked.ctaUrl}
+                label={status.blocked.ctaLabel}
+                locale={locale}
+              />
+            </div>
           )}
+          <details className="mt-2">
+            <summary className="cursor-pointer text-micro text-faint">
+              {translate(locale, "transcript.refusal.technical")}
+            </summary>
+            <p className="disclosure-panel mt-1 break-words font-mono text-micro text-muted">
+              {status.blocked.technical}
+            </p>
+          </details>
         </div>
       ) : (
         <p className="mt-3 text-fine text-muted">

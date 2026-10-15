@@ -33,6 +33,7 @@ export type ModelStatus = {
   blocked: {
     title: string;
     detail: string;
+    technical: string;
     ctaLabel: string;
     ctaUrl: string;
     /** The host can clear this refusal itself by fetching the pinned engine. */
@@ -138,6 +139,8 @@ export type EngineStatus = { running: boolean; engine: EngineView | null };
 export type BlockedInfo = {
   title: string;
   detail: string;
+  /** Paths, pins and metadata keys behind the refusal, folded under the sentence that asks for them. */
+  technical: string;
   ctaLabel: string;
   ctaUrl: string;
 };

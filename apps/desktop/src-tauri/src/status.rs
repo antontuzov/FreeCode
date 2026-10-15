@@ -56,7 +56,7 @@ impl Assembly {
             .blockers
             .iter()
             .filter(|b| !self.pending_fetch(b))
-            .map(|b| format!("{}: {}", b.title(), b.detail()))
+            .map(|b| format!("{}: {}", b.title(), b.technical()))
             .collect()
     }
 
@@ -103,6 +103,7 @@ impl Assembly {
             BlockedView {
                 title: b.title().to_string(),
                 detail: b.detail(),
+                technical: b.technical(),
                 cta_label: cta.label.to_string(),
                 cta_url: cta.url,
                 // Two refusals are things this app clears itself by fetching what it pinned. Every
@@ -305,6 +306,8 @@ pub struct PackView {
 pub struct BlockedView {
     pub title: String,
     pub detail: String,
+    /// The evidence behind `detail`, folded away until the user asks for it.
+    pub technical: String,
     pub cta_label: String,
     pub cta_url: String,
     /// True when the app can clear this itself by fetching the pinned engine; false when the fix is
@@ -366,7 +369,7 @@ mod tests {
         let root = clean_checkout();
         let status = build(root.path(), &Settings::default()).expect("status builds");
         let blocked = status.blocked.expect("a fresh tree blocks the run");
-        assert_eq!(blocked.title, "PrismML engine not installed");
+        assert_eq!(blocked.title, "The engine isn't on this machine yet");
         assert!(
             blocked.installable,
             "the first blocker on a fresh tree is the one Install fixes"

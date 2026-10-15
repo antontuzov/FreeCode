@@ -67,6 +67,14 @@ export type Step = {
   /** For a `blocked` row: the single action that clears the refusal, in the row's own words. */
   cta?: { label: string; url: string };
   /**
+   * For a `blocked` row: what the host calls the problem. It replaces the generic "Blocked" label,
+   * because a row headed "Blocked" says nothing about which of the five things went wrong and the
+   * sentence under it was written to be read on its own.
+   */
+  headline?: string;
+  /** For a `blocked` row: the evidence — paths, pins, metadata keys — folded away under the headline. */
+  technical?: string;
+  /**
    * A `blocked` row that reports something the run did anyway — an effort the model substituted, a
    * server that was restarted — rather than one that refuses it. It reads as a notice because a row
    * headed "Blocked" under an answer that streamed fine tells the user the answer is not to be
@@ -111,6 +119,8 @@ export function stepLabel(locale: Locale, step: Step): string {
     return translate(locale, I18N_KEYS.running, { seconds: step.seconds ?? 0 });
   }
   if (step.notice) return translate(locale, "transcript.notice");
+  // "Blocked" is the name of the row shape, not of what happened. A refusal says which problem it is.
+  if (step.headline) return step.headline;
   return translate(locale, I18N_KEYS[step.kind]);
 }
 
@@ -120,8 +130,32 @@ function nextId(prefix: string): string {
   return `${prefix}-${sequence}`;
 }
 
-function blockedRow(message: string, cta?: { label: string; url: string }): Step {
-  return { id: nextId("blocked"), kind: "blocked", detail: message, status: "error", cta };
+/** The row a refusal gets: a headline the user can act on, and the evidence kept out of the way. */
+function blockedRow(refusal: {
+  headline?: string;
+  detail: string;
+  technical?: string;
+  cta?: { label: string; url: string };
+}): Step {
+  return {
+    id: nextId("blocked"),
+    kind: "blocked",
+    headline: refusal.headline,
+    detail: refusal.detail,
+    technical: refusal.technical,
+    status: "error",
+    cta: refusal.cta,
+  };
+}
+
+/**
+ * Whether this row already announces that problem. A refusal arrives twice over — once as
+ * `engineBlocked`, whose headline and sentence are separate fields, and once as the `failed`
+ * message, which the host composes out of the same two — so the row has to be read back the way
+ * the host wrote it, or every blocked launch would leave two rows.
+ */
+function carries(step: Step, message: string): boolean {
+  return step.headline ? `${step.headline} — ${step.detail}` === message : step.detail === message;
 }
 
 /** Something the run worked around, on the same quiet footing as the answer it did not stop. */
@@ -178,9 +212,11 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
     case "engineBlocked":
       return [
         ...rows,
-        blockedRow(`${event.info.title} · ${event.info.detail}`, {
-          label: event.info.ctaLabel,
-          url: event.info.ctaUrl,
+        blockedRow({
+          headline: event.info.title,
+          detail: event.info.detail,
+          technical: event.info.technical,
+          cta: { label: event.info.ctaLabel, url: event.info.ctaUrl },
         }),
       ];
     case "warning":
@@ -192,10 +228,10 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
       const last = rows[rows.length - 1];
       // The host both emits `failed` and rejects the command with the same text, and a refusal
       // arrives as `engineBlocked` first. One row per problem.
-      if (last && !isTurn(last) && last.kind === "blocked" && last.detail === event.message) {
+      if (last && !isTurn(last) && last.kind === "blocked" && carries(last, event.message)) {
         return rows;
       }
-      return [...rows, blockedRow(event.message)];
+      return [...rows, blockedRow({ detail: event.message })];
     }
   }
 }
@@ -266,8 +302,9 @@ export const FIXTURE_ROWS: Row[] = [
     kind: "turn",
     role: "assistant",
     // Markdown and LaTeX on purpose: this is also the row that proves the answer parser runs on
-    // real model output rather than on a paragraph that happened to need no formatting.
-    text: "Picking up the next phase rather than waiting: wiring the loop, since that is what makes everything so far actually runnable.\n\nThe budget per turn is $O(n^2)$ in the replayed history, so the cache does most of the work:\n\n```rust\nlet ratio = cached as f32 / prompt as f32;\n```",
+    // real model output rather than on a paragraph that happened to need no formatting. The link is
+    // there for the same reason — an answer's address is a control now, not a URL to read out.
+    text: "Picking up the next phase rather than waiting: wiring the loop, since that is what makes everything so far actually runnable.\n\nThe budget per turn is $O(n^2)$ in the replayed history, so the cache does most of the work:\n\n```rust\nlet ratio = cached as f32 / prompt as f32;\n```\n\nThe build that reads these weights is [the PrismML fork](https://github.com/PrismML-Eng/llama.cpp).",
   },
   {
     id: "f2",
@@ -288,5 +325,26 @@ export const FIXTURE_ROWS: Row[] = [
       { id: "f4b", kind: "searchContent", detail: "\\.run\\(" },
       { id: "f4c", kind: "editFile", subject: "lib.rs", status: "running" },
     ],
+  },
+  // A refusal, word for word as the load guard writes it, so the card can be looked at without
+  // uninstalling the engine on a machine that already has one. It is the row's shape that is on
+  // trial here — the copy comes from `Blocker::detail`, and this is the only place it is repeated.
+  {
+    id: "f5",
+    kind: "blocked",
+    status: "error",
+    headline: "The engine isn't on this machine yet",
+    detail:
+      "SmoLLM Studio runs models with one specific build of llama.cpp, and this machine doesn't " +
+      "have it yet. Installing it fetches exactly the build this app was pinned to — nothing else " +
+      "is chosen for you.",
+    technical:
+      "engine prism-b10772-e8fd209 is not installed (expected " +
+      "~/Library/Application Support/studio.smollm.desktop/engines/llama-server from " +
+      "llama-server-aarch64-apple-darwin-metal.tar.gz)",
+    cta: {
+      label: "Install the PrismML engine",
+      url: "https://github.com/PrismML-Eng/llama.cpp/releases/tag/prism-b10772-e8fd209",
+    },
   },
 ];
