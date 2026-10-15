@@ -327,7 +327,7 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
               </p>
             </div>
           ) : (
-            <ul className="mx-auto max-w-[720px]">
+            <ul className="mx-auto w-full max-w-[var(--content-width)]">
               {rows.map((row) =>
                 isTurn(row) && row.role === "user" ? (
                   <TurnRow

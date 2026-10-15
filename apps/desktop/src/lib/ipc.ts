@@ -106,6 +106,8 @@ export type AppearanceState = {
   language: Language;
   uiFontSize: number;
   codeFontSize: number;
+  fontStyle: FontStyle;
+  contentWidth: ContentWidth;
 };
 
 /** Host event carrying `EngineInstallProgress`; must match `engine::PROGRESS_EVENT` in Rust. */

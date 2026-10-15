@@ -13,6 +13,8 @@ const FALLBACK: AppearanceState = {
   language: "en",
   uiFontSize: 14,
   codeFontSize: 12,
+  fontStyle: "sans",
+  contentWidth: "standard",
 };
 
 type AppearanceStore = AppearanceState & {
@@ -42,29 +44,44 @@ export function applyToDocument(a: AppearanceState): void {
   // half-blurred surface with no background behind it.
   const supportsBlur = CSS.supports("backdrop-filter", "blur(1px)");
   root.dataset.surface = a.glass && supportsBlur ? "glass" : "solid";
+  // Both are CSS attribute keys in tokens.css, so the window's typeface and reading column are a
+  // token swap rather than a prop threaded through every component that lays out text.
+  root.dataset.fontStyle = a.fontStyle;
+  root.dataset.contentWidth = a.contentWidth;
   root.style.setProperty("--font-ui", `${a.uiFontSize}px`);
   root.style.setProperty("--font-code", `${a.codeFontSize}px`);
   root.dataset.platform = platform();
 }
 
-/** `?mode=light` on the dev URL, honoured only by a dev build. A screenshot comparison needs the
- * other mode, and the alternative was rewriting the settings file the user's own instance reads —
- * which would have flipped their window to get a picture of ours. Production has no such lever: the
- * theme comes off disk or from nowhere else. */
-function devForcedMode(): "light" | "dark" | null {
-  if (!import.meta.env.DEV) return null;
-  const mode = new URLSearchParams(window.location.search).get("mode");
-  return mode === "light" || mode === "dark" ? mode : null;
+/** Dev-only URL levers — `?mode=light`, `?font=serif`, `?width=wide` — honoured only by a dev build.
+ * A screenshot comparison needs a state the native window cannot be clicked into, and the alternative
+ * was rewriting the settings file the user's own instance reads, which would have flipped their window
+ * to get a picture of ours. Production has no such lever: the appearance comes off disk or from
+ * nowhere else. An unknown value is no value at all, so a typo paints the stored setting rather than
+ * a state that does not exist. */
+function devOverrides(): Partial<AppearanceState> {
+  if (!import.meta.env.DEV) return {};
+  const q = new URLSearchParams(window.location.search);
+  const forced: Partial<AppearanceState> = {};
+  // A key is set only when the URL named a value this build knows. The overrides merge over the
+  // stored state, so an absent key leaves that state alone where an explicit undefined would erase it.
+  const mode = q.get("mode");
+  if (mode === "light" || mode === "dark" || mode === "system") forced.themeMode = mode;
+  const font = q.get("font");
+  if (font === "sans" || font === "serif" || font === "mono") forced.fontStyle = font;
+  const width = q.get("width");
+  if (width === "standard" || width === "wide" || width === "full") forced.contentWidth = width;
+  return forced;
 }
 
 export const useAppearance = create<AppearanceStore>((set, get) => ({
   ...FALLBACK,
   loaded: false,
   load: async () => {
-    // The override paints the window and nothing else: the store keeps what is on disk, so a later
+    // The overrides paint the window and nothing else: the store keeps what is on disk, so a later
     // settings write cannot persist a mode the user never chose.
-    const forced = devForcedMode();
-    const paint = (a: AppearanceState) => applyToDocument(forced ? { ...a, themeMode: forced } : a);
+    const forced = devOverrides();
+    const paint = (a: AppearanceState) => applyToDocument({ ...a, ...forced });
     try {
       const loaded = await ipc.loadAppearance();
       paint(loaded);

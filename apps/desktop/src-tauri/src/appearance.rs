@@ -7,7 +7,9 @@
 //! panel saved.
 
 use serde::{Deserialize, Serialize};
-use smollm_config::{Appearance, InterfaceStyle, Language, Settings, ThemeMode};
+use smollm_config::{
+    Appearance, ContentWidth, FontStyle, InterfaceStyle, Language, Settings, ThemeMode,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +23,11 @@ pub struct AppearanceView {
     pub language: Language,
     pub ui_font_size: u16,
     pub code_font_size: u16,
+    /// The interface typeface and the width of the reading column are painted by the window too, so
+    /// they travel with the rest of what first paint needs — waiting for a Settings reload to learn
+    /// the typeface would flash the wrong one on every launch.
+    pub font_style: FontStyle,
+    pub content_width: ContentWidth,
 }
 
 /// `System` asks the host; anything else is already an answer.
@@ -41,11 +48,13 @@ pub fn view(appearance: &Appearance, os_prefers_light: bool) -> AppearanceView {
         language: appearance.language,
         ui_font_size: appearance.ui_font_size_px,
         code_font_size: appearance.code_font_size_px,
+        font_style: appearance.font_style,
+        content_width: appearance.content_width,
     }
 }
 
 /// Write the shell-facing controls back into the full document. Every other `Appearance` field —
-/// terminal theme, code theme, font style — is left exactly as it was, because a save from the
+/// terminal theme, code theme, line numbers — is left exactly as it was, because a save from the
 /// shell must not reset what only the Settings surface renders.
 pub fn apply(view: &AppearanceView, appearance: &mut Appearance) {
     appearance.theme_mode = view.theme_mode;
@@ -54,6 +63,8 @@ pub fn apply(view: &AppearanceView, appearance: &mut Appearance) {
     appearance.language = view.language;
     appearance.ui_font_size_px = view.ui_font_size;
     appearance.code_font_size_px = view.code_font_size;
+    appearance.font_style = view.font_style;
+    appearance.content_width = view.content_width;
 }
 
 /// Load the whole document, or default it when nothing is stored yet. A stored file that cannot be
@@ -97,7 +108,7 @@ mod tests {
     }
 
     #[test]
-    fn saving_the_shell_slice_leaves_the_unwired_controls_alone() {
+    fn saving_the_shell_slice_lands_its_own_fields_and_leaves_the_rest_alone() {
         let mut settings = Settings::default();
         settings.appearance.font_style = smollm_config::FontStyle::Serif;
         settings.appearance.terminal_theme = smollm_config::TerminalTheme::Custom;
@@ -110,14 +121,19 @@ mod tests {
         v.accent = InterfaceStyle::Forest;
         v.glass = false;
         v.ui_font_size = 16;
+        // The typeface and the column are painted by the window, so a save through the shell carries
+        // them rather than freezing whatever was there when the view was built.
+        v.font_style = smollm_config::FontStyle::Mono;
+        v.content_width = smollm_config::ContentWidth::Full;
         apply(&v, &mut current);
 
         assert_eq!(current.interface_style, InterfaceStyle::Forest);
         assert!(!current.glass_effects);
         assert_eq!(current.ui_font_size_px, 16);
-        assert_eq!(current.font_style, settings.appearance.font_style);
+        assert_eq!(current.font_style, smollm_config::FontStyle::Mono);
+        assert_eq!(current.content_width, smollm_config::ContentWidth::Full);
+        // These three are still only rendered by the Settings surface, which writes them itself.
         assert_eq!(current.terminal_theme, settings.appearance.terminal_theme);
-        assert_eq!(current.content_width, settings.appearance.content_width);
         assert_eq!(current.dark_code_theme, settings.appearance.dark_code_theme);
         assert_eq!(
             current.show_line_numbers,
@@ -133,5 +149,8 @@ mod tests {
         assert_eq!(raw["resolvedMode"], "dark");
         assert_eq!(raw["language"], "en");
         assert_eq!(raw["uiFontSize"], 14);
+        // The Settings page offers these exact strings, and tokens.css keys its rules off them.
+        assert_eq!(raw["fontStyle"], "sans");
+        assert_eq!(raw["contentWidth"], "standard");
     }
 }

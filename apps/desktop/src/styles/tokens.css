@@ -1,11 +1,15 @@
 /* Design tokens — the only file allowed to state a color.
  *
- * Three orthogonal axes, all of which the Appearance page drives:
+ * Three colour axes, all of which the Appearance page drives:
  *   data-theme-mode = light | dark
  *   data-accent     = forest | mint | bee | parchment
  *   data-surface    = glass | solid   (glass degrades to solid when blur is unavailable)
  * Every screen must render correctly in all 2 x 4 x 2 combinations, so components consume these
  * variables exclusively and never mix a color literal with them.
+ *
+ * Two more axes at the bottom of the file are not colour and are not the palette's business:
+ *   data-font-style   = sans | serif | mono      --font-family-ui
+ *   data-content-width= standard | wide | full   --content-width
  *
  * The neutrals below are measured, not eyeballed: each one is a pixel read out of
  * docs/reference-ui with scripts/probe-reference-palette.swift (see the citation on the line).
@@ -38,6 +42,9 @@
   --radius-pill: 9999px;
   --sidebar-width: 264px;
   --inspector-width: 320px;
+  /* The reading column. Task content and the composer share one width so the answer and the prompt
+     that produced it line up; the Appearance page's "Content width" moves them together. */
+  --content-width: 720px;
   --header-height: 44px;
   --blur-amount: 18px;
   --space-1: 4px;
@@ -218,6 +225,29 @@
   --surface-bg: var(--bg-elevated);
   --surface-blur: none;
   --surface-border: var(--border);
+}
+
+/* ---- the two axes that are not colour ----
+ * Both are set by the Appearance page and read by the window on first paint. They stay here rather
+ * than in a component because the layout sites ask for a token, not for a prop. */
+
+/* "The interface typeface. Code always stays monospaced": every monospaced site names
+ * --font-family-code, which none of these three rules touch. Sans is the `:root` default, so it
+ * needs no rule of its own. */
+[data-font-style="serif"] {
+  --font-family-ui: ui-serif, Georgia, "Iowan Old Style", "Songti SC", "Noto Serif SC", serif;
+}
+[data-font-style="mono"] {
+  --font-family-ui: var(--font-family-code);
+}
+
+/* Full is not `none`: a percentage still resolves against the column, so the text keeps its padding
+ * and the last glyph does not sit under the scrollbar. */
+[data-content-width="wide"] {
+  --content-width: 920px;
+}
+[data-content-width="full"] {
+  --content-width: 100%;
 }
 
 /* macOS hides the traffic lights behind the sidebar; the shell reserves the space. */

@@ -31,7 +31,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
 
   return (
     <div className="shrink-0 px-[var(--space-6)] pb-[var(--space-3)]">
-      <div className="mx-auto max-w-[720px] rounded-[var(--radius-lg)] border border-line bg-elevated shadow-raised transition-colors focus-within:border-accent-line">
+      <div className="mx-auto w-full max-w-[var(--content-width)] rounded-[var(--radius-lg)] border border-line bg-elevated shadow-raised transition-colors focus-within:border-accent-line">
         <label className="sr-only" htmlFor="composer-input">
           {translate(locale, "composer.placeholder")}
         </label>
