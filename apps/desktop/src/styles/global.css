@@ -481,6 +481,15 @@ select.field-input {
 
 /* A run in flight says so with a breathing dot. Its 1.2s is an attention loop, not feedback under
  * the pointer, so it deliberately sits outside the interaction scale above. */
+/* A placeholder that holds the shape of the content that is coming. It breathes on the running
+ * dot's rhythm because it means the same thing: something is happening, this is not the end state. */
+.skeleton-line {
+  height: 9px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--text-faint) 35%, transparent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
 .dot-running {
   width: 8px;
   height: 8px;
@@ -505,6 +514,7 @@ select.field-input {
  * answer being written. */
 @media (prefers-reduced-motion: reduce) {
   .dot-running,
+  .skeleton-line,
   .caret-streaming::after,
   .row-enter,
   .disclosure-panel,

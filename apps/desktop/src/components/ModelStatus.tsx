@@ -89,6 +89,37 @@ function DownloadProgress({
 }
 
 /**
+ * The card's own shape, filled with the rows it is about to hold. The inspector stacks underneath,
+ * so a single line of "Checking…" text made every group below jump upward the moment the round trip
+ * answered — the column rearranged itself under the user on each launch, on a machine that takes a
+ * second to reply and longer on one that has a 27 GB pack to resolve.
+ */
+function StatusSkeleton({ locale }: { locale: Locale }) {
+  return (
+    <section
+      aria-label={translate(locale, "model.packing")}
+      className="w-[var(--inspector-width)] shrink-0 border-b border-line bg-elevated p-[var(--space-4)] shadow-raised"
+    >
+      <div className="flex items-center gap-2">
+        <Icon name="bolt" size={15} className="text-accent" />
+        <span className="skeleton-line w-32" />
+        <span className="skeleton-line ml-auto h-5 w-14" />
+      </div>
+      <div className="mt-3 flex flex-col gap-1">
+        {[0, 1, 2].map((row) => (
+          <div key={row} className="flex items-baseline justify-between gap-3">
+            <span className="skeleton-line w-16" />
+            <span className="skeleton-line w-28" />
+          </div>
+        ))}
+      </div>
+      <span className="skeleton-line mt-3 block w-24" />
+      <span className="sr-only">{translate(locale, "model.status.checking")}</span>
+    </section>
+  );
+}
+
+/**
  * The strip that makes the "Local" badge honest: it is fed by the host's real catalog + engine
  * resolution, and it names the load-guard refusal instead of hiding it.
  */
@@ -96,7 +127,6 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   const {
     status,
     error,
-    loading,
     refresh,
     installing,
     progress,
@@ -134,9 +164,10 @@ export function ModelStatus({ locale }: { locale: Locale }) {
     if (autoStart) void start();
   }, [autoStart, start]);
 
-  if (loading && !status) {
-    return <p className="transcript-row">{translate(locale, "model.status.checking")}</p>;
-  }
+  // No status yet, which is the ordinary first second of every launch: hold the card's shape rather
+  // than returning a line the finished card grows out of. An error is the one state with nothing to
+  // stand in for, so it still gets its own row below.
+  if (!status && !error) return <StatusSkeleton locale={locale} />;
   if (error) {
     return (
       <p className="transcript-row" role="status">
