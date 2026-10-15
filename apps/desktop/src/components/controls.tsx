@@ -17,10 +17,8 @@ export function Section({
 }) {
   return (
     <section className="mb-[var(--space-6)]">
-      <h2 className="text-[calc(var(--font-ui)-1px)] text-muted">{label}</h2>
-      {description && (
-        <p className="mt-1 text-[calc(var(--font-ui)-1px)] text-muted">{description}</p>
-      )}
+      <h2 className="text-quiet text-muted">{label}</h2>
+      {description && <p className="mt-1 text-quiet text-muted">{description}</p>}
       <div className="card mt-[var(--space-3)]">{children}</div>
     </section>
   );
@@ -157,7 +155,7 @@ export function TextField({
     <label className="field w-[280px]">
       <input
         aria-label={label}
-        className={`field-input ${mono ? "font-mono text-[calc(var(--font-code))]" : ""}`}
+        className={`field-input ${mono ? "field-mono" : ""}`}
         type="text"
         value={value}
         placeholder={placeholder}

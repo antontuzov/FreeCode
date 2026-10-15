@@ -50,10 +50,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           className="w-full resize-none bg-transparent px-[var(--space-4)] pt-[var(--space-3)] text-fg outline-none placeholder:text-faint"
         />
         {error && (
-          <p
-            role="alert"
-            className="px-[var(--space-4)] pb-1 text-[calc(var(--font-ui)-2px)] text-danger"
-          >
+          <p role="alert" className="px-[var(--space-4)] pb-1 text-fine text-danger">
             {error}
           </p>
         )}
@@ -89,7 +86,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
             // The dial works and the label changes; what it dials into does not answer differently
             // yet, and a control that quietly rewrites its own name would claim otherwise.
             title={translate(locale, "composer.approve.inert")}
-            className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-[calc(var(--font-ui)-2px)] text-muted hover:bg-hover hover:text-fg"
+            className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-fine text-muted hover:bg-hover hover:text-fg"
           >
             <Icon name="review" size={13} />
             {translate(locale, `composer.approve.${mode}`)}
@@ -101,7 +98,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           <button
             type="button"
             onClick={onPickModel}
-            className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-[calc(var(--font-ui)-2px)] text-muted hover:bg-hover hover:text-fg"
+            className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-fine text-muted hover:bg-hover hover:text-fg"
           >
             <Icon name="bolt" size={13} />
             {translate(locale, "composer.model")}

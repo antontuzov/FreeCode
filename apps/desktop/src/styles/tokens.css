@@ -20,6 +20,18 @@
   --font-code: 12px;
   --font-family-ui: ui-sans-serif, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
   --font-family-code: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+  /* The type scale. Every UI step is derived from `--font-ui`, which is the one the Appearance page
+     drives, so a user who raises the body size raises the whole window in proportion. Components ask
+     for a step by name; the 45 sites that used to write `calc(var(--font-ui) - 2px)` by hand each
+     picked their own arithmetic and none of them moved together. */
+  --size-micro: calc(var(--font-ui) - 3px); /* 07: turn meta, the least emphatic thing on screen */
+  --size-fine: calc(var(--font-ui) - 2px); /* labels, readouts, row descriptions in the cards */
+  --size-quiet: calc(var(--font-ui) - 1px); /* secondary copy, pills, transcript rows */
+  --size-ui: var(--font-ui); /* the body step, and the two column headings */
+  --size-page: calc(var(--font-ui) + 10px); /* 01: the Settings page title */
+  /* Mono is its own axis: the Appearance page drives the code size separately, so a monospaced
+     readout follows this step rather than the UI scale above. */
+  --size-code: var(--font-code);
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;

@@ -27,6 +27,13 @@
   --color-diff-removed: var(--diff-removed);
   --font-sans: var(--font-family-ui);
   --font-mono: var(--font-family-code);
+  /* The scale as utilities: `text-fine`, `text-quiet`, … so a component names a step instead of
+   * re-deriving one. */
+  --text-micro: var(--size-micro);
+  --text-fine: var(--size-fine);
+  --text-quiet: var(--size-quiet);
+  --text-ui: var(--size-ui);
+  --text-page: var(--size-page);
   /* Both modes state a shadow and nothing spent one, so every floating surface sat at the same
      height as the page it was lifted off. `shadow-raised` is the consumer. */
   --shadow-raised: var(--shadow);
@@ -92,7 +99,7 @@ body {
 .section-label {
   padding: var(--space-4) var(--space-3) var(--space-1);
   color: var(--text-faint);
-  font-size: calc(var(--font-ui) - 2px);
+  font-size: var(--size-fine);
 }
 
 /* Settings rows and inspector groups sit in a rounded card separated by dashed hairlines. */
@@ -123,7 +130,7 @@ body {
   border-radius: var(--radius-pill);
   background: var(--accent-soft);
   color: var(--text-strong);
-  font-size: calc(var(--font-ui) - 1px);
+  font-size: var(--size-quiet);
 }
 
 /* Bare glyph buttons in the headers: the hit area is larger than the icon it draws. */
@@ -149,7 +156,7 @@ body {
   gap: var(--space-2);
   padding-block: var(--space-1);
   color: var(--text-muted);
-  font-size: calc(var(--font-ui) - 1px);
+  font-size: var(--size-quiet);
 }
 
 /* ---- turn checkpoints ---- */
@@ -209,7 +216,7 @@ body {
 }
 .row-desc {
   color: var(--text-muted);
-  font-size: calc(var(--font-ui) - 1px);
+  font-size: var(--size-quiet);
 }
 
 /* One bordered trigger for the select, the number box and the text field. */
@@ -223,7 +230,7 @@ body {
   border-radius: var(--radius-md);
   background: var(--bg-elevated);
   color: var(--text);
-  font-size: calc(var(--font-ui) - 1px);
+  font-size: var(--size-quiet);
 }
 .field:focus-within {
   border-color: var(--accent-line);
@@ -249,6 +256,8 @@ select.field-input {
 .field-narrow {
   width: 96px;
   justify-content: flex-end;
+  /* A number the user steps through must not change width as it counts. */
+  font-variant-numeric: tabular-nums;
 }
 /* Shot 01's `14 px` box shows no stepper arrows; the field is a number, not a spinner. */
 .field-narrow input[type="number"] {
@@ -259,6 +268,12 @@ select.field-input {
 .field-narrow input[type="number"]::-webkit-inner-spin-button {
   margin: 0;
   appearance: none;
+}
+/* A path or a token count is read in the code face, at the code size the Appearance page sets —
+ * which is a separate axis from the UI scale, so it cannot be a `text-*` step. */
+.field-mono {
+  font-family: var(--font-family-code);
+  font-size: var(--size-code);
 }
 
 /* The switch, not a checkbox: off is neutral, on is the accent, and the knob is the only thing
@@ -304,7 +319,7 @@ select.field-input {
   background: var(--bg-sunken);
   color: var(--text-muted);
   font-family: var(--font-family-code);
-  font-size: calc(var(--font-ui) - 2px);
+  font-size: var(--size-fine);
 }
 
 /* The four interface-style cards. Each paints the style it advertises through `--preview`, so the
@@ -316,7 +331,7 @@ select.field-input {
   flex-direction: column;
   gap: var(--space-2);
   color: var(--text-muted);
-  font-size: calc(var(--font-ui) - 1px);
+  font-size: var(--size-quiet);
   text-align: center;
   cursor: pointer;
 }

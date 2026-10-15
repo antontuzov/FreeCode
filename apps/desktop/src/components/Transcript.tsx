@@ -31,7 +31,7 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
       <div className="my-[var(--space-4)] flex items-center gap-3 text-faint">
         <span className="h-px flex-1 bg-line" />
         <Icon name="context" size={14} />
-        <span className="text-[calc(var(--font-ui)-1px)]">{stepLabel(locale, step)}</span>
+        <span className="text-quiet">{stepLabel(locale, step)}</span>
         <span className="h-px flex-1 bg-line" />
       </div>
     );
@@ -53,16 +53,14 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
         ) : (
           <StatusMark step={step} />
         )}
-        <span className="text-[calc(var(--font-ui)-1px)] font-medium text-fg">
-          {stepLabel(locale, step)}
-        </span>
+        <span className="text-quiet font-medium text-fg">{stepLabel(locale, step)}</span>
         {step.subject && (
-          <code className="rounded-[var(--radius-sm)] bg-sunken px-1.5 py-0.5 font-mono text-[calc(var(--font-ui)-3px)] text-muted">
+          <code className="rounded-[var(--radius-sm)] bg-sunken px-1.5 py-0.5 font-mono text-micro text-muted">
             {step.subject}
           </code>
         )}
         {step.diff && (
-          <span className="font-mono text-[calc(var(--font-ui)-3px)]">
+          <span className="font-mono text-micro">
             <span className="text-success">+{step.diff.added}</span>{" "}
             <span className="text-danger">−{step.diff.removed}</span>
           </span>
@@ -73,8 +71,8 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
               step.kind === "blocked"
                 ? // A refusal or a substitution is read, not skimmed: it wraps, and the action that
                   // clears a refusal follows the reason rather than replacing it.
-                  "min-w-0 flex-1 whitespace-pre-wrap break-words text-[calc(var(--font-ui)-2px)] text-muted"
-                : "min-w-0 flex-1 truncate text-[calc(var(--font-ui)-2px)] text-faint"
+                  "min-w-0 flex-1 whitespace-pre-wrap break-words text-fine text-muted"
+                : "min-w-0 flex-1 truncate text-fine text-faint"
             }
           >
             · {step.detail}
@@ -120,7 +118,7 @@ function TurnRow({
         data-flash={flash ? "true" : undefined}
         className="turn-anchor flex justify-end py-1.5"
       >
-        <p className="max-w-[80%] whitespace-pre-wrap break-words rounded-[var(--radius-lg)] bg-accent-soft px-[var(--space-3)] py-1.5 text-[calc(var(--font-ui)-1px)] text-fg-strong">
+        <p className="max-w-[80%] whitespace-pre-wrap break-words rounded-[var(--radius-lg)] bg-accent-soft px-[var(--space-3)] py-1.5 text-quiet text-fg-strong">
           {turn.text}
         </p>
       </li>
@@ -132,29 +130,27 @@ function TurnRow({
       {turn.thought && (
         // Open while it is the only thing there, folded once the answer arrives.
         <details className="mb-1.5" open={!turn.text}>
-          <summary className="flex cursor-pointer items-center gap-1.5 text-[calc(var(--font-ui)-2px)] text-muted">
+          <summary className="flex cursor-pointer items-center gap-1.5 text-fine text-muted">
             <Icon name="thought" size={13} />
             {translate(locale, turn.text ? "transcript.step.thought" : "chat.thinking")}
           </summary>
-          <p className="mt-1 whitespace-pre-wrap break-words border-l border-line pl-3 text-[calc(var(--font-ui)-2px)] text-muted">
+          <p className="mt-1 whitespace-pre-wrap break-words border-l border-line pl-3 text-fine text-muted">
             {turn.thought}
           </p>
         </details>
       )}
       {turn.text ? (
-        <p className="whitespace-pre-wrap break-words text-[calc(var(--font-ui)-1px)] leading-relaxed text-fg">
+        <p className="whitespace-pre-wrap break-words text-quiet leading-relaxed text-fg">
           {turn.text}
         </p>
       ) : waiting ? (
-        <p className="flex items-center gap-2 text-[calc(var(--font-ui)-2px)] text-muted">
+        <p className="flex items-center gap-2 text-fine text-muted">
           <span className="dot-running" aria-hidden />
           {translate(locale, "chat.starting")}
         </p>
       ) : null}
       {turn.stopped && (
-        <p className="mt-1 text-[calc(var(--font-ui)-3px)] text-faint">
-          {translate(locale, "transcript.stopped")}
-        </p>
+        <p className="mt-1 text-micro text-faint">{translate(locale, "transcript.stopped")}</p>
       )}
     </li>
   );
@@ -250,7 +246,7 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <header className="flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b border-line px-[var(--space-4)]">
-        <h1 className="min-w-0 flex-1 truncate text-sm font-medium text-fg">
+        <h1 className="min-w-0 flex-1 truncate text-ui font-medium text-fg">
           {translate(locale, "transcript.title")}
         </h1>
         {/* The skills and extensions this button would manage are not in this build. */}

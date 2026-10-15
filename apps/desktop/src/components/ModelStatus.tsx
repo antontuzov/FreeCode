@@ -41,7 +41,7 @@ function ByteProgress({
       >
         <div className="h-full bg-accent" style={{ width: `${percent}%` }} />
       </div>
-      <p className="mt-1 font-mono text-[calc(var(--font-ui)-2px)] text-muted">
+      <p className="mt-1 font-mono tabular-nums text-fine text-muted">
         {translate(locale, "model.fetch.progress", {
           transferred: megabytes(transferredBytes),
           total: megabytes(totalBytes),
@@ -62,7 +62,7 @@ function InstallProgress({
   if (!progress) return null;
   if (progress.phase === "unpacking") {
     return (
-      <p className="mt-2 flex items-center gap-1.5 text-[calc(var(--font-ui)-2px)] text-muted">
+      <p className="mt-2 flex items-center gap-1.5 text-fine text-muted">
         <span className="dot-running" aria-hidden />
         {translate(locale, "model.install.unpacking")}
       </p>
@@ -190,21 +190,21 @@ export function ModelStatus({ locale }: { locale: Locale }) {
     >
       <div className="flex items-center gap-2">
         <Icon name="bolt" size={15} className="text-accent" />
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-fg">
+        <h2 className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">
           {status.displayName}
         </h2>
         <span
-          className={`shrink-0 rounded-[var(--radius-pill)] px-2 py-0.5 text-[calc(var(--font-ui)-2px)] ${
+          className={`shrink-0 rounded-[var(--radius-pill)] px-2 py-0.5 text-fine ${
             status.blocked ? "bg-sunken text-muted" : "bg-accent-soft text-fg-strong"
           }`}
         >
           {badge}
         </span>
       </div>
-      <dl className="mt-3 flex flex-col gap-1 text-[calc(var(--font-ui)-2px)] text-muted">
+      <dl className="mt-3 flex flex-col gap-1 text-fine text-muted">
         <div className="flex items-baseline justify-between gap-3">
           <dt className="shrink-0">{translate(locale, "model.packing")}</dt>
-          <dd className="truncate font-mono text-fg">
+          <dd className="truncate font-mono tabular-nums text-fg">
             {status.packing} · {status.sizeGb.toFixed(2)} GB
           </dd>
         </div>
@@ -230,7 +230,7 @@ export function ModelStatus({ locale }: { locale: Locale }) {
           type="button"
           onClick={() => void start()}
           disabled={starting || running}
-          className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-2.5 py-1 text-[calc(var(--font-ui)-2px)] text-muted hover:bg-hover hover:text-fg disabled:opacity-60"
+          className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-2.5 py-1 text-fine text-muted hover:bg-hover hover:text-fg disabled:opacity-60"
         >
           <Icon name="bolt" size={13} />
           {starting
@@ -246,7 +246,7 @@ export function ModelStatus({ locale }: { locale: Locale }) {
           type="button"
           onClick={() => void release()}
           disabled={running}
-          className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-2.5 py-1 text-[calc(var(--font-ui)-2px)] text-muted hover:bg-hover hover:text-fg disabled:opacity-60"
+          className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-2.5 py-1 text-fine text-muted hover:bg-hover hover:text-fg disabled:opacity-60"
         >
           <Icon name="stop" size={13} />
           {translate(locale, "model.server.stop")}
@@ -254,10 +254,8 @@ export function ModelStatus({ locale }: { locale: Locale }) {
       )}
       {status.blocked ? (
         <div className="mt-3 rounded-[var(--radius-md)] border border-danger/40 p-3">
-          <p className="text-[calc(var(--font-ui)-1px)] font-medium text-danger">
-            {status.blocked.title}
-          </p>
-          <p className="mt-1 text-[calc(var(--font-ui)-2px)] text-muted">{status.blocked.detail}</p>
+          <p className="text-quiet font-medium text-danger">{status.blocked.title}</p>
+          <p className="mt-1 text-fine text-muted">{status.blocked.detail}</p>
           {fetchAction ? (
             // The app fetches the pinned asset itself; the fallback URL text below stays for every
             // other refusal, where no button in the app could clear it.
@@ -266,27 +264,27 @@ export function ModelStatus({ locale }: { locale: Locale }) {
                 type="button"
                 onClick={() => void fetchAction.run()}
                 disabled={fetchAction.busy}
-                className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-accent px-2.5 py-1 text-[calc(var(--font-ui)-2px)] font-medium text-accent-contrast disabled:opacity-60"
+                className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-accent px-2.5 py-1 text-fine font-medium text-accent-contrast disabled:opacity-60"
               >
                 <Icon name="download" size={13} />
                 {fetchAction.busy ? fetchAction.busyLabel : fetchAction.label}
               </button>
               {fetchAction.busy && fetchAction.bar}
               {fetchAction.error && (
-                <p role="alert" className="mt-2 text-[calc(var(--font-ui)-2px)] text-danger">
+                <p role="alert" className="mt-2 text-fine text-danger">
                   {fetchAction.error}
                 </p>
               )}
             </>
           ) : (
-            <p className="mt-2 text-[calc(var(--font-ui)-2px)] text-fg">
+            <p className="mt-2 text-fine text-fg">
               {status.blocked.ctaLabel}:{" "}
               <span className="font-mono text-muted">{status.blocked.ctaUrl}</span>
             </p>
           )}
         </div>
       ) : (
-        <p className="mt-3 text-[calc(var(--font-ui)-2px)] text-muted">
+        <p className="mt-3 text-fine text-muted">
           {status.engineInstalled && status.weightsPresent
             ? translate(locale, "model.status.ready")
             : status.engineInstalled
@@ -295,7 +293,7 @@ export function ModelStatus({ locale }: { locale: Locale }) {
         </p>
       )}
       {status.warnings.length > 0 && (
-        <ul className="mt-2 list-disc pl-5 text-[calc(var(--font-ui)-2px)] text-warning">
+        <ul className="mt-2 list-disc pl-5 text-fine text-warning">
           {status.warnings.map((warning) => (
             <li key={warning}>{warning}</li>
           ))}
@@ -304,7 +302,7 @@ export function ModelStatus({ locale }: { locale: Locale }) {
       {status.uncheckedWarnings.length > 0 && (
         // Folded, not dropped: these rows describe other machines, and hiding them would lose a
         // real known issue — but listing them beside a matched warning implies they apply here.
-        <details className="mt-2 text-[calc(var(--font-ui)-2px)] text-muted">
+        <details className="mt-2 text-fine text-muted">
           <summary className="cursor-pointer text-faint">
             {translate(locale, "model.warnings.unchecked", {
               count: status.uncheckedWarnings.length,

@@ -112,9 +112,7 @@ export function Settings({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-[var(--space-3)] pb-[var(--space-3)]">
           {groups.length === 0 ? (
-            <p className="px-3 py-2 text-[calc(var(--font-ui)-1px)] text-faint">
-              {t("noResults", { query })}
-            </p>
+            <p className="px-3 py-2 text-quiet text-faint">{t("noResults", { query })}</p>
           ) : (
             groups.map((group) => (
               <div key={group.key}>
@@ -139,15 +137,13 @@ export function Settings({
 
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[980px] px-[var(--space-6)] py-[var(--space-6)]">
-          <h1 className="text-[calc(var(--font-ui)+10px)] font-semibold text-fg-strong">
-            {t(`nav.${active}`)}
-          </h1>
+          <h1 className="text-page font-semibold text-fg-strong">{t(`nav.${active}`)}</h1>
           <p className="mt-1 text-muted">{t(`about.${active}`)}</p>
 
           {error && (
             <p
               role="alert"
-              className="mt-[var(--space-4)] rounded-[var(--radius-md)] border border-danger px-[var(--space-3)] py-[var(--space-2)] text-[calc(var(--font-ui)-1px)] text-danger"
+              className="mt-[var(--space-4)] rounded-[var(--radius-md)] border border-danger px-[var(--space-3)] py-[var(--space-2)] text-quiet text-danger"
             >
               {t("saveFailed", { error })}
             </p>
@@ -207,7 +203,7 @@ function Help({ t }: { t: T }) {
   return (
     <div className="absolute bottom-[var(--space-6)] right-[var(--space-6)] flex flex-col items-end gap-[var(--space-2)]">
       {open && (
-        <dl className="card w-[300px] p-[var(--space-4)] text-[calc(var(--font-ui)-1px)] shadow-raised">
+        <dl className="card w-[300px] p-[var(--space-4)] text-quiet shadow-raised">
           {status ? (
             <>
               <dt className="text-faint">{t("help.model")}</dt>
@@ -446,9 +442,7 @@ function Voice({ doc, set, t, locale }: { doc: SettingsDoc; set: SetFn; t: T; lo
       {/* Recording is the engine's job, so the page says so instead of implying a microphone works
        * before the runtime is on disk. */}
       {status && !status.engineInstalled && (
-        <p className="text-[calc(var(--font-ui)-1px)] text-faint">
-          {translate(locale, "settings.voice.pending")}
-        </p>
+        <p className="text-quiet text-faint">{translate(locale, "settings.voice.pending")}</p>
       )}
     </>
   );
@@ -486,9 +480,7 @@ function Corrections({ terms, set, t }: { terms: string[]; set: SetFn; t: T }) {
           </button>
         </div>
         {terms.length === 0 ? (
-          <p className="mt-[var(--space-2)] text-[calc(var(--font-ui)-1px)] text-faint">
-            {t("corrections.empty")}
-          </p>
+          <p className="mt-[var(--space-2)] text-quiet text-faint">{t("corrections.empty")}</p>
         ) : (
           <ul className="mt-[var(--space-2)] flex flex-wrap gap-[var(--space-2)]">
             {terms.map((term) => (

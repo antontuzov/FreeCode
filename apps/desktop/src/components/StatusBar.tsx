@@ -42,7 +42,7 @@ export function StatusBar({ locale }: { locale: Locale }) {
   const used = contextUsed;
 
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-line bg-bg px-[var(--space-4)] text-[calc(var(--font-ui)-2px)] text-muted">
+    <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-line bg-bg px-[var(--space-4)] text-fine text-muted">
       <span className="flex items-center gap-1.5">
         <Icon name="monitor" size={13} />
         {badge}
@@ -59,7 +59,9 @@ export function StatusBar({ locale }: { locale: Locale }) {
       >
         <span className="block h-full bg-accent" style={{ width: `${used ?? 0}%` }} aria-hidden />
       </span>
-      <span className="w-8 text-right font-mono">{used === null ? "—" : percentLabel(used)}</span>
+      <span className="w-8 text-right font-mono tabular-nums">
+        {used === null ? "—" : percentLabel(used)}
+      </span>
     </footer>
   );
 }

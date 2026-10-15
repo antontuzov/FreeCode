@@ -52,7 +52,7 @@ function Row({
       // why it does nothing, which is the one thing the row still has to say.
       aria-disabled={hint ? true : undefined}
       title={hint}
-      className={`nav-item ${indent ? "pl-[34px] text-[calc(var(--font-ui)-1px)]" : ""}`}
+      className={`nav-item ${indent ? "pl-[34px] text-quiet" : ""}`}
       onClick={onClick}
     >
       {icon && <Icon name={icon} />}
@@ -142,7 +142,7 @@ export function Sidebar({
       <div className="min-h-0 flex-1 overflow-y-auto px-[var(--space-3)] pb-[var(--space-3)]">
         <p className="section-label">{translate(locale, "sidebar.workspaces")}</p>
         {workspaces.length === 0 ? (
-          <p className="px-3 py-2 text-[calc(var(--font-ui)-1px)] text-faint">
+          <p className="px-3 py-2 text-quiet text-faint">
             {translate(locale, "sidebar.emptyWorkspaces")}
           </p>
         ) : (
@@ -167,7 +167,7 @@ export function Sidebar({
         >
           <Icon name="user" size={14} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-[calc(var(--font-ui)-1px)] text-fg">
+        <span className="min-w-0 flex-1 truncate text-quiet text-fg">
           {translate(locale, "sidebar.localUser")}
         </span>
         <button
