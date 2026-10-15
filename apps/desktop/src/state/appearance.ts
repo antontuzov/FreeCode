@@ -15,6 +15,9 @@ const FALLBACK: AppearanceState = {
   codeFontSize: 12,
   fontStyle: "sans",
   contentWidth: "standard",
+  // Same as the Rust defaults, so a window that has no host yet draws the gutter the reference shows.
+  showLineNumbers: true,
+  wrapLongLines: false,
 };
 
 type AppearanceStore = AppearanceState & {
@@ -48,12 +51,18 @@ export function applyToDocument(a: AppearanceState): void {
   // token swap rather than a prop threaded through every component that lays out text.
   root.dataset.fontStyle = a.fontStyle;
   root.dataset.contentWidth = a.contentWidth;
+  // The two code-display toggles ride the same mechanism. The parser always splits an answer's fences
+  // into lines, so a number appearing is an attribute change and not a reason to re-render the
+  // transcript — which for a long conversation is the difference between a repaint and a stutter.
+  root.dataset.codeLines = a.showLineNumbers ? "on" : "off";
+  root.dataset.codeWrap = a.wrapLongLines ? "on" : "off";
   root.style.setProperty("--font-ui", `${a.uiFontSize}px`);
   root.style.setProperty("--font-code", `${a.codeFontSize}px`);
   root.dataset.platform = platform();
 }
 
-/** Dev-only URL levers — `?mode=light`, `?font=serif`, `?width=wide` — honoured only by a dev build.
+/** Dev-only URL levers — `?mode=light`, `?font=serif`, `?width=wide`, `?lines=off`, `?wrap=on` —
+ * honoured only by a dev build.
  * A screenshot comparison needs a state the native window cannot be clicked into, and the alternative
  * was rewriting the settings file the user's own instance reads, which would have flipped their window
  * to get a picture of ours. Production has no such lever: the appearance comes off disk or from
@@ -71,6 +80,10 @@ function devOverrides(): Partial<AppearanceState> {
   if (font === "sans" || font === "serif" || font === "mono") forced.fontStyle = font;
   const width = q.get("width");
   if (width === "standard" || width === "wide" || width === "full") forced.contentWidth = width;
+  const lines = q.get("lines");
+  if (lines === "on" || lines === "off") forced.showLineNumbers = lines === "on";
+  const wrap = q.get("wrap");
+  if (wrap === "on" || wrap === "off") forced.wrapLongLines = wrap === "on";
   return forced;
 }
 

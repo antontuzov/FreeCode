@@ -108,6 +108,10 @@ export type AppearanceState = {
   codeFontSize: number;
   fontStyle: FontStyle;
   contentWidth: ContentWidth;
+  /** Both govern the answer's fenced code, which the shell renders, so they belong to this slice
+   * rather than only to the document the Settings surface edits. */
+  showLineNumbers: boolean;
+  wrapLongLines: boolean;
 };
 
 /** Host event carrying `EngineInstallProgress`; must match `engine::PROGRESS_EVENT` in Rust. */

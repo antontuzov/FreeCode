@@ -10,6 +10,8 @@
  * Two more axes at the bottom of the file are not colour and are not the palette's business:
  *   data-font-style   = sans | serif | mono      --font-family-ui
  *   data-content-width= standard | wide | full   --content-width
+ * A third pair is not colour either, and lives in global.css because it paints no token:
+ *   data-code-lines   = on | off     data-code-wrap = on | off   (an answer's fenced code)
  *
  * The neutrals below are measured, not eyeballed: each one is a pixel read out of
  * docs/reference-ui with scripts/probe-reference-palette.swift (see the citation on the line).

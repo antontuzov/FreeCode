@@ -692,6 +692,43 @@ select.field-input {
   font-size: var(--size-code);
   line-height: 1.6;
 }
+/* Line numbers are a CSS counter, not text. `rehypeCodeLines` gives every source line its own block
+ * whatever the setting says, so the Appearance toggle lands as an attribute on the window instead of
+ * a reason to re-parse the transcript. `3ch` is the widest count a fence realistically reaches, and
+ * the negative first-line indent hangs the number into the padding so the code stays aligned: a
+ * wrapped continuation lines up under the character above it, not under the number. */
+.answer-code .code-line {
+  display: block;
+  /* A blank line carries no glyph to hold its row open, and a block with nothing in it is no height. */
+  min-height: calc(1.6 * 1em);
+}
+[data-code-lines="on"] .answer-code code {
+  display: block;
+  counter-reset: code-line;
+}
+[data-code-lines="on"] .answer-code .code-line {
+  padding-left: calc(3ch + var(--space-3));
+  text-indent: calc(-1 * (3ch + var(--space-3)));
+  counter-increment: code-line;
+}
+[data-code-lines="on"] .answer-code .code-line::before {
+  content: counter(code-line);
+  display: inline-block;
+  width: 3ch;
+  margin-right: var(--space-3);
+  text-align: right;
+  text-indent: 0;
+  color: var(--text-faint);
+  /* The count is the app's addition; selecting the code should copy the code. */
+  user-select: none;
+}
+/* The other toggle of the pair. Off, a long line runs past the column and the block scrolls sideways,
+ * which is how a diff stays scannable; on, each source line wraps inside itself and nothing scrolls. */
+[data-code-wrap="on"] .answer-code pre {
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .answer-code-lang {
   position: absolute;
   top: 0;

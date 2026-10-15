@@ -28,6 +28,10 @@ pub struct AppearanceView {
     /// the typeface would flash the wrong one on every launch.
     pub font_style: FontStyle,
     pub content_width: ContentWidth,
+    /// The two code-display toggles, for the same reason: an answer's fences are rendered by the
+    /// shell, so a gutter either appears on the first answer after the change or it does not.
+    pub show_line_numbers: bool,
+    pub wrap_long_lines: bool,
 }
 
 /// `System` asks the host; anything else is already an answer.
@@ -50,12 +54,14 @@ pub fn view(appearance: &Appearance, os_prefers_light: bool) -> AppearanceView {
         code_font_size: appearance.code_font_size_px,
         font_style: appearance.font_style,
         content_width: appearance.content_width,
+        show_line_numbers: appearance.show_line_numbers,
+        wrap_long_lines: appearance.wrap_long_lines,
     }
 }
 
 /// Write the shell-facing controls back into the full document. Every other `Appearance` field —
-/// terminal theme, code theme, line numbers — is left exactly as it was, because a save from the
-/// shell must not reset what only the Settings surface renders.
+/// terminal theme, the code theme names, the file-icon set — is left exactly as it was, because a
+/// save from the shell must not reset what only the Settings surface renders.
 pub fn apply(view: &AppearanceView, appearance: &mut Appearance) {
     appearance.theme_mode = view.theme_mode;
     appearance.interface_style = view.accent;
@@ -65,6 +71,8 @@ pub fn apply(view: &AppearanceView, appearance: &mut Appearance) {
     appearance.code_font_size_px = view.code_font_size;
     appearance.font_style = view.font_style;
     appearance.content_width = view.content_width;
+    appearance.show_line_numbers = view.show_line_numbers;
+    appearance.wrap_long_lines = view.wrap_long_lines;
 }
 
 /// Load the whole document, or default it when nothing is stored yet. A stored file that cannot be
@@ -115,16 +123,19 @@ mod tests {
         settings.appearance.content_width = smollm_config::ContentWidth::Wide;
         settings.appearance.dark_code_theme = "vikia".into();
         settings.appearance.show_line_numbers = false;
+        settings.appearance.wrap_long_lines = true;
 
         let mut current = settings.appearance.clone();
         let mut v = view(&current, false);
         v.accent = InterfaceStyle::Forest;
         v.glass = false;
         v.ui_font_size = 16;
-        // The typeface and the column are painted by the window, so a save through the shell carries
-        // them rather than freezing whatever was there when the view was built.
+        // Everything the window paints from has to survive the trip back, rather than being frozen
+        // at whatever the document held when the view was built.
         v.font_style = smollm_config::FontStyle::Mono;
         v.content_width = smollm_config::ContentWidth::Full;
+        v.show_line_numbers = true;
+        v.wrap_long_lines = false;
         apply(&v, &mut current);
 
         assert_eq!(current.interface_style, InterfaceStyle::Forest);
@@ -132,13 +143,11 @@ mod tests {
         assert_eq!(current.ui_font_size_px, 16);
         assert_eq!(current.font_style, smollm_config::FontStyle::Mono);
         assert_eq!(current.content_width, smollm_config::ContentWidth::Full);
-        // These three are still only rendered by the Settings surface, which writes them itself.
+        assert!(current.show_line_numbers);
+        assert!(!current.wrap_long_lines);
+        // These two are still only rendered by the Settings surface, which writes them itself.
         assert_eq!(current.terminal_theme, settings.appearance.terminal_theme);
         assert_eq!(current.dark_code_theme, settings.appearance.dark_code_theme);
-        assert_eq!(
-            current.show_line_numbers,
-            settings.appearance.show_line_numbers
-        );
     }
 
     #[test]
@@ -152,5 +161,8 @@ mod tests {
         // The Settings page offers these exact strings, and tokens.css keys its rules off them.
         assert_eq!(raw["fontStyle"], "sans");
         assert_eq!(raw["contentWidth"], "standard");
+        // The reference ships a guttered code block, so the default is numbers on, wrapping off.
+        assert_eq!(raw["showLineNumbers"], true);
+        assert_eq!(raw["wrapLongLines"], false);
     }
 }

@@ -303,8 +303,11 @@ export const FIXTURE_ROWS: Row[] = [
     role: "assistant",
     // Markdown and LaTeX on purpose: this is also the row that proves the answer parser runs on
     // real model output rather than on a paragraph that happened to need no formatting. The link is
-    // there for the same reason — an answer's address is a control now, not a URL to read out.
-    text: "Picking up the next phase rather than waiting: wiring the loop, since that is what makes everything so far actually runnable.\n\nThe budget per turn is $O(n^2)$ in the replayed history, so the cache does most of the work:\n\n```rust\nlet ratio = cached as f32 / prompt as f32;\n```\n\nThe build that reads these weights is [the PrismML fork](https://github.com/PrismML-Eng/llama.cpp).",
+    // there for the same reason — an answer's address is a control now, not a URL to read out. The
+    // fence has a comment, a blank line and a line longer than the column because those are the three
+    // shapes the gutter and the wrap toggle are judged on: a numbered blank row, no phantom row from
+    // the fence's trailing newline, and a continuation that either scrolls or breaks.
+    text: "Picking up the next phase rather than waiting: wiring the loop, since that is what makes everything so far actually runnable.\n\nThe budget per turn is $O(n^2)$ in the replayed history, so the cache does most of the work:\n\n```rust\nlet ratio = cached as f32 / prompt as f32;\n// A line this long is what the wrap toggle is for: either it runs past the column and the block scrolls, or it breaks inside itself.\nif ratio > 0.6 { reuse(ratio) } else { replay_from_turn(0) }\n\nreplay_from_turn(0)\n```\n\nThe build that reads these weights is [the PrismML fork](https://github.com/PrismML-Eng/llama.cpp).",
   },
   {
     id: "f2",

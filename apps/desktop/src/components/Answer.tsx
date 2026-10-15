@@ -21,6 +21,7 @@ import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 
 import type { Locale } from "../i18n";
+import { rehypeCodeLines } from "../lib/codeLines";
 import { ExternalLink } from "./ExternalLink";
 
 /** The fence's language rides on the inner `<code>`; the chip has to reach past `<pre>` for it. */
@@ -70,6 +71,9 @@ export function Answer({
         remarkPlugins={[remarkMath]}
         rehypePlugins={[
           [rehypeHighlight, { detect: true, ignoreMissing: true }],
+          // After the highlighter, because it is the one that folds the snippet into a single span;
+          // the line split reads that span's newlines and keeps each token's class with both halves.
+          rehypeCodeLines,
           [rehypeKatex, { throwOnError: false, errorColor: "inherit", output: "htmlAndMathml" }],
         ]}
         components={linkComponents(locale)}
