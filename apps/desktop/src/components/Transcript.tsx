@@ -9,6 +9,7 @@ import {
   type Step,
   type Turn,
 } from "../state/transcript";
+import { BrandMark } from "./BrandMark";
 import { Composer } from "./Composer";
 import { Icon } from "./icons";
 
@@ -282,9 +283,16 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
           className="min-h-0 min-w-0 flex-1 overflow-y-auto px-[var(--space-6)] py-[var(--space-4)]"
         >
           {rows.length === 0 ? (
-            <p className="mt-[var(--space-6)] text-center text-muted">
-              {translate(locale, "transcript.empty")}
-            </p>
+            // The one screen in the app with nothing on it, so it is the one carrying the name. The
+            // mark is drawn in the live accent rather than shipped as an image, which is why it can
+            // be here in all eight theme combinations without a second palette.
+            <div className="flex flex-col items-center gap-2 pt-[var(--space-6)] text-accent">
+              <BrandMark />
+              <p className="text-ui font-medium text-fg-strong">{translate(locale, "app.name")}</p>
+              <p className="max-w-[360px] text-center text-quiet text-muted">
+                {translate(locale, "transcript.empty")}
+              </p>
+            </div>
           ) : (
             <ul className="mx-auto max-w-[720px]">
               {rows.map((row) =>
