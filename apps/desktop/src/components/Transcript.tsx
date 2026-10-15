@@ -232,9 +232,30 @@ function previewOf(text: string): string {
 
 const NEAR_BOTTOM_PX = 48;
 
+/**
+ * How long the open run has been running, in whole seconds, or null when nothing is open to time.
+ *
+ * The engine spends ten seconds or more booting the server and paging the weights in before the
+ * first token arrives, and a spinner that never changes is what a frozen window looks like from
+ * where the user is sitting. So the running line counts the wait it is asking to be waited out —
+ * which is also what the reference shot does with its in-flight row.
+ */
+function useRunSeconds(startedAt: number | null): number | null {
+  const [, setBeat] = useState(0);
+  useEffect(() => {
+    if (startedAt === null) return;
+    const id = window.setInterval(() => setBeat((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [startedAt]);
+  if (startedAt === null) return null;
+  return Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+}
+
 export function Transcript({ locale, onPickModel }: { locale: Locale; onPickModel: () => void }) {
   const rows = useTranscript((s) => s.rows);
   const running = useTranscript((s) => s.running);
+  const runStartedAt = useTranscript((s) => s.runStartedAt);
+  const waited = useRunSeconds(running ? runStartedAt : null);
   const scroll = useRef<HTMLDivElement>(null);
   const anchors = useRef(new Map<string, HTMLLIElement>());
   const flashTimer = useRef<number | undefined>(undefined);
@@ -347,9 +368,11 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
             </ul>
           )}
           {running && (
-            <p className="transcript-row mt-[var(--space-3)]">
+            <p className="transcript-row mt-[var(--space-3)] tabular-nums">
               <span className="dot-running" aria-hidden />
-              {translate(locale, "transcript.keepGoing")}
+              {waited === null
+                ? translate(locale, "transcript.keepGoing")
+                : translate(locale, "transcript.keepGoing.elapsed", { seconds: waited })}
             </p>
           )}
         </div>

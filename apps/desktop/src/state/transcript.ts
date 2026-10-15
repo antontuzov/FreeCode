@@ -247,6 +247,12 @@ type TranscriptStore = {
   /** What the last finished run cost, or null while none has reported. The inspector says "no run
    * has been timed yet" rather than showing rates for a run that never sent its timings frame. */
   lastRun: RunReport | null;
+  /**
+   * When the wait for the current run opened, as `Date.now()`, or null while no run is open. The
+   * transcript's running line counts the seconds off this, which is why the stamp is taken from the
+   * click that sent the prompt rather than from the host's answer.
+   */
+  runStartedAt: number | null;
   setRows: (rows: Row[]) => void;
   setRunning: (running: boolean) => void;
   /** Presets the meter for the fixture, and clears it when the conversation is thrown away. */
@@ -263,30 +269,38 @@ export const useTranscript = create<TranscriptStore>((set) => ({
   running: false,
   contextUsed: null,
   lastRun: null,
+  runStartedAt: null,
   setRows: (rows) => set({ rows }),
-  setRunning: (running) => set({ running }),
+  setRunning: (running) => set({ running, runStartedAt: running ? Date.now() : null }),
   setContextUsed: (contextUsed) => set({ contextUsed }),
   setLastRun: (lastRun) => set({ lastRun }),
   pushPrompt: (text) =>
     set((s) => ({ rows: [...s.rows, { id: nextId("turn"), kind: "turn", role: "user", text }] })),
   apply: (event) =>
-    set((s) => ({
-      rows: reduce(s.rows, event),
-      running:
+    set((s) => {
+      const running =
         event.type === "runStarted"
           ? true
           : event.type === "runFinished" || event.type === "failed"
             ? false
-            : s.running,
-      // The server counted the tokens; this is the one place that learns them. A run that reported
-      // no usage leaves the last measured figure standing rather than blanking a meter that was
-      // already telling the truth about the same window.
-      contextUsed:
-        event.type === "runFinished" ? (event.contextUsed ?? s.contextUsed) : s.contextUsed,
-      // Unlike the meter, the report is about one run rather than about the window, so a run that
-      // never timed itself replaces the last one's numbers instead of leaving them up.
-      lastRun: event.type === "runFinished" ? event.run : s.lastRun,
-    })),
+            : s.running;
+      return {
+        rows: reduce(s.rows, event),
+        running,
+        // `send` already stamped the click, and the run's own announcement is inside the wait that
+        // started there, so the origin stands. A window that re-rendered mid-run never saw the click
+        // and takes the announcement instead of showing a clock that guessed an origin.
+        runStartedAt: running ? (s.runStartedAt ?? Date.now()) : null,
+        // The server counted the tokens; this is the one place that learns them. A run that reported
+        // no usage leaves the last measured figure standing rather than blanking a meter that was
+        // already telling the truth about the same window.
+        contextUsed:
+          event.type === "runFinished" ? (event.contextUsed ?? s.contextUsed) : s.contextUsed,
+        // Unlike the meter, the report is about one run rather than about the window, so a run that
+        // never timed itself replaces the last one's numbers instead of leaving them up.
+        lastRun: event.type === "runFinished" ? event.run : s.lastRun,
+      };
+    }),
 }));
 
 /**

@@ -39,6 +39,7 @@
   "transcript.more": "Task options",
   "transcript.empty": "No task running. Describe what you want the local model to do.",
   "transcript.keepGoing": "Keeping going…",
+  "transcript.keepGoing.elapsed": "Keeping going… {{seconds}}s",
   "transcript.checkpoints": "Turns",
   "transcript.checkpoint": "Jump to turn {{n}}: {{text}}",
   "transcript.notice": "Notice",
