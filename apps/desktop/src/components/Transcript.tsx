@@ -12,7 +12,7 @@ import {
   type Turn,
 } from "../state/transcript";
 import { Answer } from "./Answer";
-import { BrandMark } from "./BrandMark";
+import { BrandMark, MascotMark } from "./BrandMark";
 import { Composer } from "./Composer";
 import { ExternalLink } from "./ExternalLink";
 import { Icon } from "./icons";
@@ -348,12 +348,16 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
           className="min-h-0 min-w-0 flex-1 overflow-y-auto px-[var(--space-6)] py-[var(--space-4)]"
         >
           {rows.length === 0 ? (
-            // The one screen in the app with nothing on it, so it is the one carrying the name. The
-            // mark is drawn in the live accent rather than shipped as an image, which is why it can
-            // be here in all eight theme combinations without a second palette.
+            // The one screen in the app with nothing on it, so it is the one carrying the name — and
+            // the mascot, one of twelve drawn ducks picked once per run. The duck is a raster and
+            // takes no accent, which is why it is the picture above the name rather than the mark
+            // beside it: that one is still drawn, so the name reads in all eight theme combinations.
             <div className="flex flex-col items-center gap-2 pt-[var(--space-6)] text-accent-ink">
-              <BrandMark />
-              <p className="text-ui font-medium text-fg-strong">{translate(locale, "app.name")}</p>
+              <MascotMark />
+              <p className="flex items-center gap-2 text-ui font-medium text-fg-strong">
+                <BrandMark size={18} />
+                {translate(locale, "app.name")}
+              </p>
               <p className="max-w-[360px] text-center text-quiet text-muted">
                 {translate(locale, "transcript.empty")}
               </p>
