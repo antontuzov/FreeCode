@@ -749,10 +749,16 @@ select.field-input {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.answer-code-lang {
+/* The corner a fence keeps for itself: which language it is, and the control that copies it. Both
+ * hang over the code's own padding rather than pushing the first line down. */
+.answer-code-tools {
   position: absolute;
   top: 0;
   right: 0;
+  display: flex;
+  align-items: stretch;
+}
+.answer-code-lang {
   padding: 2px var(--space-2);
   border-bottom-left-radius: var(--radius-sm);
   border-left: 1px solid var(--border);
@@ -761,6 +767,32 @@ select.field-input {
   font-family: var(--font-family-code);
   font-size: var(--size-micro);
   color: var(--text-faint);
+}
+/* Not `.icon-btn`: the header's 28px square would stand taller than the code line it sits beside, and
+ * a copy control that shoves the first line down is a worse trade than a smaller hit area. */
+.answer-code-copy {
+  display: grid;
+  place-items: center;
+  padding: 2px var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    color var(--dur-quick) var(--ease-standard),
+    background-color var(--dur-quick) var(--ease-standard);
+}
+.answer-code-copy:hover {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+/* The two answers the host can give, held for a beat. Colour alone would say it, but the label says
+ * it too: the button is reporting whether the pasteboard took the text. */
+.answer-code-copy.copied {
+  color: var(--success);
+}
+.answer-code-copy.failed {
+  color: var(--danger);
 }
 
 /* Display math scrolls across rather than widening the column, and keeps its own baseline. */

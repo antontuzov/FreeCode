@@ -25,6 +25,9 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri-plugin-opener = "2.7.2"
+# A code fence's copy control writes through the host, because the webview is not a place the web
+# Clipboard API can be counted on. Text only, so the image feature stays off.
+arboard = { version = "3", default-features = false }
 
 # Only for the shutdown hook's SIGTERM/SIGINT listener; `tokio::signal::unix` does not exist on
 # Windows, so the dependency is gated to the platforms that have the signals.

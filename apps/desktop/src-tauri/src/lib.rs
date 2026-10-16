@@ -7,6 +7,7 @@
 
 mod appearance;
 mod chat;
+mod clipboard;
 mod engine;
 mod paths;
 mod status;
@@ -170,6 +171,9 @@ pub fn run() {
             save_appearance,
             load_settings,
             save_settings,
+            // The one write the UI may make to the machine it runs on: the text of a code fence, onto
+            // the pasteboard. See `clipboard`.
+            clipboard::copy_text,
             chat::start_engine,
             chat::stop_engine,
             chat::engine_status,

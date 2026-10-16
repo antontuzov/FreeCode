@@ -311,6 +311,12 @@ export const ipc = {
   loadSettings: () => invoke<SettingsDoc>("load_settings"),
   /** Validated by deserialising on the host side; the answer is what actually landed on disk. */
   saveSettings: (settings: SettingsDoc) => invoke<SettingsDoc>("save_settings", { settings }),
+  /**
+   * Put a fence's text on the system pasteboard. The host does the writing because the webview is not
+   * a place the web Clipboard API can be counted on, and its promise settles only once the pasteboard
+   * has actually taken the text — which is what lets the button say "Copied" truthfully.
+   */
+  copyText: (text: string) => invoke<void>("copy_text", { text }),
   /** Launch the supervised fork server, or refuse with the load guard's own reason. */
   startEngine: () => invoke<EngineView>("start_engine"),
   stopEngine: () => invoke<void>("stop_engine"),
