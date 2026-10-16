@@ -68,8 +68,13 @@ function SectionHeader({
 }
 
 function Section({ group, items, locale }: { group: Group; items: Item[]; locale: Locale }) {
-  const [open, setOpen] = useState(true);
   const label = translate(locale, `inspector.${group.key}`);
+  // A group starts open when it has rows and closed when it does not. This build's run reports no
+  // files, tools, pages or subagents — the tool loop that would produce them is not wired, so under
+  // a real answer all five of these are empty at once — and five open headings each followed by
+  // their own apology is a panel that advertises what is missing. The sentence is one press away
+  // either way, so closing says nothing that opening hides.
+  const [open, setOpen] = useState(items.length > 0);
 
   return (
     <section className="border-b border-line/60">
