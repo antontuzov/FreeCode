@@ -335,8 +335,65 @@ export type SessionHit = SessionSummary & {
   excerpt: string;
 };
 
+/* ---- the Knowledge Center: the pinned catalog, and this machine's share of it ---- */
+
+/**
+ * One packing the catalog pins, plus whether its file is in the weights directory. Mirrors
+ * `knowledge::PackRow`. `onDisk` is a size check rather than a hash, for the reason given there.
+ */
+export type CatalogPack = {
+  key: string;
+  file: string;
+  quantType: string;
+  bitsPerWeight: number;
+  sizeGb: number;
+  sizeBytes: number;
+  onDisk: boolean;
+  notes: string;
+};
+
+/**
+ * A known issue the model card records, quoted rather than judged: the host does not evaluate the
+ * condition against this machine here, which is what separates this page from the status strip.
+ * Mirrors `knowledge::CaveatRow`.
+ */
+export type CatalogCaveat = {
+  condition: string;
+  symptom: string;
+  workaround: string;
+  severity: "moderate" | "severe" | "fatal";
+};
+
+/** Mirrors `knowledge::ModelCard`. */
+export type CatalogModel = {
+  id: string;
+  name: string;
+  repoId: string;
+  repoUrl: string;
+  license: string;
+  baseModel: string;
+  architecture: string;
+  contextLength: number;
+  packs: CatalogPack[];
+  caveats: CatalogCaveat[];
+  /** The catalog's own sizes summed over the packs marked present, so the figure cannot disagree
+   * with the rows above it. */
+  heldBytes: number;
+};
+
+/** Mirrors `knowledge::Center`. */
+export type KnowledgeCenter = {
+  catalogUpdated: string;
+  weightsDir: string;
+  engineTag: string;
+  engineInstalled: boolean;
+  models: CatalogModel[];
+};
+
 export const ipc = {
   modelStatus: () => invoke<ModelStatus>("model_status"),
+  /** Every model and packing the catalog pins, with the ones on this machine marked. */
+  knowledgeCenter: () => invoke<KnowledgeCenter>("knowledge_center"),
   /** Fetch and unpack the pinned fork engine. Progress arrives on `onEngineInstall`. */
   installEngine: () => invoke<InstallOutcome>("install_engine"),
   onEngineInstall: (onProgress: (progress: EngineInstallProgress) => void): Promise<() => void> =>

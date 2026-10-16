@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Inspector } from "./components/Inspector";
+import { Knowledge } from "./components/Knowledge";
 import { ModelStatus } from "./components/ModelStatus";
 import { Palette } from "./components/Palette";
 import { Settings } from "./components/Settings";
@@ -24,6 +25,11 @@ export default function App() {
   const stop = useChat((s) => s.stop);
   const newTask = useChat((s) => s.newTask);
   const [settingsPage, setSettingsPage] = useState<string | null>(query("settings"));
+  // `?knowledge=1` opens the Knowledge Center and `?knowledge=<model id>` opens one model's page, for
+  // the same reason as the other deep links: the rows that do that are clicks the native window
+  // cannot make. An id the catalog does not have falls back to the machine page.
+  const knowledgePage = query("knowledge");
+  const [knowledge, setKnowledge] = useState(knowledgePage !== null);
   // `?search=<query>` opens the palette with that query already typed — the deep link the panel is
   // captured through, since the window takes no injected keystrokes and a search nobody can type
   // into is a search nobody can see.
@@ -125,15 +131,22 @@ export default function App() {
     newTask: () => {
       // The palette owns the keyboard the same way Settings does: a New task fired from under it
       // would empty the transcript the rows in front of the user describe.
-      if (settingsPage !== null || paletteOpen) return;
+      if (settingsPage !== null || paletteOpen || knowledge) return;
       void newTask();
     },
-    settings: () => setSettingsPage((page) => page ?? "appearance"),
+    // Knowledge Center is a surface rather than a page of the shell, so ⌘, leaves it: staying on two
+    // full-window pages at once would mean a back button that returns to a third.
+    settings: () => {
+      setKnowledge(false);
+      setSettingsPage((page) => page ?? "appearance");
+    },
     // Twice closes it, because the second press is the user changing their mind.
     palette: () => setPaletteOpen((open) => !open),
     escape: () => {
       if (settingsPage !== null) {
         setSettingsPage(null);
+      } else if (knowledge) {
+        setKnowledge(false);
       } else if (running) {
         void stop();
       }
@@ -144,6 +157,16 @@ export default function App() {
     return <Settings locale={locale} page={settingsPage} onBack={() => setSettingsPage(null)} />;
   }
 
+  if (knowledge) {
+    return (
+      <Knowledge
+        locale={locale}
+        initial={knowledgePage === "1" ? "" : (knowledgePage ?? "")}
+        onBack={() => setKnowledge(false)}
+      />
+    );
+  }
+
   return (
     <div className="flex h-full flex-col bg-bg text-fg">
       <div className="flex min-h-0 flex-1">
@@ -151,7 +174,11 @@ export default function App() {
           locale={locale}
           fixture={fixture}
           onOpenSettings={() => setSettingsPage("appearance")}
-          actions={{ newTask: () => void newTask(), openPalette: () => setPaletteOpen(true) }}
+          actions={{
+            newTask: () => void newTask(),
+            openPalette: () => setPaletteOpen(true),
+            openKnowledge: () => setKnowledge(true),
+          }}
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <Transcript locale={locale} onPickModel={() => setSettingsPage("model")} />

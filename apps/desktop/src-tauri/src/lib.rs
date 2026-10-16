@@ -9,6 +9,7 @@ mod appearance;
 mod chat;
 mod clipboard;
 mod engine;
+mod knowledge;
 mod paths;
 mod sessions;
 mod status;
@@ -20,6 +21,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, Theme};
 
 use appearance::AppearanceView;
+use knowledge::Center;
 use smollm_config::Settings;
 use status::ModelStatusView;
 
@@ -42,6 +44,16 @@ async fn model_status(app: AppHandle) -> Result<ModelStatusView, String> {
     tauri::async_runtime::spawn_blocking(move || status::build(&root, &settings))
         .await
         .map_err(|e| format!("model status probe failed: {e}"))?
+}
+
+/// The catalog as a page: every model and packing the pins name, and which of those files this
+/// machine holds. The Knowledge Center's only source.
+#[tauri::command]
+async fn knowledge_center(app: AppHandle) -> Result<Center, String> {
+    let (root, settings) = root_and_settings(&app)?;
+    tauri::async_runtime::spawn_blocking(move || Center::build(&root, &settings))
+        .await
+        .map_err(|e| format!("catalog listing failed: {e}"))?
 }
 
 #[tauri::command]
@@ -166,6 +178,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             model_status,
+            // What the catalog pins and what this machine has of it, for the Knowledge Center.
+            knowledge_center,
             install_engine,
             download_weights,
             load_appearance,

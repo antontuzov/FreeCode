@@ -18,6 +18,9 @@ type NavRow = {
   /** A row the reference layout draws and this build has nothing behind. It stays on screen — the
    * layout is the contract — but a click on it says so rather than looking like a lost one. */
   placeholder?: true;
+  /** A hover line that says what the row holds rather than what it cannot do, named by key so a
+   * module-level row still reads in the locale the window answers in. */
+  tipKey?: string;
 };
 
 const PRIMARY: NavRow[] = [
@@ -28,7 +31,14 @@ const PRIMARY: NavRow[] = [
 ];
 
 const PLACES: NavRow[] = [
-  { key: "knowledge", icon: "knowledge", placeholder: true },
+  // The same reason the search row's placeholder went: this row has a page behind it now, so it
+  // opens it instead of saying this build has nothing to open.
+  {
+    key: "knowledge",
+    icon: "knowledge",
+    tipKey: "sidebar.knowledgeAbout",
+    onActivate: (a) => a.openKnowledge(),
+  },
   { key: "sites", icon: "sites", placeholder: true },
   { key: "automations", icon: "automations", placeholder: true },
   { key: "extensions", icon: "extensions", placeholder: true },
@@ -119,6 +129,8 @@ export type SidebarActions = {
   newTask: () => void;
   /** Put the search over the shell. */
   openPalette: () => void;
+  /** Open the Knowledge Center: the catalog and this machine's share of it. */
+  openKnowledge: () => void;
 };
 
 export function Sidebar({
@@ -147,6 +159,7 @@ export function Sidebar({
       label={translate(locale, `sidebar.${r.key}`)}
       hint={r.placeholder ? notInBuild : undefined}
       shortcut={r.shortcut ? shortcutLabel(r.shortcut) : undefined}
+      tip={r.tipKey ? translate(locale, r.tipKey) : undefined}
       onClick={r.onActivate ? () => r.onActivate?.(actions) : undefined}
     />
   );
