@@ -118,7 +118,14 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let catalog = Catalog::load_default(&root).expect("seeded catalog loads");
         let ids: Vec<&str> = catalog.models.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(ids, ["ternary-bonsai-2-27b", "ternary-bonsai-1-7b"]);
+        assert_eq!(
+            ids,
+            [
+                "ternary-bonsai-2-27b",
+                "ternary-bonsai-1-7b",
+                "ternary-bonsai-2-4b"
+            ]
+        );
         assert_eq!(catalog.models[0].packs.len(), 3);
 
         // The 1.7B lists four files but offers two: the F16 reference is a baseline, and the
@@ -131,5 +138,30 @@ mod tests {
             .map(|p| p.key.as_str())
             .collect();
         assert_eq!(offered, ["PQ2_0", "Q2_0_g64"]);
+
+        // The 4B is the vision size of the Bonsai 2 family: three language packs with the group-64
+        // band registered but not offered (this app only ever launches the fork, where PQ2_0 wins),
+        // and the projector the card recommends rather than the one that can crash.
+        let mid = catalog.model("ternary-bonsai-2-4b").unwrap();
+        assert_eq!(mid.packs.len(), 3);
+        let offered: Vec<&str> = mid
+            .downloadable_packs()
+            .iter()
+            .map(|p| p.key.as_str())
+            .collect();
+        assert_eq!(offered, ["PQ2_0", "PTQ1_0"]);
+        assert_eq!(
+            mid.recommended_vision().map(|v| v.file.as_str()),
+            Some("Ternary-Bonsai-2-4B-mmproj-Q8_0.gguf")
+        );
+        assert_eq!(
+            mid.engine.required_metadata_prefixes,
+            ["prism.hadamard."],
+            "a rotated export is only provably Prism's if the metadata says so"
+        );
+        assert!(
+            mid.benchmarks.bonsai.is_none() && mid.benchmarks.no_published_score.is_some(),
+            "the 4B has no published suite, which has to be stated rather than left blank"
+        );
     }
 }

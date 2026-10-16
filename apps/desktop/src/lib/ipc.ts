@@ -353,6 +353,22 @@ export type CatalogPack = {
 };
 
 /**
+ * A projector file the card publishes for images. Mirrors `knowledge::VisionRow`. It carries no
+ * bits-per-weight because it is not a quantisation of the language model — it is the separate
+ * network that maps picture embeddings in, so the catalog keeps it out of `CatalogPack`.
+ */
+export type CatalogVisionPack = {
+  key: string;
+  file: string;
+  quantType: string;
+  sizeGb: number;
+  sizeBytes: number;
+  /** The card's own pick, which is a claim about the pack rather than a state of this machine. */
+  recommended: boolean;
+  onDisk: boolean;
+};
+
+/**
  * A known issue the model card records, quoted rather than judged: the host does not evaluate the
  * condition against this machine here, which is what separates this page from the status strip.
  * Mirrors `knowledge::CaveatRow`.
@@ -375,6 +391,8 @@ export type CatalogModel = {
   architecture: string;
   contextLength: number;
   packs: CatalogPack[];
+  /** The projector files for image input, empty for a model whose card publishes none. */
+  vision: CatalogVisionPack[];
   caveats: CatalogCaveat[];
   /** The catalog's own sizes summed over the packs marked present, so the figure cannot disagree
    * with the rows above it. */

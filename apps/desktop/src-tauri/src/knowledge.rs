@@ -72,12 +72,18 @@ pub struct ModelCard {
     pub architecture: String,
     pub context_length: u32,
     pub packs: Vec<PackRow>,
+    /// The card's projector files, which is the half of "this model takes images" that a reader
+    /// cannot infer from the language packs. Empty for a model that publishes none.
+    pub vision: Vec<VisionRow>,
     /// The card's own caveats, gathered across its packings and deduped: a pack-level note that
     /// repeats on three quantisations is one known issue, not three.
     pub caveats: Vec<CaveatRow>,
     /// Bytes of this model sitting in [`Center::weights_dir`], counted from the packs marked
     /// [`PackRow::on_disk`] — the catalog's sizes rather than a `du`, so the number means "what the
-    /// pin says is here" and cannot disagree with the rows above it.
+    /// pin says is here" and cannot disagree with the pack rows.
+    /// Projectors are deliberately not in this total: a 0.37 GB mmproj with no language pack under it
+    /// is not a model this machine can run, and the count that feeds "1 of 2 packs here" would stop
+    /// meaning what it says.
     pub held_bytes: u64,
 }
 
@@ -98,6 +104,20 @@ impl ModelCard {
             })
             .collect();
 
+        let vision: Vec<VisionRow> = model
+            .vision
+            .iter()
+            .map(|proj| VisionRow {
+                key: proj.key.clone(),
+                file: proj.file.clone(),
+                quant_type: proj.quant_type.clone(),
+                size_gb: proj.size_gb,
+                size_bytes: proj.size_bytes,
+                recommended: proj.recommended,
+                on_disk: on_disk(weights, &proj.file, proj.size_bytes),
+            })
+            .collect();
+
         let held_bytes = packs
             .iter()
             .filter(|p| p.on_disk)
@@ -115,6 +135,7 @@ impl ModelCard {
             context_length: model.context_length,
             caveats: caveat_rows(model),
             packs,
+            vision,
             held_bytes,
         }
     }
@@ -131,6 +152,23 @@ pub struct PackRow {
     pub size_bytes: u64,
     pub on_disk: bool,
     pub notes: String,
+}
+
+/// A projector the card publishes for images. It carries no bits-per-weight because it is not a
+/// quantisation of the language model — it is a separate network that maps picture embeddings into
+/// the model's embedding space, and the catalog says so by keeping it off [`PackRow`].
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VisionRow {
+    pub key: String,
+    pub file: String,
+    pub quant_type: String,
+    pub size_gb: f32,
+    pub size_bytes: u64,
+    /// The card's own pick for this model, which is a statement about the pack rather than about
+    /// this machine — so it is a label on the row, not the row's state.
+    pub recommended: bool,
+    pub on_disk: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -219,6 +257,13 @@ mod tests {
         for (card, entry) in center.models.iter().zip(&catalog.models) {
             assert_eq!(card.id, entry.id);
             assert_eq!(card.packs.len(), entry.packs.len());
+            // A model's projector files are as much the catalog's as its quantisations: a page that
+            // dropped them would hide the only half of a vision model that makes it one.
+            assert_eq!(card.vision.len(), entry.vision.len());
+            assert_eq!(
+                card.vision.iter().filter(|v| v.recommended).count(),
+                entry.vision.iter().filter(|v| v.recommended).count(),
+            );
             assert_eq!(
                 card.repo_url,
                 format!("https://huggingface.co/{}", entry.repo_id)
@@ -238,7 +283,54 @@ mod tests {
                 .all(|m| m.packs.iter().all(|p| !p.on_disk)),
             "an empty weights directory cannot hold a pack"
         );
+        assert!(
+            center
+                .models
+                .iter()
+                .all(|m| m.vision.iter().all(|v| !v.on_disk)),
+            "or a projector"
+        );
         assert!(center.models.iter().all(|m| m.held_bytes == 0));
+    }
+
+    /// The 4B is the model the app points at for images, so its page is the one a reader arrives on
+    /// asking "which file adds vision, and which of those should I fetch". A projector the card marks
+    /// as not its own pick has to say so on the row: the two differ in whether a concurrent image
+    /// run crashes the server, which is the whole reason the card publishes both.
+    #[test]
+    fn the_vision_models_page_names_its_projectors_and_the_picks() {
+        let (root, settings) = nothing_fetched();
+        let center = Center::build(root.path(), &settings).unwrap();
+        let card = center
+            .models
+            .iter()
+            .find(|m| m.id == "ternary-bonsai-2-4b")
+            .expect("the catalog ships the 4B");
+
+        assert_eq!(card.vision.len(), 2);
+        assert!(card.vision.iter().any(|v| v.recommended));
+        assert_eq!(
+            card.vision
+                .iter()
+                .find(|v| v.recommended)
+                .unwrap()
+                .quant_type
+                .as_str(),
+            "Q8_0",
+            "the card's pick is the Q8_0 projector, because the BF16 one can crash on concurrent images"
+        );
+        assert!(card.vision.iter().all(|v| !v.file.is_empty()));
+
+        // A model that publishes no projector gets an empty list, not a fabricated row.
+        let plain = center
+            .models
+            .iter()
+            .find(|m| m.id == "ternary-bonsai-1-7b")
+            .expect("the catalog ships the 1.7B");
+        assert!(
+            plain.vision.is_empty(),
+            "the 1.7B card publishes no projector"
+        );
     }
 
     #[test]

@@ -205,6 +205,38 @@ function ModelPage({
         ))}
       </Section>
 
+      {/* The half of "this model takes images" that the pack rows cannot say: a projector is not a
+          quantisation of the language model, so it belongs on its own rows. Recorded here because a
+          reader choosing a model for image input needs the file named, not the architecture string. */}
+      <Section label={t("vision")} description={t("vision.desc")}>
+        {model.vision.length === 0 && (
+          <Row title={t("vision.none")}>
+            <span />
+          </Row>
+        )}
+        {model.vision.map((proj) => (
+          <Row
+            key={proj.file}
+            title={proj.key === proj.quantType ? proj.key : `${proj.key} · ${proj.quantType}`}
+            description={`${t("size", { gb: proj.sizeGb.toFixed(2) })} · ${proj.file}`}
+          >
+            {/* Two claims on one row, and the row's own copy block does not grow, so they travel as
+                one group rather than being spread to either side of the leftover width. */}
+            <span className="flex shrink-0 items-center gap-[var(--space-2)]">
+              {proj.recommended && <span className="pill">{t("vision.recommended")}</span>}
+              <State on={proj.onDisk}>{proj.onDisk ? t("pack.held") : t("pack.absent")}</State>
+            </span>
+          </Row>
+        ))}
+      </Section>
+
+      {/* Held projectors are deliberately outside the byte totals above: a 0.4 GB mmproj with no
+          language pack under it is not a model this machine can run, and the row that counts packs
+          would stop meaning what it says. */}
+      {model.vision.length > 0 && (
+        <p className="mb-[var(--space-6)] text-fine text-faint">{t("vision.note")}</p>
+      )}
+
       <Section label={t("issues")} description={t("issues.desc")}>
         {model.caveats.length === 0 && (
           <Row title={t("issues.none")}>

@@ -247,6 +247,12 @@ pub struct Benchmarks {
     /// The ternary pack itself. `validate_catalog` requires it for any model with a runtime pack.
     #[serde(default)]
     pub bonsai: Option<QuantScore>,
+    /// Upstream publishes no evaluation table for this size, and the entry says where that was
+    /// checked. Rule 9 accepts either a measured `bonsai` score or this statement, because the
+    /// alternative to an honest absence is a typed-in number — and a number is what the rule exists
+    /// to keep honest. An empty string is not a statement, so it fails the check.
+    #[serde(default)]
+    pub no_published_score: Option<String>,
     #[serde(default)]
     pub by_skill: BTreeMap<String, f32>,
     #[serde(default)]

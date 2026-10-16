@@ -414,6 +414,16 @@ fn validate_model(model: &ModelEntry, targets: &[AvailableTarget], out: &mut Vec
                 format!("a quantized pack cannot score above its FP16 reference on the same suite ({} > {})", b.avg, model.benchmarks.fp16_avg),
             ));
         }
+    } else if let Some(checked) = &model.benchmarks.no_published_score {
+        // The honest alternative to a measured score: upstream published none, and the entry names
+        // where it looked. Blank is not that — it is the empty form of typing in a number.
+        if checked.trim().is_empty() {
+            out.push(Violation::new(
+                "benchmark-measured",
+                &model.id,
+                "no_published_score has to name the sources checked, or the entry is just missing a benchmark".into(),
+            ));
+        }
     } else if model.packs.iter().any(|p| p.is_runtime_pack()) {
         out.push(Violation::new(
             "benchmark-measured",
@@ -543,6 +553,34 @@ mod tests {
             rules.contains(&"thinking-budget-floor".to_string()),
             "{rules:?}"
         );
+    }
+
+    #[test]
+    fn a_runtime_pack_needs_a_measured_score_or_a_named_absence() {
+        let base = catalog();
+        let idx = base
+            .models
+            .iter()
+            .position(|m| m.id == "ternary-bonsai-2-4b")
+            .expect("the shipped catalog carries the 4B entry");
+        let id = base.models[idx].id.clone();
+
+        // The 4B is the case the statement exists for: it offers runtime packs and upstream publishes
+        // no evaluation suite for it. Deleting the statement, or leaving it blank, is the same
+        // silence as never having looked, so both have to fail.
+        for blank in [None, Some(String::new())] {
+            let mut c = base.clone();
+            c.models[idx].benchmarks.no_published_score = blank.clone();
+            let rules: Vec<String> = validate_catalog(&c, &targets())
+                .into_iter()
+                .filter(|v| v.subject == id)
+                .map(|v| v.rule)
+                .collect();
+            assert!(
+                rules.contains(&"benchmark-measured".to_string()),
+                "{rules:?}"
+            );
+        }
     }
 
     #[test]
