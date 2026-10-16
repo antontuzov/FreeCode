@@ -10,6 +10,7 @@ mod chat;
 mod clipboard;
 mod engine;
 mod paths;
+mod sessions;
 mod status;
 pub mod verify_native;
 mod weights;
@@ -179,7 +180,11 @@ pub fn run() {
             chat::engine_status,
             chat::chat_send,
             chat::chat_stop,
-            chat::new_task
+            chat::new_task,
+            // The conversations the app has filed, and the one control that reopens one. The sidebar
+            // lists the first and its rows are the second.
+            chat::list_sessions,
+            chat::open_session
         ])
         .setup(|app| {
             // Before this process spawns a server of its own, so a leftover's port is free to be

@@ -164,6 +164,16 @@ body {
   color: var(--text-strong);
 }
 
+/* A conversation sits under its workspace rather than beside it, so its label starts past the
+ * workspace's own. Both steps are set here rather than as utilities on the row: this file is
+ * unlayered, which outranks Tailwind's utility layer, so a `pl-*` or `text-*` class beside
+ * `.nav-item` loses to its shorthand `padding` and its `font-size` — and the row has no icon to
+ * carry the indent either way. */
+.nav-item.indent {
+  padding-left: calc(var(--space-3) * 4);
+  font-size: var(--size-quiet);
+}
+
 /* "Personal", "Integrations", "Coding" — the group label above a run of nav items. */
 .section-label {
   padding: var(--space-4) var(--space-3) var(--space-1);

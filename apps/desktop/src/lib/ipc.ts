@@ -294,6 +294,34 @@ export type SettingsDoc = {
   };
 };
 
+/** One side of an exchange, as the conversation store filed it. Mirrors `sessions::Turn`. */
+export type SessionTurn = { role: "user" | "assistant"; text: string };
+
+/**
+ * A filed conversation. Mirrors `sessions::Session`.
+ *
+ * Only the prompt/answer pairs are here, because those are what the history replays and so the only
+ * part that makes reopening one mean something. A run's notices, refusals and timings describe an
+ * attempt rather than the exchange, and the reasoning stream is never replayed into a prompt
+ * (Bonsai-demo#183) — none of the three is filed, and the transcript of a reopened conversation
+ * shows the exchange rather than the diagnostics around it.
+ */
+export type Session = {
+  schemaVersion: number;
+  id: string;
+  /** The folder the conversation happened in, which is the heading the sidebar groups rows under. */
+  workspace: string;
+  /** The first prompt, shortened. The user's own words, not a generated summary. */
+  title: string;
+  /** The model that answered the newest turn. */
+  model: string;
+  updatedAtMs: number;
+  turns: SessionTurn[];
+};
+
+/** What a sidebar row needs, without every answer's text crossing the boundary to get it. */
+export type SessionSummary = Omit<Session, "schemaVersion" | "turns"> & { turnCount: number };
+
 export const ipc = {
   modelStatus: () => invoke<ModelStatus>("model_status"),
   /** Fetch and unpack the pinned fork engine. Progress arrives on `onEngineInstall`. */
@@ -327,11 +355,23 @@ export const ipc = {
    */
   chatSend: (text: string) => invoke<string>("chat_send", { text }),
   /**
-   * Forget the conversation and keep the server up. This is what the sidebar's "New task" row is:
-   * the history the next request is built from is the only thing a new task resets, and reloading
-   * the weights for it would be a cost the click never asked for.
+   * Start a new task: forget the conversation in flight and keep the server up. This is what the
+   * sidebar's "New task" row is — the history the next request is built from is the only thing a new
+   * task resets, and reloading the weights for it would be a cost the click never asked for.
+   *
+   * What was on screen is not lost by it. Each turn is filed as it happens, so the conversation the
+   * click abandons is already in the list below, and reopening it continues where it stopped.
    */
   newTask: () => invoke<void>("new_task"),
+  /** Every conversation this app has filed, newest first. The sidebar's Workspaces group lists these. */
+  listSessions: () => invoke<SessionSummary[]>("list_sessions"),
+  /**
+   * Reopen one. The host answers with the conversation it also just put back into the history, so the
+   * transcript and the engine agree on what was said — a row that showed turns the model no longer
+   * remembers would let the next prompt be answered out of a different conversation than it looks
+   * like it is continuing.
+   */
+  openSession: (id: string) => invoke<Session>("open_session", { id }),
   /**
    * Stop the reply that is streaming. The engine keeps its weights loaded, so the next message costs
    * nothing — `stopEngine` is the one that releases them, and the composer's Stop is not that.

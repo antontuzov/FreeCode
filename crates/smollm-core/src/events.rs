@@ -133,19 +133,23 @@ pub enum NoticeCode {
     ContextTrimmed,
     /// The reply hit its token cap, so it ends mid-sentence.
     BudgetExhausted,
+    /// The exchange happened but did not reach the conversation store, so the sidebar will not show it
+    /// after the window closes.
+    NotFiled,
 }
 
 impl NoticeCode {
     /// Every code the host can emit. `verify-transcript-i18n` walks this to require one catalog entry
     /// per code, so a notice added here without its sentence in both locales fails the build instead
     /// of rendering its own key in the middle of a transcript.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::EffortNotSupported,
         Self::EngineRestarted,
         Self::ToolCallWithoutTools,
         Self::PromptTooLong,
         Self::ContextTrimmed,
         Self::BudgetExhausted,
+        Self::NotFiled,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -156,6 +160,7 @@ impl NoticeCode {
             Self::PromptTooLong => "notice.prompt-too-long",
             Self::ContextTrimmed => "notice.context-trimmed",
             Self::BudgetExhausted => "notice.budget-exhausted",
+            Self::NotFiled => "notice.not-filed",
         }
     }
 
@@ -171,6 +176,7 @@ impl NoticeCode {
             Self::PromptTooLong => &["tokens", "window"],
             Self::ContextTrimmed => &[],
             Self::BudgetExhausted => &["maxTokens"],
+            Self::NotFiled => &["why"],
         }
     }
 }

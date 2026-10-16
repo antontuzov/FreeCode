@@ -4,6 +4,7 @@
 import { create } from "zustand";
 
 import { ipc, type EngineView } from "../lib/ipc";
+import { useSessions } from "./sessions";
 import { useTranscript } from "./transcript";
 
 type ChatStore = {
@@ -60,6 +61,10 @@ export const useChat = create<ChatStore>((set, get) => ({
       set({ sending: false });
       useTranscript.getState().setRunning(false);
       void get().refresh();
+      // The host files each turn as it happens, so the run that just closed is the moment the filed
+      // list stops matching the sidebar. Refreshed after the send rather than on an event because the
+      // turn is only on disk once the command has returned.
+      void useSessions.getState().refresh();
     }
   },
   stop: async () => {
@@ -123,6 +128,11 @@ export const useChat = create<ChatStore>((set, get) => ({
     transcript.setContextUsed(null);
     // Same for the run report — it describes an answer this transcript no longer holds.
     transcript.setLastRun(null);
+    // The conversation that was on screen is filed, which is the only reason throwing it away is a
+    // control rather than a loss. Its row goes back to the list at once, so the user can see where it
+    // went, and no row is highlighted because nothing is open any more.
+    useSessions.setState({ activeId: null });
+    void useSessions.getState().refresh();
   },
 }));
 

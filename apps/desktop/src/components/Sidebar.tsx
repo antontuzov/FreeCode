@@ -1,6 +1,8 @@
 import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
+import type { SessionSummary } from "../lib/ipc";
 import { shortcutLabel, type ShortcutId } from "../lib/shortcuts";
+import { useSessions } from "../state/sessions";
 
 type NavRow = {
   key: string;
@@ -26,11 +28,46 @@ const PLACES: NavRow[] = [
   { key: "extensions", icon: "extensions", placeholder: true },
 ];
 
-type Workspace = { name: string; tasks: string[] };
+type Conversation = {
+  /** null for a row that only exists to show the layout: the fixture's tasks have no conversation to
+   * reopen, and a row that looks clickable and is not is the failure this build already fixed once. */
+  id: string | null;
+  title: string;
+  /** The model that answered, shown on hover rather than in the row: the column is 260 px wide and
+   * the conversation's own words are what identifies it. */
+  meta?: string;
+};
 
-/** Only ever rendered under `?fixture=1`; a real workspace list arrives with the session store. */
+type Workspace = { name: string; conversations: Conversation[] };
+
+/**
+ * The filed conversations, under the folder each happened in.
+ *
+ * The host lists them newest first, so the groups are taken in the order their first conversation
+ * appears and each group keeps that order. One workspace today — the root the host resolved — but
+ * the grouping is what the reference draws, and it is the shape a second folder would join.
+ */
+function group(items: SessionSummary[], unnamed: string): Workspace[] {
+  const byName = new Map<string, Workspace>();
+  for (const item of items) {
+    const name = item.workspace || unnamed;
+    const found = byName.get(name);
+    const conversation: Conversation = { id: item.id, title: item.title, meta: item.model };
+    if (found) found.conversations.push(conversation);
+    else byName.set(name, { name, conversations: [conversation] });
+  }
+  return [...byName.values()];
+}
+
+/** Only ever rendered under `?fixture=1`, to compare the layout against docs/reference-ui. */
 const FIXTURE_WORKSPACES: Workspace[] = [
-  { name: "smollm-studio", tasks: ["Phase 0 host", "Catalog pin"] },
+  {
+    name: "smollm-studio",
+    conversations: [
+      { id: null, title: "Phase 0 host" },
+      { id: null, title: "Catalog pin" },
+    ],
+  },
 ];
 
 function Row({
@@ -41,6 +78,7 @@ function Row({
   onClick,
   hint,
   shortcut,
+  tip,
 }: {
   icon?: IconName;
   label: string;
@@ -49,6 +87,9 @@ function Row({
   onClick?: () => void;
   hint?: string;
   shortcut?: string;
+  /** A hover line that says what the row holds rather than what it cannot do, so it needs a row that
+   * is not `hint`-disabled to show it. */
+  tip?: string;
 }) {
   return (
     <button
@@ -57,8 +98,8 @@ function Row({
       // Not `disabled`: a disabled button swallows the hover that carries the sentence explaining
       // why it does nothing, which is the one thing the row still has to say.
       aria-disabled={hint ? true : undefined}
-      title={hint ?? shortcut}
-      className={`nav-item ${indent ? "pl-[34px] text-quiet" : ""}`}
+      title={hint ?? shortcut ?? tip}
+      className={`nav-item ${indent ? "indent" : ""}`}
       onClick={onClick}
     >
       {icon && <Icon name={icon} />}
@@ -83,8 +124,13 @@ export function Sidebar({
   onOpenSettings: () => void;
   actions: SidebarActions;
 }) {
-  const workspaces = fixture ? FIXTURE_WORKSPACES : [];
+  const items = useSessions((s) => s.items);
+  const activeId = useSessions((s) => s.activeId);
+  const open = useSessions((s) => s.open);
   const notInBuild = translate(locale, "common.notInBuild");
+  const workspaces = fixture
+    ? FIXTURE_WORKSPACES
+    : group(items, translate(locale, "sidebar.localUser"));
 
   const row = (r: NavRow) => (
     <Row
@@ -150,15 +196,31 @@ export function Sidebar({
         <p className="section-label">{translate(locale, "sidebar.workspaces")}</p>
         {workspaces.length === 0 ? (
           <p className="px-3 py-2 text-quiet text-faint">
-            {translate(locale, "sidebar.emptyWorkspaces")}
+            {translate(locale, "sidebar.emptyConversations")}
           </p>
         ) : (
           workspaces.map((ws) => (
             <div key={ws.name}>
               <Row icon="workspace" label={ws.name} />
-              {ws.tasks.map((task) => (
-                <Row key={task} label={task} indent />
-              ))}
+              {ws.conversations.map((c) => {
+                // A local, because the handler below runs after the check and a property's narrowing
+                // does not carry into a closure the way a local's does.
+                const id = c.id;
+                return (
+                  <Row
+                    key={id ?? c.title}
+                    label={c.title}
+                    indent
+                    active={id !== null && id === activeId}
+                    tip={
+                      c.meta
+                        ? `${translate(locale, "sidebar.openConversation")} · ${c.meta}`
+                        : undefined
+                    }
+                    onClick={id ? () => void open(id) : undefined}
+                  />
+                );
+              })}
             </div>
           ))
         )}

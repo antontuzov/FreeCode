@@ -37,7 +37,8 @@ use smollm_llama::{
 };
 use smollm_models::ModelEntry;
 
-use crate::{appearance, status};
+use crate::{appearance, sessions, status};
+use sessions::{Role, Session};
 
 /// Event name the transcript subscribes to for the duration of the window.
 pub const EVENT: &str = "agent-event";
@@ -247,6 +248,10 @@ impl Slot {
 pub struct ChatState {
     slot: Mutex<Slot>,
     history: Mutex<Vec<Message>>,
+    /// The same history as it is filed on disk, or `None` between New task and the next prompt.
+    /// Kept beside the history rather than rebuilt from it because the file carries what the history
+    /// cannot: the conversation's name, its workspace, and the model that answered.
+    session: Mutex<Option<Session>>,
     /// The last run's fill as the server counted it, paired with the window it was counted against:
     /// `(window, tokens)`. Only [`outgrew_window`] reads it, and a pairing is what keeps a Settings
     /// change that doubles the slot from inheriting the old one's verdict.
@@ -702,17 +707,29 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
     let settings = appearance::load_settings()?;
     let run_id = format!("run-{}", state.runs.fetch_add(1, Ordering::Relaxed) + 1);
     let stopped = AtomicBool::new(false);
+    let model_label = format!("{} ({})", turn.model.name, turn.view.packing);
     emit(
         &app,
         AgentEvent::RunStarted {
             run_id: run_id.clone(),
-            model_label: format!("{} ({})", turn.model.name, turn.view.packing),
+            model_label: model_label.clone(),
             // The answer is coming from the supervised loopback server, so the only thing that can
             // make this run not-local is a configured remote provider.
             local: status::local_badge(true, settings.privacy.allow_remote_providers),
         },
     );
     lock(&state.history).push(Message::user(&text));
+    // Filed before the request goes out rather than after the answer lands. A run that dies mid-stream
+    // leaves the question on screen and nowhere else, and the one copy of what was asked that survives
+    // the window is the copy in the conversation store.
+    file_turn(
+        &app,
+        &state,
+        &sessions::workspace_label(&app),
+        &model_label,
+        Role::User,
+        &text,
+    );
     // Read before the request goes out and acted on after it lands: the replay this turn is about to
     // do is already too big for the window, but what the run did with that is only known once the
     // server reports its own count.
@@ -760,6 +777,14 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
         Ok(reply) => {
             if !reply.text.is_empty() {
                 lock(&state.history).push(Message::assistant(reply.text.clone()));
+                file_turn(
+                    &app,
+                    &state,
+                    &sessions::workspace_label(&app),
+                    &model_label,
+                    Role::Assistant,
+                    &reply.text,
+                );
             }
             if let Some(total) = reply.total_tokens {
                 *lock(&state.last_fill) = Some((turn.view.context_tokens, total));
@@ -857,7 +882,86 @@ fn forget_conversation(state: &ChatState) -> Result<(), String> {
     // The measurement was of the conversation this just threw away: the next request replays
     // nothing, so there is no overflow left to announce.
     *lock(&state.last_fill) = None;
+    // The filed copy stays where it is — that is the point of having filed it — and the next prompt
+    // opens a new one. This is what makes the sidebar's row for a conversation the user started and
+    // abandoned a true statement rather than a promise to keep writing to it.
+    *lock(&state.session) = None;
     Ok(())
+}
+
+/// Append one side of the exchange to the conversation store, opening the file if this is its first.
+///
+/// A conversation that will not land is announced on the transcript rather than swallowed. The
+/// sidebar's row is a promise that the exchange is still there tomorrow, and a run that quietly
+/// failed to keep it would break that promise at the one moment nobody is looking.
+fn file_turn(
+    app: &AppHandle,
+    state: &ChatState,
+    workspace: &str,
+    model: &str,
+    role: Role,
+    text: &str,
+) {
+    let session = {
+        let mut cell = lock(&state.session);
+        let session = cell.get_or_insert_with(|| Session::new(workspace, model, text));
+        session.model = model.to_string();
+        session.push(role, text);
+        session.clone()
+    };
+    if let Err(why) = sessions::write(&session) {
+        emit(
+            app,
+            AgentEvent::notice(NoticeCode::NotFiled, &[("why", why.as_str())]),
+        );
+    }
+}
+
+/// Every conversation this app has filed, newest first. What the sidebar's Workspaces group lists.
+#[tauri::command]
+pub async fn list_sessions() -> Result<Vec<sessions::Summary>, String> {
+    Ok(sessions::list())
+}
+
+/// Reopen a filed conversation: its turns go back on screen *and* into the history the next request
+/// is built from, so asking it another question continues that exchange instead of starting a new one
+/// that happens to look like it.
+#[tauri::command]
+pub async fn open_session(app: AppHandle, id: String) -> Result<Session, String> {
+    let state = app.state::<ChatState>();
+    {
+        let slot = lock(&state.slot);
+        // Same reason New task refuses: the reply in flight belongs to the conversation on screen, and
+        // replacing the history under it would have the next turn answer out of two conversations.
+        if slot.streaming {
+            return Err(
+                "a reply is still streaming; stop it before opening another conversation".into(),
+            );
+        }
+    }
+    let session = sessions::read(&id)?;
+    // Whichever conversation the window was holding, its measurement is now about a different one.
+    *lock(&state.history) = history_of(&session);
+    *lock(&state.last_fill) = None;
+    *lock(&state.session) = Some(session.clone());
+    Ok(session)
+}
+
+/// The history a filed conversation would be answered from, in the order it was said.
+///
+/// Reopening has to rebuild what the run built the first time. The transcript on screen and the
+/// memory behind the next prompt are the same exchange or neither is the conversation the user
+/// believes they continued, and a row that showed turns the engine no longer holds would let the
+/// next answer come from a different one.
+fn history_of(session: &Session) -> Vec<Message> {
+    session
+        .turns
+        .iter()
+        .map(|turn| match turn.role {
+            Role::User => Message::user(&turn.text),
+            Role::Assistant => Message::assistant(&turn.text),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -882,10 +986,33 @@ mod tests {
         let state = ChatState::default();
         lock(&state.history).push(Message::user("first question"));
         lock(&state.history).push(Message::assistant("first answer"));
+        *lock(&state.session) = Some(Session::new("smollm-studio", "model", "first question"));
         forget_conversation(&state).unwrap();
         // The next request is built from this vector, so an empty one is a model that remembers
         // nothing — which is the entire behaviour the control claims.
         assert!(lock(&state.history).is_empty());
+        // And the next prompt opens its own file rather than appending to the one just left, or the
+        // two conversations would be written over each other.
+        assert!(lock(&state.session).is_none());
+    }
+
+    #[test]
+    fn a_reopened_conversation_goes_back_into_the_history_in_the_order_it_was_said() {
+        let mut session = Session::new("smollm-studio", "model", "first question");
+        session.push(Role::User, "first question");
+        session.push(Role::Assistant, "first answer");
+        session.push(Role::User, "and then?");
+
+        // The same vector the run built the first time, so the next prompt continues this exchange
+        // rather than answering a transcript the engine never held.
+        assert_eq!(
+            history_of(&session),
+            vec![
+                Message::user("first question"),
+                Message::assistant("first answer"),
+                Message::user("and then?"),
+            ]
+        );
     }
 
     #[test]

@@ -10,6 +10,7 @@ import type { Locale } from "./i18n";
 import { useShortcuts } from "./lib/shortcuts";
 import { useAppearance } from "./state/appearance";
 import { connectAgentEvents, useChat } from "./state/chat";
+import { useSessions } from "./state/sessions";
 import { FIXTURE_ROWS, useTranscript } from "./state/transcript";
 
 export default function App() {
@@ -28,6 +29,10 @@ export default function App() {
   const askAgain = query("ask_again");
   const forgetBetween = query("new_task_between") === "1";
   const stopAfter = Math.max(0, Number(query("stop_after")) || 0);
+  const reopen = query("reopen") === "1";
+  const filed = useSessions((s) => s.items);
+  const openFiled = useSessions((s) => s.open);
+  const refreshFiled = useSessions((s) => s.refresh);
 
   // The catalog language is the setting, so switching it in Settings repaints every label.
   const locale: Locale = language;
@@ -46,11 +51,15 @@ export default function App() {
       else off();
     });
     void refreshEngine();
+    // The sidebar's rows are conversations the host filed on a previous run, so the window has to ask
+    // for them once it opens. The fixture does not: it draws its own workspace list to compare
+    // against docs/reference-ui, and a real list arriving underneath it would be a second truth.
+    if (!fixture) void refreshFiled();
     return () => {
       live = false;
       unlisten?.();
     };
-  }, [refreshEngine]);
+  }, [fixture, refreshEngine, refreshFiled]);
 
   // `?fixture=1` renders the shell with a scripted run so the layout can be compared against
   // docs/reference-ui. Nothing sets it by default: an empty transcript is honest, an invented one
@@ -81,6 +90,16 @@ export default function App() {
       await send(askAgain);
     })();
   }, [ask, askRepeat, askAgain, forgetBetween, newTask, send]);
+
+  // `?reopen=1` opens the newest filed conversation once the list arrives — the same call the
+  // sidebar's row makes, and the only way that row's behavior gets verified rather than assumed,
+  // since the native window takes no injected clicks. Waiting for the list is the point: the row
+  // cannot be opened before the host has said what it filed.
+  useEffect(() => {
+    if (!reopen) return;
+    const newest = filed[0];
+    if (newest) void openFiled(newest.id);
+  }, [reopen, filed, openFiled]);
 
   // `?stop_after=<ms>` presses the composer's Stop that far into a run. Measured from the run
   // starting rather than from the window opening, because the engine spends seconds loading weights

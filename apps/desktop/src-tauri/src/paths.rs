@@ -24,7 +24,7 @@ const CONTRACT: [&str; 2] = [smollm_models::CATALOG_REL, smollm_models::ENGINE_L
 
 /// The directory the app owns beside `settings.json`, and the only place a packaged app may unpack
 /// its engine or download weights. `None` on a platform that gives the app no such directory.
-fn app_data_dir() -> Option<PathBuf> {
+pub(crate) fn app_data_dir() -> Option<PathBuf> {
     smollm_config::Settings::default_path()
         .and_then(|settings| settings.parent().map(|dir| absolute(dir.to_path_buf())))
 }
