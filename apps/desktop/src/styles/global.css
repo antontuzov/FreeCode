@@ -563,9 +563,6 @@ select.field-input {
   color: var(--text);
   overflow-wrap: break-word;
 }
-.answer > * + * {
-  margin-top: var(--space-3);
-}
 .answer h1,
 .answer h2,
 .answer h3,
@@ -584,11 +581,17 @@ select.field-input {
 .answer h4 {
   font-size: var(--size-quiet);
 }
-.answer p,
-.answer ul,
-.answer ol,
-.answer blockquote {
+/* The parser's blocks lose the user-agent's own margins, and `:where` is what keeps that reset from
+ * eating the rhythm below. Written as `.answer p`, it out-ranks `.answer > * + *` — one class plus one
+ * type against one class — and `margin` is a shorthand, so the reset wins on specificity wherever the
+ * two rules sit in the file and an answer's paragraphs measure exactly like two wrapped lines. Only
+ * the direct children need the rhythm, so only they are raised back: a nested block still takes the
+ * zero-specificity reset, which an author rule beats without needing to out-specify anything. */
+:where(.answer) :where(p, ul, ol, blockquote) {
   margin: 0;
+}
+.answer > * + * {
+  margin-top: var(--space-3);
 }
 .answer ul,
 .answer ol {
