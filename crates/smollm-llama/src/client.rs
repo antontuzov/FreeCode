@@ -307,23 +307,41 @@ impl SseDecoder {
         self.pending.push_str(&String::from_utf8_lossy(bytes));
         let mut events = Vec::new();
         while let Some(frame) = self.take_frame() {
-            for line in frame.lines() {
-                let Some(data) = line.strip_prefix("data:") else {
-                    continue;
-                };
-                let data = data.trim();
-                if data == "[DONE]" {
-                    self.finished = true;
-                    events.push(SseEvent::Done);
-                    continue;
-                }
-                match serde_json::from_str::<Value>(data) {
-                    Ok(value) => events.push(SseEvent::Data(value)),
-                    Err(e) => events.push(SseEvent::Malformed {
-                        payload: data.to_string(),
-                        reason: e.to_string(),
-                    }),
-                }
+            events.append(&mut self.decode(&frame));
+        }
+        events
+    }
+
+    /// What the stream left behind when it ended without terminating its last event. A server that
+    /// closes the connection on a `data:` line with no blank line after it keeps that line in
+    /// `pending` forever, and an answer that loses it stops mid-word with nothing to say so.
+    pub fn finish(&mut self) -> Vec<SseEvent> {
+        if self.pending.trim().is_empty() {
+            self.pending.clear();
+            return Vec::new();
+        }
+        let frame = std::mem::take(&mut self.pending);
+        self.decode(&frame)
+    }
+
+    fn decode(&mut self, frame: &str) -> Vec<SseEvent> {
+        let mut events = Vec::new();
+        for line in frame.lines() {
+            let Some(data) = line.strip_prefix("data:") else {
+                continue;
+            };
+            let data = data.trim();
+            if data == "[DONE]" {
+                self.finished = true;
+                events.push(SseEvent::Done);
+                continue;
+            }
+            match serde_json::from_str::<Value>(data) {
+                Ok(value) => events.push(SseEvent::Data(value)),
+                Err(e) => events.push(SseEvent::Malformed {
+                    payload: data.to_string(),
+                    reason: e.to_string(),
+                }),
             }
         }
         events
@@ -511,47 +529,65 @@ pub async fn stream_chat(
     let mut reply = Reply::default();
     let mut decoder = SseDecoder::default();
     let mut stream = response.bytes_stream();
+    let mut flush_tail = true;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-        let mut deltas = Vec::new();
-        for event in decoder.push(&chunk) {
-            match event {
-                SseEvent::Data(value) => {
-                    let (mut d, finish) = chunk_deltas(&value);
-                    deltas.append(&mut d);
-                    if let Some(f) = finish {
-                        reply.finish_reason = Some(f);
-                    }
-                    if let Some(usage) = chunk_usage(&value) {
-                        reply.total_tokens = Some(usage.total_tokens);
-                        reply.prompt_tokens = Some(usage.prompt_tokens);
-                    }
-                    if let Some(timings) = chunk_timings(&value) {
-                        reply.timings = Some(timings);
-                    }
-                }
-                SseEvent::Done => break,
-                SseEvent::Malformed { payload, reason } => {
-                    // Reported, not swallowed: it is how a server that returned a plain-text error
-                    // through a 200 would otherwise look like silence.
-                    deltas.push(ReplyDelta::Answer(format!(
-                        "unparsable stream frame: {reason}"
-                    )));
-                    tracing::warn!("malformed SSE payload: {payload}");
-                }
-            }
-        }
-        if !deltas.is_empty() {
-            apply_deltas(&mut reply, &deltas);
-            if on_delta(&deltas) == StreamControl::Stop {
-                break;
-            }
-        }
-        if decoder.is_finished() {
+        if !fold_events(decoder.push(&chunk), &mut reply, &mut on_delta) || decoder.is_finished() {
+            flush_tail = false;
             break;
         }
     }
+    // Only a stream that ran to its end can be holding a frame the caller still wants: after a Stop
+    // press the buffer has the line that was refused, and after `[DONE]` it has nothing.
+    if flush_tail {
+        fold_events(decoder.finish(), &mut reply, &mut on_delta);
+    }
     Ok(reply)
+}
+
+/// Fold one batch of decoded frames into the reply and hand the additions to the watcher. Returns
+/// whether the rest of the stream is wanted.
+fn fold_events<F>(events: Vec<SseEvent>, reply: &mut Reply, mut on_delta: F) -> bool
+where
+    F: FnMut(&[ReplyDelta]) -> StreamControl,
+{
+    let mut deltas = Vec::new();
+    let mut done = false;
+    for event in events {
+        match event {
+            SseEvent::Data(value) => {
+                let (mut d, finish) = chunk_deltas(&value);
+                deltas.append(&mut d);
+                if let Some(f) = finish {
+                    reply.finish_reason = Some(f);
+                }
+                if let Some(usage) = chunk_usage(&value) {
+                    reply.total_tokens = Some(usage.total_tokens);
+                    reply.prompt_tokens = Some(usage.prompt_tokens);
+                }
+                if let Some(timings) = chunk_timings(&value) {
+                    reply.timings = Some(timings);
+                }
+            }
+            SseEvent::Done => {
+                done = true;
+                break;
+            }
+            SseEvent::Malformed { payload, reason } => {
+                // Reported, not swallowed: it is how a server that returned a plain-text error
+                // through a 200 would otherwise look like silence.
+                deltas.push(ReplyDelta::Answer(format!(
+                    "unparsable stream frame: {reason}"
+                )));
+                tracing::warn!("malformed SSE payload: {payload}");
+            }
+        }
+    }
+    if deltas.is_empty() {
+        return !done;
+    }
+    apply_deltas(reply, &deltas);
+    !done && on_delta(&deltas) != StreamControl::Stop
 }
 
 #[cfg(test)]
@@ -910,6 +946,58 @@ mod tests {
             matches!(&events[0], SseEvent::Malformed { payload, .. } if payload.contains("choices")),
             "{events:?}"
         );
+    }
+
+    #[test]
+    fn a_last_frame_that_never_got_its_blank_line_is_still_the_answer() {
+        let mut decoder = SseDecoder::default();
+        assert_eq!(
+            decoder
+                .push(b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
+                .len(),
+            1
+        );
+        // The connection closes here: nothing delimits this frame, so `push` alone never yields it.
+        let tail = b"data: {\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}]}";
+        assert!(decoder.push(tail).is_empty());
+        let events = decoder.finish();
+        assert_eq!(events.len(), 1, "{events:?}");
+        let SseEvent::Data(chunk) = &events[0] else {
+            panic!("expected a data frame, got {events:?}");
+        };
+        let (deltas, finish) = chunk_deltas(chunk);
+        assert_eq!(deltas, vec![ReplyDelta::Answer(" world".into())]);
+        assert_eq!(finish.as_deref(), Some("stop"));
+        // Drained, so a second flush cannot hand the same token to the answer twice.
+        assert!(decoder.finish().is_empty());
+    }
+
+    #[test]
+    fn a_stream_the_server_closed_properly_leaves_nothing_to_flush() {
+        let mut decoder = SseDecoder::default();
+        decoder.push(b"data: {\"x\":1}\n\n");
+        assert_eq!(decoder.push(b"data: [DONE]\n\n"), vec![SseEvent::Done]);
+        assert!(decoder.finish().is_empty());
+    }
+
+    #[test]
+    fn the_flushed_tail_reaches_the_reply_the_stream_returns() {
+        let mut reply = Reply::default();
+        let mut batches = 0;
+        let kept = fold_events(
+            vec![SseEvent::Data(json!({
+                "choices": [{"delta": {"content": "last word"}, "finish_reason": "stop"}]
+            }))],
+            &mut reply,
+            |_deltas| {
+                batches += 1;
+                StreamControl::Continue
+            },
+        );
+        assert!(kept);
+        assert_eq!(batches, 1);
+        assert_eq!(reply.text, "last word");
+        assert_eq!(reply.finish_reason.as_deref(), Some("stop"));
     }
 
     #[test]
