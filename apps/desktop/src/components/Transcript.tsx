@@ -4,6 +4,7 @@ import { translate, type Locale } from "../i18n";
 import {
   isTurn,
   stepLabel,
+  stepText,
   useTranscript,
   type Row,
   type Step,
@@ -65,6 +66,9 @@ function RefusalRow({ step, locale }: { step: Step; locale: Locale }) {
 function StepRow({ step, locale }: { step: Step; locale: Locale }) {
   const [open, setOpen] = useState(true);
   const hasChildren = !!step.children?.length;
+  // A notice's line is its catalog sentence with the run's own numbers in it; every other row's line
+  // is the detail the host gave it.
+  const text = stepText(locale, step);
 
   if (step.kind === "contextCompressed") {
     return (
@@ -114,7 +118,7 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
             <span className="text-danger">−{step.diff.removed}</span>
           </span>
         )}
-        {step.detail && (
+        {text && (
           <span
             className={
               step.notice
@@ -124,7 +128,7 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
                 : "min-w-0 flex-1 truncate text-fine text-faint"
             }
           >
-            · {step.detail}
+            · {text}
           </span>
         )}
       </div>

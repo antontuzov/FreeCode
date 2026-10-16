@@ -30,7 +30,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use smollm_config::{ReasoningEffort, Settings};
-use smollm_core::events::{AgentEvent, RunReport};
+use smollm_core::events::{AgentEvent, NoticeCode, RunReport};
 use smollm_llama::{
     prompt_tokens, start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message, Reply,
     ReplyDelta, ServerHandle, StreamControl,
@@ -123,7 +123,7 @@ struct Running {
     tuning: LaunchTuning,
     /// Set when the model's effort contract replaced the saved choice, so the launch can announce it
     /// rather than the override looking like a silent default.
-    effort_note: Option<String>,
+    effort_swap: Option<EffortSwap>,
 }
 
 impl Running {
@@ -143,7 +143,7 @@ impl Running {
             layers_offloaded: handle.plan.layers_offloaded,
             command: handle.plan.display.clone(),
         };
-        let (effort, effort_note) = resolve_effort(&assembly.model, settings.sampling.effort);
+        let (effort, effort_swap) = resolve_effort(&assembly.model, settings.sampling.effort);
         Self {
             handle,
             turn: Turn {
@@ -153,7 +153,7 @@ impl Running {
                 max_tokens: settings.sampling.budget.clamped().max_tokens,
             },
             tuning,
-            effort_note,
+            effort_swap,
         }
     }
 }
@@ -319,7 +319,21 @@ fn effort_word(effort: ReasoningEffort) -> &'static str {
     }
 }
 
-/// The effort this model will take, plus the sentence explaining any replacement.
+/// A saved reasoning effort the selected model does not accept, as the four facts a notice about it
+/// needs. The words are the locale catalog's; these are what its sentence interpolates, so the
+/// substitution can be explained in the language the interface is being read in.
+#[derive(Debug, PartialEq)]
+struct EffortSwap {
+    model: String,
+    /// The model's accepted efforts, quoted and comma-joined the way the sentence lists them.
+    accepted: String,
+    /// The picker's word that was not among them.
+    chosen: String,
+    /// The word the run went out with instead.
+    sent: String,
+}
+
+/// The effort this model will take, plus the substitution it had to make.
 ///
 /// `client::wire_effort` rejects an effort the loaded model's template does not accept, so a choice
 /// saved while another model was selected would turn every request into an error. The catalog's
@@ -327,11 +341,11 @@ fn effort_word(effort: ReasoningEffort) -> &'static str {
 ///
 /// `auto` takes that default with no report: nothing is being overridden, so announcing it would be
 /// the app describing its own default to the user on every launch. A saved word is different — the
-/// user picked it, and the sentence is what tells them the model they now have cannot take it.
+/// user picked it, and the notice is what tells them the model they now have cannot take it.
 ///
 /// `low` is left alone even when unsupported: `wire_effort` maps it onto the catalog's measured
 /// synonym, and the Settings control already labels that downgrade.
-fn resolve_effort(model: &ModelEntry, stored: ReasoningEffort) -> (String, Option<String>) {
+fn resolve_effort(model: &ModelEntry, stored: ReasoningEffort) -> (String, Option<EffortSwap>) {
     let r = &model.sampling.reasoning;
     if stored == ReasoningEffort::Auto {
         return (r.default_effort.clone(), None);
@@ -350,11 +364,12 @@ fn resolve_effort(model: &ModelEntry, stored: ReasoningEffort) -> (String, Optio
     let default = &r.default_effort;
     (
         default.clone(),
-        Some(format!(
-            "{model_name} accepts reasoning effort {accepted}; the saved choice \"{word}\" is not \
-             among them, so this server replies at \"{default}\". Settings › Reasoning can change it.",
-            model_name = model.name
-        )),
+        Some(EffortSwap {
+            model: model.name.clone(),
+            accepted,
+            chosen: word,
+            sent: default.clone(),
+        }),
     )
 }
 
@@ -401,13 +416,18 @@ async fn launch(app: &AppHandle) -> Result<Running, String> {
     .map_err(|e| e.to_string())?;
 
     let running = Running::new(handle, &assembly, &settings, tuning);
-    if let Some(note) = &running.effort_note {
+    if let Some(swap) = &running.effort_swap {
         emit(
             app,
-            AgentEvent::Warning {
-                code: "effort-not-supported".into(),
-                message: note.clone(),
-            },
+            AgentEvent::notice(
+                NoticeCode::EffortNotSupported,
+                &[
+                    ("model", swap.model.as_str()),
+                    ("accepted", swap.accepted.as_str()),
+                    ("chosen", swap.chosen.as_str()),
+                    ("sent", swap.sent.as_str()),
+                ],
+            ),
         );
     }
     Ok(running)
@@ -448,16 +468,19 @@ async fn ensure_running(app: &AppHandle) -> Result<Turn, String> {
     // Announced, not swallowed: a relaunch that said nothing would just look like a slow first
     // answer, and the reason the last one died is the only clue to what to change.
     if let Launch::Restart { attempt, log } = kind {
+        let attempt = attempt.to_string();
+        let max = MAX_RESTARTS.to_string();
+        let log = excerpt(&log);
         emit(
             app,
-            AgentEvent::Warning {
-                code: "engine-restarted".into(),
-                message: format!(
-                    "The engine stopped between runs, so it is being started again (restart {attempt} \
-                     of {MAX_RESTARTS}). Its last lines:\n{}",
-                    excerpt(&log)
-                ),
-            },
+            AgentEvent::notice(
+                NoticeCode::EngineRestarted,
+                &[
+                    ("attempt", attempt.as_str()),
+                    ("max", max.as_str()),
+                    ("log", log.as_str()),
+                ],
+            ),
         );
     }
     let outcome = launch(app).await;
@@ -499,13 +522,10 @@ async fn stream_turn(
                 // Nothing asked for a tool call: the chat path sends no `tools`, so this is the model
                 // emitting one anyway. Said out loud rather than dropped, because the answer text is
                 // truncated at that point and silence would read as a stalled server.
-                ReplyDelta::ToolCall { name, .. } => AgentEvent::Warning {
-                    code: "tool-call-without-tools".into(),
-                    message: format!(
-                        "The model asked for a tool ({}), which this version does not run yet.",
-                        name.clone().unwrap_or_default()
-                    ),
-                },
+                ReplyDelta::ToolCall { name, .. } => {
+                    let name = name.clone().unwrap_or_default();
+                    AgentEvent::notice(NoticeCode::ToolCallWithoutTools, &[("name", name.as_str())])
+                }
             };
             emit(&sink, event);
         }
@@ -708,19 +728,14 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
     .await
     {
         Ok(sent) if leaves_no_room(sent, turn.view.context_tokens) => {
+            let tokens = sent.to_string();
+            let window = turn.view.context_tokens.to_string();
             emit(
                 &app,
-                AgentEvent::Warning {
-                    code: "prompt-too-long".into(),
-                    message: format!(
-                        "This prompt is {sent} tokens on the server's own count, and the window is \
-                         {} wide, so the model will not see all of it: it answers from the end of \
-                         what it was given, with the beginning dropped before it reaches the model. \
-                         Shorten the message, or raise Context window in Settings if the machine \
-                         has the room.",
-                        turn.view.context_tokens
-                    ),
-                },
+                AgentEvent::notice(
+                    NoticeCode::PromptTooLong,
+                    &[("tokens", tokens.as_str()), ("window", window.as_str())],
+                ),
             );
             true
         }
@@ -745,31 +760,16 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
             // The same news twice in one run's transcript reads as two problems. The count before the
             // run is the better-measured of the two sentences, so it is the one that stands.
             if outgrew && !warned_before {
-                emit(
-                    &app,
-                    AgentEvent::Warning {
-                        code: "context-trimmed".into(),
-                        message:
-                            "This conversation has outgrown the context window, so the server \
-                                  could not replay all of it: the model answered from the most \
-                                  recent turns, with the earliest ones dropped before it saw them. \
-                                  Start a new task to answer from a clean window, or raise Context \
-                                  window in Settings if the machine has the room."
-                                .into(),
-                    },
-                );
+                emit(&app, AgentEvent::notice(NoticeCode::ContextTrimmed, &[]));
             }
             if reply.ran_out_of_budget() {
+                let max_tokens = turn.max_tokens.to_string();
                 emit(
                     &app,
-                    AgentEvent::Warning {
-                        code: "budget-exhausted".into(),
-                        message: format!(
-                            "The reply hit its {} token cap, so it is cut off. Raise Maximum tokens \
-                             per reply in Settings if the answer needs more room.",
-                            turn.max_tokens
-                        ),
-                    },
+                    AgentEvent::notice(
+                        NoticeCode::BudgetExhausted,
+                        &[("maxTokens", max_tokens.as_str())],
+                    ),
                 );
             }
             emit(
@@ -973,10 +973,19 @@ mod tests {
     #[test]
     fn a_model_without_a_thinking_branch_replaces_the_saved_effort_and_says_so() {
         let m = seeded("ternary-bonsai-1-7b");
-        let (word, note) = resolve_effort(&m, ReasoningEffort::Xhigh);
+        let (word, swap) = resolve_effort(&m, ReasoningEffort::Xhigh);
         assert_eq!(word, "none");
-        let note = note.expect("the substitution must be announced, not silent");
-        assert!(note.contains("xhigh") && note.contains("none"), "{note}");
+        let swap = swap.expect("the substitution must be announced, not silent");
+        // The four facts a notice about the substitution interpolates, not a sentence: what the user
+        // reads is the catalog's, in whichever language the window is set to.
+        assert_eq!(swap.chosen, "xhigh");
+        assert_eq!(swap.sent, "none");
+        assert_eq!(swap.model, m.name);
+        assert!(
+            swap.accepted.contains("\"none\"") && !swap.accepted.contains("xhigh"),
+            "{}",
+            swap.accepted
+        );
         // `low` stays un-translated here because this model has no measured synonym for it;
         // `client::wire_effort` is the one that rejects it.
         assert_eq!(

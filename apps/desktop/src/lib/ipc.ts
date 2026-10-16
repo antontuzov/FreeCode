@@ -170,12 +170,21 @@ export type RunReport = {
  * listed: the tool-step variants arrive with the agent loop, and their payloads are Rust
  * `TranscriptStep`s rather than the UI's own row shape, so they get their mapping then.
  */
+/**
+ * `smollm_core::NoticeCode`: what a run worked around rather than refused. The wire spelling is the
+ * Rust enum's kebab-case and each code names a `notice.<code>` sentence in both locale catalogs, with
+ * `params` filling the fields that sentence interpolates — the host measures, the catalog owns the
+ * wording. `verify-transcript-i18n` fails the build when a code has no key or the two sides name the
+ * fields differently, which is why the renderer can look the sentence up without a fallback.
+ */
+export type NoticeParams = Record<string, string>;
+
 export type AgentEvent =
   | { type: "runStarted"; runId: string; modelLabel: string; local: boolean }
   | { type: "thoughtDelta"; text: string }
   | { type: "answerDelta"; text: string }
   | { type: "engineBlocked"; info: BlockedInfo }
-  | { type: "warning"; code: string; message: string }
+  | { type: "warning"; code: string; params: NoticeParams }
   /** `totalDiff` is the "+N −M" pill's running total, which the tool loop is what produces.
    * `contextUsed` is the percent of the window the finished run left filled, counted by the server;
    * null when the stream never reported its usage frame. `run` is what the run cost, and it is null

@@ -9,6 +9,8 @@
 //! (Bonsai-demo#183), so `ThoughtDelta` feeds the collapsed block and only `AnswerDelta` is replayed
 //! into history.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use smollm_config::agent::PermissionClass;
 use smollm_llama::load_guard::Blocker;
@@ -93,6 +95,66 @@ pub struct ArtifactRef {
     pub path: Option<String>,
 }
 
+/// What a run worked around rather than refused. The code names one sentence in the locale catalogs:
+/// the host contributes the numbers it measured, the catalog owns the wording, and a Chinese
+/// interface then reads its own notice instead of an English sentence glued into a row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NoticeCode {
+    /// The saved reasoning effort is not among the selected model's accepted ones.
+    EffortNotSupported,
+    /// The supervised server died between runs and is being started again.
+    EngineRestarted,
+    /// The model emitted a tool call in a chat that offers it no tools.
+    ToolCallWithoutTools,
+    /// The prompt was already too big for the window when the run was measured.
+    PromptTooLong,
+    /// The server could not replay the whole conversation and dropped its earliest turns.
+    ContextTrimmed,
+    /// The reply hit its token cap, so it ends mid-sentence.
+    BudgetExhausted,
+}
+
+impl NoticeCode {
+    /// Every code the host can emit. `verify-transcript-i18n` walks this to require one catalog entry
+    /// per code, so a notice added here without its sentence in both locales fails the build instead
+    /// of rendering its own key in the middle of a transcript.
+    pub const ALL: [Self; 6] = [
+        Self::EffortNotSupported,
+        Self::EngineRestarted,
+        Self::ToolCallWithoutTools,
+        Self::PromptTooLong,
+        Self::ContextTrimmed,
+        Self::BudgetExhausted,
+    ];
+
+    pub fn i18n_key(self) -> &'static str {
+        match self {
+            Self::EffortNotSupported => "notice.effort-not-supported",
+            Self::EngineRestarted => "notice.engine-restarted",
+            Self::ToolCallWithoutTools => "notice.tool-call-without-tools",
+            Self::PromptTooLong => "notice.prompt-too-long",
+            Self::ContextTrimmed => "notice.context-trimmed",
+            Self::BudgetExhausted => "notice.budget-exhausted",
+        }
+    }
+
+    /// The fields the sentence interpolates. Declared here because both halves of a notice have to
+    /// agree on them: the gate reads each locale's `{{braces}}` back against this list, and
+    /// [`AgentEvent::notice`] names the call that sent another set. A number that went out under a
+    /// different name leaves a blank in the middle of the sentence the user reads.
+    pub fn params(self) -> &'static [&'static str] {
+        match self {
+            Self::EffortNotSupported => &["model", "accepted", "chosen", "sent"],
+            Self::EngineRestarted => &["attempt", "max", "log"],
+            Self::ToolCallWithoutTools => &["name"],
+            Self::PromptTooLong => &["tokens", "window"],
+            Self::ContextTrimmed => &[],
+            Self::BudgetExhausted => &["maxTokens"],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     rename_all = "camelCase",
@@ -160,10 +222,15 @@ pub enum AgentEvent {
     EngineBlocked {
         info: BlockedInfo,
     },
-    /// A catalog caveat that matches this host (its KNOWN_ISSUES rows).
+    /// Something the run adapted to, surfaced as a quiet line beside the answer it did not stop.
+    /// The sentence itself is the locale catalog's, keyed by `code` and filled from `params` — the
+    /// host contributes what it measured, never the wording, so a translated interface reads its own
+    /// notice instead of an English one glued into a row.
     Warning {
-        code: String,
-        message: String,
+        code: NoticeCode,
+        /// The fields the catalog's sentence interpolates, by the names [`NoticeCode::params`] lists.
+        #[serde(default)]
+        params: BTreeMap<String, String>,
     },
     /// The run ended. `stopped` distinguishes the stop button from a natural finish.
     RunFinished {
@@ -182,6 +249,35 @@ pub enum AgentEvent {
     Failed {
         message: String,
     },
+}
+
+impl AgentEvent {
+    /// One notice: the code the window looks its sentence up by, and the values of the fields
+    /// [`NoticeCode::params`] names. The wording belongs to the catalog alone — a host that carried
+    /// its own sentence too would leave two copies of it to drift apart, one of which the user never
+    /// sees in their language.
+    ///
+    /// Panics in a debug build when the names sent are not the names declared: the alternative is a
+    /// notice with a blank where its number should be, which nobody notices until it is on screen.
+    pub fn notice(code: NoticeCode, params: &[(&str, &str)]) -> Self {
+        let sent = code.params();
+        let names: Vec<&str> = params.iter().map(|(name, _)| *name).collect();
+        assert!(
+            sent.len() == names.len()
+                && sent.iter().all(|name| names.contains(name))
+                && names.iter().all(|name| sent.contains(name)),
+            "{:?} must carry exactly {:?}, got {names:?}",
+            code,
+            sent
+        );
+        Self::Warning {
+            code,
+            params: params
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                .collect(),
+        }
+    }
 }
 
 /// What one finished run cost, every field of it read out of the stream's own usage and timing
@@ -238,6 +334,37 @@ mod tests {
         .unwrap();
         assert_eq!(t["type"], json!("thoughtDelta"));
         assert_eq!(a["type"], json!("answerDelta"));
+    }
+
+    #[test]
+    fn a_notice_sends_its_code_and_the_fields_its_sentence_names() {
+        let e = AgentEvent::notice(
+            NoticeCode::PromptTooLong,
+            &[("tokens", "5107"), ("window", "4096")],
+        );
+        let raw = serde_json::to_value(&e).unwrap();
+        assert_eq!(raw["type"], json!("warning"));
+        // The kebab spelling is what the catalog key ends with, so the wire and `i18n_key` cannot be
+        // renamed apart without the gate in `verify-transcript-i18n` seeing it.
+        assert_eq!(raw["code"], json!("prompt-too-long"));
+        assert_eq!(raw["params"]["tokens"], json!("5107"));
+        assert_eq!(raw["params"]["window"], json!("4096"));
+    }
+
+    #[test]
+    fn a_notice_that_sends_a_field_by_another_name_is_refused() {
+        // The window's copy interpolates `{{window}}`; a call that sent `width` instead would leave a
+        // blank in the middle of the line the user reads, so the debug build says so at the call.
+        let r = std::panic::catch_unwind(|| {
+            AgentEvent::notice(
+                NoticeCode::PromptTooLong,
+                &[("tokens", "5107"), ("width", "4096")],
+            )
+        });
+        assert!(
+            r.is_err(),
+            "a mismatched field name must be caught, not rendered"
+        );
     }
 
     #[test]

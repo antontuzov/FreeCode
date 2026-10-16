@@ -19,7 +19,7 @@ pub mod transcript;
 use std::path::PathBuf;
 
 pub use approvals::{evaluate, request, ApprovalDecision, ApprovalRequest, Pending};
-pub use events::{AgentEvent, ArtifactRef, BlockedInfo, ToolOutcome};
+pub use events::{AgentEvent, ArtifactRef, BlockedInfo, NoticeCode, ToolOutcome};
 pub use transcript::{
     all_i18n_keys, context_compressed, running_line, tool_batch, DiffStat, StepKind, StepStatus,
     TranscriptStep,

@@ -49,6 +49,13 @@ const I18N_KEYS: Record<StepKind, string> = {
 
 export type StepStatus = "ok" | "running" | "stopped" | "error";
 
+/**
+ * A notice's code and the fields its sentence interpolates, exactly as the host sent them. Stored on
+ * the row rather than turned into text when it arrives, because the wording belongs to the locale
+ * catalog: a run that streamed under English and is read under Chinese says its notice in Chinese.
+ */
+export type Notice = { code: string; params: Record<string, string> };
+
 export type DiffStat = { added: number; removed: number };
 
 export type Step = {
@@ -79,8 +86,12 @@ export type Step = {
    * server that was restarted — rather than one that refuses it. It reads as a notice because a row
    * headed "Blocked" under an answer that streamed fine tells the user the answer is not to be
    * trusted, which is the opposite of what happened.
+   *
+   * What it holds is the host's code and the fields it measured, not a sentence: the wording is the
+   * locale catalog's, so a different language re-renders the notices already on screen instead of
+   * keeping the English the run happened to be described in.
    */
-  notice?: boolean;
+  notice?: Notice;
 };
 
 /** One side of the conversation. The reference renders the prompt as a right-aligned bubble and the
@@ -124,6 +135,17 @@ export function stepLabel(locale: Locale, step: Step): string {
   return translate(locale, I18N_KEYS[step.kind]);
 }
 
+/**
+ * What a row says, as opposed to what it is called. A notice's sentence comes out of the catalog for
+ * its code, filled with the measurements the host sent: switching language re-words the notices of a
+ * run that already finished, and a catalog entry can name the Settings control in the same language
+ * it labels the control with.
+ */
+export function stepText(locale: Locale, step: Step): string {
+  if (step.notice) return translate(locale, `notice.${step.notice.code}`, step.notice.params);
+  return step.detail ?? "";
+}
+
 let sequence = 0;
 function nextId(prefix: string): string {
   sequence += 1;
@@ -159,8 +181,8 @@ function carries(step: Step, message: string): boolean {
 }
 
 /** Something the run worked around, on the same quiet footing as the answer it did not stop. */
-function noticeRow(message: string): Step {
-  return { id: nextId("notice"), kind: "blocked", detail: message, status: "error", notice: true };
+function noticeRow(notice: Notice): Step {
+  return { id: nextId("notice"), kind: "blocked", status: "error", notice };
 }
 
 /** The turn the next delta belongs to: the assistant turn the current run opened. */
@@ -223,7 +245,7 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
       // Warnings are what the run adapted to, not what it refused: `failed` and `engineBlocked`
       // carry the refusals, and this case takes the substitutions and relaunches that left the
       // answer standing.
-      const notice = noticeRow(event.message);
+      const notice = noticeRow({ code: event.code, params: event.params });
       const turn = openTurn(rows);
       // The run's row opens the moment the host announces it, so an appended notice would otherwise
       // land under an answer that has not said a word yet. A warning sent before the first token is
@@ -344,6 +366,15 @@ export const FIXTURE_ROWS: Row[] = [
     ],
   },
   { id: "f3", kind: "contextCompressed" },
+  // A notice, on the footing of the answer it did not stop. Its sentence is the catalog's, so this row
+  // is also how that copy gets looked at in either language without filling a context window on
+  // purpose; the two numbers are the shape a real one arrives with, not this machine's measurement.
+  {
+    id: "f3n",
+    kind: "blocked",
+    status: "error",
+    notice: { code: "prompt-too-long", params: { tokens: "5107", window: "4096" } },
+  },
   {
     id: "f4",
     kind: "running",
