@@ -28,8 +28,8 @@ pub mod server;
 use std::path::PathBuf;
 
 pub use client::{
-    chat_body, clamp_budget, normalize, stream_chat, wire_effort, ChatRequest, Message, Reply,
-    ReplyDelta, RequestError, Role, SseDecoder, SseEvent, StreamControl, ToolCall,
+    chat_body, clamp_budget, normalize, prompt_tokens, stream_chat, wire_effort, ChatRequest,
+    Message, Reply, ReplyDelta, RequestError, Role, SseDecoder, SseEvent, StreamControl, ToolCall,
 };
 pub use engine::{
     banner_matches_pin, engines_root, models_root, parse_version, EngineBinary, EngineVersion,

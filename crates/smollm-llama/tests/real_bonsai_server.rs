@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use smollm_llama::client::{
-    chat_body, stream_chat, ChatRequest, Message, Reply, ReplyDelta, StreamControl,
+    chat_body, prompt_tokens, stream_chat, ChatRequest, Message, Reply, ReplyDelta, StreamControl,
 };
 use smollm_llama::load_guard::{self, FileState, GuardRequest};
 use smollm_llama::{EngineBinary, LaunchRequest, LaunchTuning, ServerHandle};
@@ -212,6 +212,12 @@ async fn the_pinned_fork_server_loads_the_real_weights_and_streams_a_real_answer
     };
     let mut thoughts = 0usize;
     let mut answers = 0usize;
+    // Counted before the run, on the same request: the app asks the server how big a prompt is so it
+    // can warn about one that will not fit, and the answer is only worth having if it is the number
+    // the run itself later reports.
+    let counted = prompt_tokens(handle.base_url(), &req, &r.model, handle.context_tokens())
+        .await
+        .expect("the fork answers /apply-template and /tokenize");
     let reply = stream_chat(
         handle.base_url(),
         &req,
@@ -234,6 +240,15 @@ async fn the_pinned_fork_server_loads_the_real_weights_and_streams_a_real_answer
     println!("reasoning: {} chars", reply.reasoning.chars().count());
     println!("answer   : {:?}", reply.text);
     println!("finish   : {:?}", reply.finish_reason);
+    println!(
+        "prompt   : counted {counted} before, reported {:?}",
+        reply.prompt_tokens
+    );
+    assert_eq!(
+        reply.prompt_tokens,
+        Some(counted),
+        "the count taken before the run must be the count the usage frame reports for it"
+    );
     assert!(
         !reply.text.trim().is_empty(),
         "the model answered with nothing"

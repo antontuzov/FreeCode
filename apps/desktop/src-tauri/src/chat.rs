@@ -32,8 +32,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use smollm_config::{ReasoningEffort, Settings};
 use smollm_core::events::{AgentEvent, RunReport};
 use smollm_llama::{
-    start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message, Reply, ReplyDelta,
-    ServerHandle, StreamControl,
+    prompt_tokens, start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message, Reply,
+    ReplyDelta, ServerHandle, StreamControl,
 };
 use smollm_models::ModelEntry;
 
@@ -612,6 +612,16 @@ fn outgrew_window(last: Option<(u32, u64)>, window: u32) -> bool {
     })
 }
 
+/// Whether a prompt this size leaves the server anywhere to answer.
+///
+/// [`outgrew_window`] can only speak for a conversation that has already filled the window once, so
+/// it says nothing about the first turn of a task whose prompt is oversized on its own. This is the
+/// same margin applied to the prompt before it goes out, which is the case the after-the-fact notice
+/// structurally cannot reach.
+fn leaves_no_room(prompt_tokens: u64, window: u32) -> bool {
+    prompt_tokens + FULL_BY > window as u64
+}
+
 /// How full the window is after a run, as a percent of what the server was started with.
 ///
 /// The server's own count is the only one that means anything: the host never sees the conversation
@@ -684,6 +694,42 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
     request.max_tokens = turn.max_tokens;
     request.reasoning_effort = Some(turn.effort.clone());
 
+    // Asked of the server, because the size that decides whether the prompt fits is the size the
+    // server counts it at — and asked before the run, because the notice above can only reach a
+    // conversation that has already filled the window once. A prompt that is oversized on its own
+    // first turn has no previous run to be inferred from. A measurement that fails is silent: the
+    // run still goes out, since a server that will not count a prompt may well still answer one.
+    let warned_before = match prompt_tokens(
+        &turn.view.base_url,
+        &request,
+        &turn.model,
+        turn.view.context_tokens,
+    )
+    .await
+    {
+        Ok(sent) if leaves_no_room(sent, turn.view.context_tokens) => {
+            emit(
+                &app,
+                AgentEvent::Warning {
+                    code: "prompt-too-long".into(),
+                    message: format!(
+                        "This prompt is {sent} tokens on the server's own count, and the window is \
+                         {} wide, so the model will not see all of it: it answers from the end of \
+                         what it was given, with the beginning dropped before it reaches the model. \
+                         Shorten the message, or raise Context window in Settings if the machine \
+                         has the room.",
+                        turn.view.context_tokens
+                    ),
+                },
+            );
+            true
+        }
+        Ok(_) => false,
+        // No logger in this crate, and nothing to do about it either way: the run goes out and the
+        // server's own answer is the remaining evidence of how big the prompt was.
+        Err(_) => false,
+    };
+
     let started = Instant::now();
     let outcome = stream_turn(&app, &turn, &request, &state.stop_requested, &stopped).await;
     lock(&state.slot).streaming = false;
@@ -696,7 +742,9 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
             if let Some(total) = reply.total_tokens {
                 *lock(&state.last_fill) = Some((turn.view.context_tokens, total));
             }
-            if outgrew {
+            // The same news twice in one run's transcript reads as two problems. The count before the
+            // run is the better-measured of the two sentences, so it is the one that stands.
+            if outgrew && !warned_before {
                 emit(
                     &app,
                     AgentEvent::Warning {
@@ -870,6 +918,16 @@ mod tests {
         // Nothing counted, and nothing to count against: the meter stays unknown.
         assert_eq!(context_percent(None, 32_768), None);
         assert_eq!(context_percent(Some(31), 0), None);
+    }
+
+    #[test]
+    fn a_prompt_that_reaches_the_ceiling_is_measured_before_the_run() {
+        // The margin is the distance the fork kept from the ceiling when it trimmed a 1090-token
+        // prompt into a 512-token slot, so a prompt with room left is not reported as a full one.
+        assert!(!leaves_no_room(1, 32_768));
+        assert!(!leaves_no_room(1_026, 1_090));
+        assert!(leaves_no_room(1_027, 1_090));
+        assert!(leaves_no_room(1_090, 1_090));
     }
 
     #[test]

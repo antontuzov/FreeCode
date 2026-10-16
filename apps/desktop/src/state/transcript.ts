@@ -219,11 +219,22 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
           cta: { label: event.info.ctaLabel, url: event.info.ctaUrl },
         }),
       ];
-    case "warning":
+    case "warning": {
       // Warnings are what the run adapted to, not what it refused: `failed` and `engineBlocked`
       // carry the refusals, and this case takes the substitutions and relaunches that left the
       // answer standing.
-      return [...rows, noticeRow(event.message)];
+      const notice = noticeRow(event.message);
+      const turn = openTurn(rows);
+      // The run's row opens the moment the host announces it, so an appended notice would otherwise
+      // land under an answer that has not said a word yet. A warning sent before the first token is
+      // about the answer to come, and belongs above it; one that lands on an answer already in
+      // flight — or after the run closed — stays below the row it describes.
+      if (turn && !turn.text && !turn.thought) {
+        const at = rows.indexOf(turn);
+        return [...rows.slice(0, at), notice, ...rows.slice(at)];
+      }
+      return [...rows, notice];
+    }
     case "failed": {
       const last = rows[rows.length - 1];
       // The host both emits `failed` and rejects the command with the same text, and a refusal

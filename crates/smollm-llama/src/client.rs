@@ -154,6 +154,11 @@ pub enum RequestError {
         "this model's chat template does not accept reasoning effort {0}; it takes the values the catalog lists"
     )]
     EffortRejected(String),
+    #[error("{endpoint} answered with no `{field}`, so the prompt could not be counted")]
+    NotCounted {
+        endpoint: &'static str,
+        field: &'static str,
+    },
 }
 
 fn valid_object(raw: &str) -> bool {
@@ -498,6 +503,60 @@ pub enum StreamControl {
     /// Stop here. The text streamed so far is returned as the answer, because that is what the model
     /// actually said before the caller stopped listening.
     Stop,
+}
+
+/// What the server counts the prompt for this request at, before the request is made.
+///
+/// The host cannot count it: the chat template, the generation prompt and the pack's own vocabulary
+/// all belong to the engine, and a character estimate would be a number nobody measured. So the
+/// question is asked of the thing that would have to trim the answer — `/apply-template` for the
+/// string this run will prefill, then `/tokenize` for its length. Against the pinned fork the two
+/// agree exactly with the `prompt_tokens` the usage frame reports afterwards, which is what makes a
+/// prompt too big for its window knowable before the reply rather than inferred from the next one.
+pub async fn prompt_tokens(
+    base_url: &str,
+    req: &ChatRequest,
+    model: &ModelEntry,
+    context_tokens: u32,
+) -> Result<u64, LlamaError> {
+    let body = chat_body(req, model, context_tokens)?;
+    let mut template = json!({
+        "messages": body["messages"],
+        "add_generation_prompt": true,
+    });
+    if let Some(tools) = body.get("tools") {
+        template["tools"] = tools.clone();
+    }
+    let client = reqwest::Client::new();
+    let templated: Value = client
+        .post(format!("{base_url}/apply-template"))
+        .json(&template)
+        .send()
+        .await?
+        .json()
+        .await?;
+    let prompt = templated
+        .get("prompt")
+        .and_then(Value::as_str)
+        .ok_or(LlamaError::Request(RequestError::NotCounted {
+            endpoint: "/apply-template",
+            field: "prompt",
+        }))?;
+    let counted: Value = client
+        .post(format!("{base_url}/tokenize"))
+        .json(&json!({ "content": prompt }))
+        .send()
+        .await?
+        .json()
+        .await?;
+    let tokens = counted
+        .get("tokens")
+        .and_then(Value::as_array)
+        .ok_or(LlamaError::Request(RequestError::NotCounted {
+            endpoint: "/tokenize",
+            field: "tokens",
+        }))?;
+    Ok(tokens.len() as u64)
 }
 
 /// POST one chat completion and stream it, forwarding each batch of deltas as it arrives. The
