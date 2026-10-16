@@ -8,9 +8,9 @@
 //!   * [`approvals`] — policy decisions, including the ones that block without asking.
 //!
 //! Two contract rules shape these types. Reasoning arrives as its own delta stream so it is never
-//! replayed into the next prompt (Bonsai-demo#183). And a refused action carries the reason and the
-//! fix: the load-guard's blocker becomes a transcript row with an "Install the PrismML engine" CTA,
-//! not a stack trace.
+//! replayed into the next prompt (Bonsai-demo#183). And a refused action carries a code and the fix:
+//! the load-guard's blocker becomes a transcript row whose headline, instruction and install button
+//! the locale catalogs word, not a stack trace.
 
 pub mod approvals;
 pub mod events;
@@ -20,6 +20,7 @@ use std::path::PathBuf;
 
 pub use approvals::{evaluate, request, ApprovalDecision, ApprovalRequest, Pending};
 pub use events::{AgentEvent, ArtifactRef, BlockedInfo, NoticeCode, ToolOutcome};
+pub use smollm_llama::load_guard::{BlockerCode, CtaCode};
 pub use transcript::{
     all_i18n_keys, context_compressed, running_line, tool_batch, DiffStat, StepKind, StepStatus,
     TranscriptStep,

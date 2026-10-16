@@ -56,7 +56,7 @@ impl Assembly {
             .blockers
             .iter()
             .filter(|b| !self.pending_fetch(b))
-            .map(|b| format!("{}: {}", b.title(), b.technical()))
+            .map(|b| format!("{}: {}", b.code().as_str(), b.technical()))
             .collect()
     }
 
@@ -98,21 +98,14 @@ impl Assembly {
         unchecked_warnings.sort();
         unchecked_warnings.dedup();
 
-        let blocked = self.report.first_blocker().map(|b| {
-            let cta = b.cta(&self.lock, &self.model.repo_id);
-            BlockedView {
-                title: b.title().to_string(),
-                detail: b.detail(),
-                technical: b.technical(),
-                cta_label: cta.label.to_string(),
-                cta_url: cta.url,
-                // Two refusals are things this app clears itself by fetching what it pinned. Every
-                // other one is a fact about the tree — a stock binary, a stale pin, a file whose bytes
-                // disagree with the catalog — and the honest answer there is the URL, not a button
-                // that would overwrite a file the user put there.
-                installable: matches!(b, Blocker::EngineNotInstalled { .. }),
-                downloadable: self.weights_absent && matches!(b, Blocker::IntegrityFailed { .. }),
-            }
+        let blocked = self.report.first_blocker().map(|b| BlockedView {
+            info: smollm_core::blocked_info(b, &self.lock, &self.model.repo_id),
+            // Two refusals are things this app clears itself by fetching what it pinned. Every
+            // other one is a fact about the tree — a stock binary, a stale pin, a file whose bytes
+            // disagree with the catalog — and the honest answer there is the URL, not a button
+            // that would overwrite a file the user put there.
+            installable: matches!(b, Blocker::EngineNotInstalled { .. }),
+            downloadable: self.weights_absent && matches!(b, Blocker::IntegrityFailed { .. }),
         });
 
         ModelStatusView {
@@ -300,16 +293,14 @@ pub struct PackView {
     pub reason: String,
 }
 
-/// The refusal the status strip renders: title, why, and the single action that clears it.
+/// The refusal the status strip renders. The `info` fields are the same ones the transcript's refusal
+/// row gets, flattened rather than copied, so the two surfaces cannot word — or code — the same
+/// refusal differently. What is added here is which of the two the app can clear by itself.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockedView {
-    pub title: String,
-    pub detail: String,
-    /// The evidence behind `detail`, folded away until the user asks for it.
-    pub technical: String,
-    pub cta_label: String,
-    pub cta_url: String,
+    #[serde(flatten)]
+    pub info: smollm_core::BlockedInfo,
     /// True when the app can clear this itself by fetching the pinned engine; false when the fix is
     /// a file or a pin change and the URL is the honest answer.
     pub installable: bool,
@@ -369,15 +360,18 @@ mod tests {
         let root = clean_checkout();
         let status = build(root.path(), &Settings::default()).expect("status builds");
         let blocked = status.blocked.expect("a fresh tree blocks the run");
-        assert_eq!(blocked.title, "The engine isn't on this machine yet");
+        assert_eq!(
+            blocked.info.code,
+            load_guard::BlockerCode::EngineNotInstalled
+        );
         assert!(
             blocked.installable,
             "the first blocker on a fresh tree is the one Install fixes"
         );
         assert!(
-            blocked.cta_url.contains("PrismML-Eng"),
+            blocked.info.cta_url.contains("PrismML-Eng"),
             "{}",
-            blocked.cta_url
+            blocked.info.cta_url
         );
         assert!(!status.local);
         assert!(!status.engine_installed);

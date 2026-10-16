@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
 import {
+  ctaLabel,
   isTurn,
   stepLabel,
   stepText,
@@ -41,10 +42,16 @@ function RefusalRow({ step, locale }: { step: Step; locale: Locale }) {
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-quiet font-medium text-fg">{stepLabel(locale, step)}</p>
-          <p className="mt-1 whitespace-pre-wrap break-words text-fine text-muted">{step.detail}</p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-fine text-muted">
+            {stepText(locale, step)}
+          </p>
           {step.cta && (
             <div className="mt-2">
-              <ExternalLink url={step.cta.url} label={step.cta.label} locale={locale} />
+              <ExternalLink
+                url={step.cta.url}
+                label={ctaLabel(locale, step.cta.code)}
+                locale={locale}
+              />
             </div>
           )}
           {step.technical && (

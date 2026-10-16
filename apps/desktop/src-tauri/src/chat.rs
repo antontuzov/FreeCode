@@ -390,7 +390,14 @@ async fn launch(app: &AppHandle) -> Result<Running, String> {
     if let Some(blocker) = assembly.report.first_blocker() {
         let info = smollm_core::blocked_info(blocker, &assembly.lock, &assembly.model.repo_id);
         emit(app, AgentEvent::EngineBlocked { info: info.clone() });
-        return Err(format!("{} — {}", info.title, info.detail));
+        // The refusal the user reads is the transcript row above, in their language. This string only
+        // has to identify the problem to whoever reads the log, so it names the code and quotes the
+        // evidence rather than carrying a second copy of a sentence the catalogs own.
+        return Err(format!(
+            "engine refused: {} — {}",
+            info.code.as_str(),
+            info.technical
+        ));
     }
     let engine = assembly
         .engine

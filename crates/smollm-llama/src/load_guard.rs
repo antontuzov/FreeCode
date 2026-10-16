@@ -19,6 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use smollm_models::catalog::{ModelEntry, Pack, Severity};
 use smollm_models::gguf::GgufHeader;
 use smollm_models::hardware::{host_os, Backend, HostHardware};
@@ -79,62 +80,139 @@ pub enum Blocker {
     EnginePinTooOld { pinned: String, floor: String },
 }
 
-/// The single action that clears a blocker, as copy for the UI's call-to-action button.
+/// Which of the refusals this is, named once so the locale catalogs can hold its two sentences.
+///
+/// The code, not the sentence, crosses the IPC boundary: a host that carried English too would leave
+/// two copies to drift apart, one of which the user never sees in their language. `technical` stays
+/// the host's own text because it is what the machine saw — a path, a pin, a metadata key — not copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BlockerCode {
+    /// No pinned fork binary on disk.
+    EngineNotInstalled,
+    /// A stock binary was offered where only the fork is allowed.
+    StockEngineRejected,
+    /// The chosen pack has never been fetched, which is a task and not a corrupted file.
+    WeightsNotDownloaded,
+    /// The file on disk disagrees with what the publisher shipped.
+    IntegrityMismatch,
+    /// A rotated-basis file without its `prism.hadamard.*` keys.
+    RotationMetadataMissing,
+    /// The lock's pin predates the fork's first binary release.
+    EnginePinTooOld,
+}
+
+impl BlockerCode {
+    pub const ALL: [Self; 6] = [
+        Self::EngineNotInstalled,
+        Self::StockEngineRejected,
+        Self::WeightsNotDownloaded,
+        Self::IntegrityMismatch,
+        Self::RotationMetadataMissing,
+        Self::EnginePinTooOld,
+    ];
+
+    /// The card's headline: which problem this is, in a few words.
+    pub fn title_key(self) -> &'static str {
+        match self {
+            Self::EngineNotInstalled => "blocker.engine-not-installed.title",
+            Self::StockEngineRejected => "blocker.stock-engine-rejected.title",
+            Self::WeightsNotDownloaded => "blocker.weights-not-downloaded.title",
+            Self::IntegrityMismatch => "blocker.integrity-mismatch.title",
+            Self::RotationMetadataMissing => "blocker.rotation-metadata-missing.title",
+            Self::EnginePinTooOld => "blocker.engine-pin-too-old.title",
+        }
+    }
+
+    /// The card's instruction: what to press, in the order the app offers it.
+    pub fn detail_key(self) -> &'static str {
+        match self {
+            Self::EngineNotInstalled => "blocker.engine-not-installed.detail",
+            Self::StockEngineRejected => "blocker.stock-engine-rejected.detail",
+            Self::WeightsNotDownloaded => "blocker.weights-not-downloaded.detail",
+            Self::IntegrityMismatch => "blocker.integrity-mismatch.detail",
+            Self::RotationMetadataMissing => "blocker.rotation-metadata-missing.detail",
+            Self::EnginePinTooOld => "blocker.engine-pin-too-old.detail",
+        }
+    }
+
+    /// The fields the two sentences may interpolate, checked against both locales' `{{braces}}` by
+    /// `verify-transcript-i18n`. Only the refusals about one particular file can name it.
+    pub fn params(self) -> &'static [&'static str] {
+        match self {
+            Self::WeightsNotDownloaded | Self::IntegrityMismatch => &["file"],
+            _ => &[],
+        }
+    }
+
+    /// The stable id a log line uses for this refusal. Diagnostics name the code rather than
+    /// repeating a sentence the catalogs own.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EngineNotInstalled => "engine-not-installed",
+            Self::StockEngineRejected => "stock-engine-rejected",
+            Self::WeightsNotDownloaded => "weights-not-downloaded",
+            Self::IntegrityMismatch => "integrity-mismatch",
+            Self::RotationMetadataMissing => "rotation-metadata-missing",
+            Self::EnginePinTooOld => "engine-pin-too-old",
+        }
+    }
+}
+
+/// The one action that clears a blocker, as the catalog key of its button label plus the URL it opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CtaCode {
+    InstallEngine,
+    DownloadOfficialFiles,
+    RedownloadFile,
+}
+
+impl CtaCode {
+    pub const ALL: [Self; 3] = [
+        Self::InstallEngine,
+        Self::DownloadOfficialFiles,
+        Self::RedownloadFile,
+    ];
+
+    pub fn i18n_key(self) -> &'static str {
+        match self {
+            Self::InstallEngine => "cta.install-engine",
+            Self::DownloadOfficialFiles => "cta.download-official-files",
+            Self::RedownloadFile => "cta.redownload-file",
+        }
+    }
+}
+
+/// The single action that clears a blocker, as the UI's call-to-action.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallToAction {
-    pub label: &'static str,
+    pub code: CtaCode,
     pub url: String,
 }
 
 impl Blocker {
-    /// What is wrong, in the words a person who did not write this app would use. One of these is
-    /// the whole screen the user gets, so it says the cause and the way out and stops there.
-    pub fn title(&self) -> &'static str {
+    /// Which refusal this is, as the code both locale catalogs write sentences against.
+    pub fn code(&self) -> BlockerCode {
         match self {
-            Blocker::EngineNotInstalled { .. } => "The engine isn't on this machine yet",
-            Blocker::StockEngineRejected { .. } => "This model can't run on standard llama.cpp",
-            Blocker::IntegrityFailed { .. } => "The model file isn't the one that was published",
-            Blocker::RotationMetadataMissing { .. } => "This file wasn't exported by Prism",
-            Blocker::EnginePinTooOld { .. } => "The pinned engine build has no downloadable files",
+            Blocker::EngineNotInstalled { .. } => BlockerCode::EngineNotInstalled,
+            Blocker::StockEngineRejected { .. } => BlockerCode::StockEngineRejected,
+            // A file that has never arrived is not a forged file. Telling the user their download
+            // disagrees with the publisher would send them looking for corruption in the wrong place.
+            Blocker::IntegrityFailed { status, .. } if status == "not downloaded" => {
+                BlockerCode::WeightsNotDownloaded
+            }
+            Blocker::IntegrityFailed { .. } => BlockerCode::IntegrityMismatch,
+            Blocker::RotationMetadataMissing { .. } => BlockerCode::RotationMetadataMissing,
+            Blocker::EnginePinTooOld { .. } => BlockerCode::EnginePinTooOld,
         }
     }
 
-    /// The same refusal as an instruction: what the user can actually press, in the order the app
-    /// offers it. No paths, no key names, no issue numbers — [`Blocker::technical`] holds those.
-    pub fn detail(&self) -> String {
+    /// The values behind the fields [`BlockerCode::params`] names, read off this blocker.
+    pub fn params(&self) -> Vec<(&'static str, String)> {
         match self {
-            Blocker::EngineNotInstalled { .. } => {
-                "SmoLLM Studio runs models with one specific build \
-                 of llama.cpp, and this machine doesn't have it yet. Installing it fetches exactly \
-                 the build this app was pinned to — nothing else is chosen for you."
-                    .into()
-            }
-            Blocker::StockEngineRejected { .. } => "The llama.cpp on this machine is the standard \
-                 one, which can't read these weights. Installing the build this app pins is what \
-                 fixes it; the app will never quietly fall back to a build that answers wrongly."
-                .into(),
-            Blocker::IntegrityFailed { file, status } => {
-                // A file that has never arrived is not a forged file, and telling the user their
-                // download disagrees with the publisher would send them looking for corruption.
-                if status == "not downloaded" {
-                    format!("{file} hasn't been downloaded yet, and nothing can run without it.")
-                } else {
-                    format!(
-                        "{file} isn't byte-for-byte the file that was published, so the app won't \
-                         load it — an interrupted download is the usual cause. Downloading it \
-                         again clears this."
-                    )
-                }
-            }
-            Blocker::RotationMetadataMissing { .. } => "This file came from somewhere other than \
-                 the official Prism release, and a ternary model without its rotation settings \
-                 answers confidently and wrongly rather than failing loudly. Get the file from the \
-                 model's own page."
-                .into(),
-            Blocker::EnginePinTooOld { .. } => "The engine build this app is pinned to was \
-                 published without any files to download, so there is nothing here the app can \
-                 fetch. Moving the pin to the next build that ships binaries clears this."
-                .into(),
+            Blocker::IntegrityFailed { file, .. } => vec![("file", file.clone())],
+            _ => Vec::new(),
         }
     }
 
@@ -190,7 +268,7 @@ impl Blocker {
                 download_url,
                 message: _,
             } => CallToAction {
-                label: "Install the PrismML engine",
+                code: CtaCode::InstallEngine,
                 url: if download_url.is_empty() {
                     releases
                 } else {
@@ -198,15 +276,15 @@ impl Blocker {
                 },
             },
             Blocker::StockEngineRejected { .. } | Blocker::EnginePinTooOld { .. } => CallToAction {
-                label: "Install the PrismML engine",
+                code: CtaCode::InstallEngine,
                 url: releases,
             },
             Blocker::RotationMetadataMissing { .. } => CallToAction {
-                label: "Download the official Bonsai files",
+                code: CtaCode::DownloadOfficialFiles,
                 url: format!("https://huggingface.co/{model_repo}"),
             },
             Blocker::IntegrityFailed { file, .. } => CallToAction {
-                label: "Re-download this file",
+                code: CtaCode::RedownloadFile,
                 url: format!("https://huggingface.co/{model_repo}/resolve/main/{file}"),
             },
         }
@@ -494,7 +572,7 @@ mod tests {
             report
                 .blockers
                 .iter()
-                .map(|b| format!("{} — {}", b.title(), b.technical()))
+                .map(|b| format!("{} — {}", b.code().as_str(), b.technical()))
                 .collect::<Vec<_>>()
         );
     }
@@ -594,7 +672,7 @@ mod tests {
         let blocker = report.first_blocker().expect("engine must be required");
         assert!(matches!(blocker, Blocker::EngineNotInstalled { .. }));
         let cta = blocker.cta(&lock, &model.repo_id);
-        assert_eq!(cta.label, "Install the PrismML engine");
+        assert_eq!(cta.code, CtaCode::InstallEngine);
         assert!(
             cta.url
                 .starts_with("https://github.com/PrismML-Eng/llama.cpp/releases/"),

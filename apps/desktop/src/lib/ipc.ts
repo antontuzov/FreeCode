@@ -29,18 +29,15 @@ export type ModelStatus = {
   /** Caveats whose condition the host could not evaluate, so they may not apply to this machine. */
   uncheckedWarnings: string[];
   packs: PackView[];
-  /** Set when the load-guard refuses to run: title plus the one action that clears it. */
-  blocked: {
-    title: string;
-    detail: string;
-    technical: string;
-    ctaLabel: string;
-    ctaUrl: string;
-    /** The host can clear this refusal itself by fetching the pinned engine. */
-    installable: boolean;
-    /** The host can clear this refusal itself by downloading the chosen pack. */
-    downloadable: boolean;
-  } | null;
+  /** Set when the load-guard refuses to run: the refusal's code plus the one action that clears it. */
+  blocked:
+    | (BlockedInfo & {
+        /** The host can clear this refusal itself by fetching the pinned engine. */
+        installable: boolean;
+        /** The host can clear this refusal itself by downloading the chosen pack. */
+        downloadable: boolean;
+      })
+    | null;
 };
 
 /**
@@ -141,13 +138,22 @@ export type EngineView = {
 
 export type EngineStatus = { running: boolean; engine: EngineView | null };
 
-/** A load-guard refusal plus the one action that clears it. Mirrors `smollm_core::BlockedInfo`. */
+/**
+ * A load-guard refusal plus the one action that clears it. Mirrors `smollm_core::BlockedInfo`.
+ *
+ * `code` is `smollm_llama::load_guard::BlockerCode` in its kebab-case wire spelling, and it names two
+ * sentences in both locale catalogs — `blocker.<code>.title` and `blocker.<code>.detail` — with
+ * `params` filling the fields they interpolate. `ctaCode` names the button's own key, `cta.<code>`.
+ * The host carries no copy of any of the three, which is what lets the same refusal read in the
+ * interface's language; `verify-transcript-i18n` fails the build when the two sides drift.
+ * `technical` stays the host's text because a path, a pin or a metadata key is a measurement.
+ */
 export type BlockedInfo = {
-  title: string;
-  detail: string;
+  code: string;
+  params: Record<string, string>;
   /** Paths, pins and metadata keys behind the refusal, folded under the sentence that asks for them. */
   technical: string;
-  ctaLabel: string;
+  ctaCode: string;
   ctaUrl: string;
 };
 

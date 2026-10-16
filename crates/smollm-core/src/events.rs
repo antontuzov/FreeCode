@@ -13,24 +13,31 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use smollm_config::agent::PermissionClass;
-use smollm_llama::load_guard::Blocker;
+use smollm_llama::load_guard::{Blocker, BlockerCode, CtaCode};
 use smollm_models::EngineLock;
 
 use crate::transcript::{DiffStat, TranscriptStep};
 
-/// A load-guard refusal rendered in the transcript: localized copy plus the one action that clears
-/// it. The acceptance criteria name this path — a stock-llama.cpp attempt must show a clear error
-/// with an install-fork CTA, not a crash log.
+/// A load-guard refusal rendered in the transcript: the code the window looks its two sentences up
+/// by, plus the one action that clears it. The acceptance criteria name this path — a stock-llama.cpp
+/// attempt must show a clear error with an install-fork CTA, not a crash log.
+///
+/// The headline and the instruction belong to the locale catalogs, which is why they are not fields
+/// here: the same refusal has to read in the language the interface is in, and a host that carried
+/// its own English would leave a copy of each sentence that no user in the other language ever sees.
+/// What the host does carry is `technical`, because a path, a pin or a metadata key is a measurement
+/// rather than copy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockedInfo {
-    pub title: String,
-    /// What to do about it, in the app's own words. This is the sentence the user reads.
-    pub detail: String,
+    pub code: BlockerCode,
+    /// The values of the fields [`BlockerCode::params`] names, for the sentences to interpolate.
+    #[serde(default)]
+    pub params: BTreeMap<String, String>,
     /// Paths, key names, pins and upstream issue numbers behind the refusal, kept for the disclosure
     /// a user opens when the sentence above was not enough to act on.
     pub technical: String,
-    pub cta_label: String,
+    pub cta_code: CtaCode,
     pub cta_url: String,
 }
 
@@ -39,11 +46,24 @@ impl BlockedInfo {
     /// disk point there, while the ones about the engine point at the GitHub fork in `lock`.
     pub fn from_blocker(blocker: &Blocker, lock: &EngineLock, model_repo: &str) -> Self {
         let cta = blocker.cta(lock, model_repo);
+        let code = blocker.code();
+        let params = blocker.params();
+        let names: Vec<&str> = params.iter().map(|(name, _)| *name).collect();
+        let sent = code.params();
+        assert!(
+            sent.len() == names.len() && sent.iter().all(|name| names.contains(name)),
+            "{:?} must carry exactly {:?}, got {names:?}",
+            code,
+            sent
+        );
         Self {
-            title: blocker.title().to_string(),
-            detail: blocker.detail(),
+            code,
+            params: params
+                .into_iter()
+                .map(|(name, value)| (name.to_string(), value))
+                .collect(),
             technical: blocker.technical(),
-            cta_label: cta.label.to_string(),
+            cta_code: cta.code,
             cta_url: cta.url,
         }
     }
@@ -374,16 +394,51 @@ mod tests {
         };
         let info =
             BlockedInfo::from_blocker(&blocker, &lock(), "prism-ml/Ternary-Bonsai-2-27B-gguf");
-        assert_eq!(info.title, "This model can't run on standard llama.cpp");
-        assert_eq!(info.cta_label, "Install the PrismML engine");
+        assert_eq!(info.code, BlockerCode::StockEngineRejected);
+        assert_eq!(info.cta_code, CtaCode::InstallEngine);
         assert!(info
             .cta_url
             .starts_with("https://github.com/PrismML-Eng/llama.cpp/releases/"),);
-        // The sentence the user reads says what to press; the evidence sits beside it, not in it.
-        assert!(info.detail.contains("Installing the build this app pins"));
+        // The evidence crosses; the sentences do not. What the user reads is the catalog's, so a
+        // Chinese interface renders its own headline rather than this English one beside it.
         assert!(info.technical.contains("no automatic fallback"));
         let wire = serde_json::to_value(&info).unwrap();
         assert_eq!(wire["ctaUrl"], json!(info.cta_url));
+        assert_eq!(wire["code"], json!("stock-engine-rejected"));
+        assert!(wire.get("title").is_none() && wire.get("detail").is_none());
+    }
+
+    /// The two refusals about one particular file are the only ones whose sentences name it, and the
+    /// catalog can only fill in what the host measured.
+    #[test]
+    fn a_refusal_about_one_file_sends_which_file() {
+        let info = BlockedInfo::from_blocker(
+            &Blocker::IntegrityFailed {
+                file: "Ternary-Bonsai-2-27B-PQ2_0.gguf".into(),
+                status: "size 463290464 != 463290465".into(),
+            },
+            &lock(),
+            "prism-ml/Ternary-Bonsai-2-27B-gguf",
+        );
+        assert_eq!(info.code, BlockerCode::IntegrityMismatch);
+        assert_eq!(info.params["file"], "Ternary-Bonsai-2-27B-PQ2_0.gguf");
+        assert_eq!(info.cta_code, CtaCode::RedownloadFile);
+
+        // The same variant, and a different sentence: a file that never arrived is a task, not a
+        // corrupted one.
+        let absent = BlockedInfo::from_blocker(
+            &Blocker::IntegrityFailed {
+                file: "Ternary-Bonsai-2-27B-PQ2_0.gguf".into(),
+                status: "not downloaded".into(),
+            },
+            &lock(),
+            "prism-ml/Ternary-Bonsai-2-27B-gguf",
+        );
+        assert_eq!(absent.code, BlockerCode::WeightsNotDownloaded);
+        assert_eq!(absent.cta_code, CtaCode::RedownloadFile);
+        assert!(absent
+            .cta_url
+            .ends_with("/resolve/main/Ternary-Bonsai-2-27B-PQ2_0.gguf"));
     }
 
     #[test]

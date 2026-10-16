@@ -56,6 +56,14 @@ export type StepStatus = "ok" | "running" | "stopped" | "error";
  */
 export type Notice = { code: string; params: Record<string, string> };
 
+/**
+ * A refusal's code and the fields its sentences interpolate, exactly as the host sent them. Like a
+ * notice, the row keeps the code rather than the wording: `blocker.<code>.title` and
+ * `blocker.<code>.detail` come out of the catalog for the language the interface is in, so switching
+ * language re-words a refusal that is already on screen.
+ */
+export type Refusal = { code: string; params: Record<string, string> };
+
 export type DiffStat = { added: number; removed: number };
 
 export type Step = {
@@ -71,14 +79,13 @@ export type Step = {
   children?: Step[];
   /** Seconds elapsed, only meaningful on a `running` header. */
   seconds?: number;
-  /** For a `blocked` row: the single action that clears the refusal, in the row's own words. */
-  cta?: { label: string; url: string };
+  /** For a `blocked` row: the single action that clears the refusal, as its catalog key and its URL. */
+  cta?: { code: string; url: string };
   /**
-   * For a `blocked` row: what the host calls the problem. It replaces the generic "Blocked" label,
-   * because a row headed "Blocked" says nothing about which of the five things went wrong and the
-   * sentence under it was written to be read on its own.
+   * For a `blocked` row: which of the load-guard's refusals this is. The code replaces the generic
+   * "Blocked" label and its sentence, because both are the catalog's to write — see [`Refusal`].
    */
-  headline?: string;
+  refusal?: Refusal;
   /** For a `blocked` row: the evidence — paths, pins, metadata keys — folded away under the headline. */
   technical?: string;
   /**
@@ -131,19 +138,26 @@ export function stepLabel(locale: Locale, step: Step): string {
   }
   if (step.notice) return translate(locale, "transcript.notice");
   // "Blocked" is the name of the row shape, not of what happened. A refusal says which problem it is.
-  if (step.headline) return step.headline;
+  if (step.refusal) return translate(locale, `blocker.${step.refusal.code}.title`);
   return translate(locale, I18N_KEYS[step.kind]);
 }
 
 /**
- * What a row says, as opposed to what it is called. A notice's sentence comes out of the catalog for
- * its code, filled with the measurements the host sent: switching language re-words the notices of a
- * run that already finished, and a catalog entry can name the Settings control in the same language
- * it labels the control with.
+ * What a row says, as opposed to what it is called. A notice's and a refusal's sentences come out of
+ * the catalog for their code, filled with the measurements the host sent: switching language re-words
+ * the rows of a run that already finished, and a catalog entry can name the Settings control in the
+ * same language it labels the control with.
  */
 export function stepText(locale: Locale, step: Step): string {
   if (step.notice) return translate(locale, `notice.${step.notice.code}`, step.notice.params);
+  if (step.refusal)
+    return translate(locale, `blocker.${step.refusal.code}.detail`, step.refusal.params);
   return step.detail ?? "";
+}
+
+/** The one action a refusal offers, as its catalog label. */
+export function ctaLabel(locale: Locale, code: string): string {
+  return translate(locale, `cta.${code}`);
 }
 
 let sequence = 0;
@@ -152,17 +166,17 @@ function nextId(prefix: string): string {
   return `${prefix}-${sequence}`;
 }
 
-/** The row a refusal gets: a headline the user can act on, and the evidence kept out of the way. */
+/** The row a refusal gets: a code the catalog words into a headline and an instruction, plus the evidence. */
 function blockedRow(refusal: {
-  headline?: string;
-  detail: string;
+  refusal?: Refusal;
   technical?: string;
-  cta?: { label: string; url: string };
+  cta?: { code: string; url: string };
+  detail?: string;
 }): Step {
   return {
     id: nextId("blocked"),
     kind: "blocked",
-    headline: refusal.headline,
+    refusal: refusal.refusal,
     detail: refusal.detail,
     technical: refusal.technical,
     status: "error",
@@ -172,12 +186,15 @@ function blockedRow(refusal: {
 
 /**
  * Whether this row already announces that problem. A refusal arrives twice over — once as
- * `engineBlocked`, whose headline and sentence are separate fields, and once as the `failed`
- * message, which the host composes out of the same two — so the row has to be read back the way
- * the host wrote it, or every blocked launch would leave two rows.
+ * `engineBlocked`, and once as the `failed` message the host composes out of the same blocker's code
+ * and evidence — so the row has to be read back the way the host wrote it, or every blocked launch
+ * would leave two rows. Both halves are host text, which is why the comparison is against the code
+ * rather than the sentence the user sees.
  */
 function carries(step: Step, message: string): boolean {
-  return step.headline ? `${step.headline} — ${step.detail}` === message : step.detail === message;
+  if (step.refusal)
+    return message === `engine refused: ${step.refusal.code} — ${step.technical ?? ""}`;
+  return step.detail === message;
 }
 
 /** Something the run worked around, on the same quiet footing as the answer it did not stop. */
@@ -235,10 +252,9 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
       return [
         ...rows,
         blockedRow({
-          headline: event.info.title,
-          detail: event.info.detail,
+          refusal: { code: event.info.code, params: event.info.params },
           technical: event.info.technical,
-          cta: { label: event.info.ctaLabel, url: event.info.ctaUrl },
+          cta: { code: event.info.ctaCode, url: event.info.ctaUrl },
         }),
       ];
     case "warning": {
@@ -385,24 +401,21 @@ export const FIXTURE_ROWS: Row[] = [
       { id: "f4c", kind: "editFile", subject: "lib.rs", status: "running" },
     ],
   },
-  // A refusal, word for word as the load guard writes it, so the card can be looked at without
-  // uninstalling the engine on a machine that already has one. It is the row's shape that is on
-  // trial here — the copy comes from `Blocker::detail`, and this is the only place it is repeated.
+  // A refusal, as the load guard reports it, so the card can be looked at without uninstalling the
+  // engine on a machine that already has one. It carries its code rather than its sentences: the
+  // headline, the instruction and the button are the catalog's, which is what makes this row the way
+  // the copy gets reviewed in either language. The evidence line is the shape a real one arrives with.
   {
     id: "f5",
     kind: "blocked",
     status: "error",
-    headline: "The engine isn't on this machine yet",
-    detail:
-      "SmoLLM Studio runs models with one specific build of llama.cpp, and this machine doesn't " +
-      "have it yet. Installing it fetches exactly the build this app was pinned to — nothing else " +
-      "is chosen for you.",
+    refusal: { code: "engine-not-installed", params: {} },
     technical:
       "engine prism-b10772-e8fd209 is not installed (expected " +
       "~/Library/Application Support/studio.smollm.desktop/engines/llama-server from " +
       "llama-server-aarch64-apple-darwin-metal.tar.gz)",
     cta: {
-      label: "Install the PrismML engine",
+      code: "install-engine",
       url: "https://github.com/PrismML-Eng/llama.cpp/releases/tag/prism-b10772-e8fd209",
     },
   },

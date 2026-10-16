@@ -39,8 +39,8 @@ pub use install::{
 };
 pub use launch::{context_from_ram, layers_to_offload, LaunchPlan, LaunchRequest, LaunchTuning};
 pub use load_guard::{
-    caveat_matches, check, Blocker, CallToAction, FileState, GuardReport, GuardRequest, Warning,
-    WarningCode,
+    caveat_matches, check, Blocker, BlockerCode, CallToAction, CtaCode, FileState, GuardReport,
+    GuardRequest, Warning, WarningCode,
 };
 pub use server::{
     kill_spawned_servers, pick_free_port, reap_orphaned_servers, start, verify_version,

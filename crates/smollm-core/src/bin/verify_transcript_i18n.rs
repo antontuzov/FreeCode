@@ -6,22 +6,25 @@
 //! summary the reference screenshot shows. Both are invisible until the app is running, so this
 //! binary fails the build instead.
 //!
-//! Notices run on the same contract, one step further: the host stopped writing the sentence at all
-//! and sends only `NoticeCode` plus the fields it measured, so the catalog is the *only* copy. Each
-//! code's entry is then required in every locale, and its `{{braces}}` have to be exactly the fields
-//! `NoticeCode::params` names — otherwise a notice renders its key, or a number that went out under a
-//! different name leaves a hole in the middle of the line.
+//! Notices and refusals run on the same contract, one step further: the host stopped writing those
+//! sentences at all and sends only a code plus the fields it measured, so the catalog is the *only*
+//! copy. Each code's entry is then required in every locale, and its `{{braces}}` have to be exactly
+//! the fields the code names — otherwise a row renders its key, or a number that went out under a
+//! different name leaves a hole in the middle of the line. A refusal contributes a headline, an
+//! instruction and a button, so all three are checked.
 //!
 //! Usage: `cargo run -p smollm-core --bin verify-transcript-i18n [i18n-dir]`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use smollm_core::{all_i18n_keys, NoticeCode};
+use smollm_core::{all_i18n_keys, BlockerCode, CtaCode, NoticeCode};
 
 const LOCALES: [&str; 2] = ["en", "zh"];
 const STEP_PREFIX: &str = "transcript.step.";
 const NOTICE_PREFIX: &str = "notice.";
+const BLOCKER_PREFIX: &str = "blocker.";
+const CTA_PREFIX: &str = "cta.";
 
 fn main() {
     let dir = std::env::args_os()
@@ -31,9 +34,10 @@ fn main() {
     let failures = check(&dir);
     if failures.is_empty() {
         println!(
-            "verify-transcript-i18n: OK — {} step keys and {} notice keys present in {:?}",
+            "verify-transcript-i18n: OK — {} step keys, {} notice keys and {} refusal keys present in {:?}",
             all_i18n_keys().len(),
             NoticeCode::ALL.len(),
+            BlockerCode::ALL.len() * 2 + CtaCode::ALL.len(),
             LOCALES
         );
         return;
@@ -51,6 +55,40 @@ fn main() {
 
 fn default_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/desktop/src/i18n")
+}
+
+/// One sentence the host can only reach by its code: it has to exist in every locale and interpolate
+/// exactly the fields the code measures. `sent` is empty for a headline or a button label, which never
+/// carries a number — a `{{token}}` in one of those renders on screen as written.
+fn require_sentence(
+    catalogs: &[(String, BTreeMap<String, String>)],
+    key: &str,
+    sent: &[&str],
+    emitted_by: &str,
+    failures: &mut Vec<String>,
+) {
+    let want: BTreeSet<String> = sent.iter().map(|name| (*name).to_string()).collect();
+    for (locale, catalog) in catalogs {
+        match catalog.get(key) {
+            None => failures.push(format!("{locale}.json has no {key}")),
+            Some(text) => {
+                let got = placeholders(text);
+                if got != want {
+                    failures.push(format!(
+                        "{locale}.json {key} interpolates {got:?}, {emitted_by} sends {want:?}"
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// The keys a code vocabulary owns, so an entry no code reaches can be named as the stray it is.
+fn owned_keys<'a>(prefix: &str, keys: impl IntoIterator<Item = &'a str>) -> BTreeSet<String> {
+    keys.into_iter()
+        .filter(|key| key.starts_with(prefix))
+        .map(str::to_string)
+        .collect()
 }
 
 fn check(dir: &Path) -> Vec<String> {
@@ -80,45 +118,75 @@ fn check(dir: &Path) -> Vec<String> {
 
     // A notice's sentence belongs to the catalog alone, so this is the only place the two halves of
     // that contract meet: each code the host can emit needs one entry per locale, interpolating
-    // exactly the fields the host measures. A brace the host never fills reads as a blank in the
-    // middle of the sentence, and a field the host sends that no locale names is a number nobody
-    // reads — neither fails anything until the notice is on screen in the other language.
+    // exactly the fields the host measures.
     for code in NoticeCode::ALL {
-        let key = code.i18n_key();
-        let sent: BTreeSet<String> = code
-            .params()
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect();
-        for (locale, catalog) in &catalogs {
-            match catalog.get(key) {
-                None => failures.push(format!("{locale}.json has no {key}")),
-                Some(text) => {
-                    let got = placeholders(text);
-                    if got != sent {
-                        failures.push(format!(
-                            "{locale}.json {key} interpolates {got:?}, the host sends {sent:?}"
-                        ));
-                    }
-                }
-            }
-        }
+        require_sentence(
+            &catalogs,
+            code.i18n_key(),
+            code.params(),
+            "NoticeCode",
+            &mut failures,
+        );
+    }
+
+    // A refusal is three sentences — the headline, the instruction under it, and the one button that
+    // clears it — and the host sends none of them. The two about a particular file are the only ones
+    // allowed to name it; the rest carry no number at all.
+    for code in BlockerCode::ALL {
+        require_sentence(
+            &catalogs,
+            code.title_key(),
+            &[],
+            "BlockerCode's headline",
+            &mut failures,
+        );
+        require_sentence(
+            &catalogs,
+            code.detail_key(),
+            code.params(),
+            "BlockerCode",
+            &mut failures,
+        );
+    }
+    for code in CtaCode::ALL {
+        require_sentence(&catalogs, code.i18n_key(), &[], "CtaCode", &mut failures);
     }
 
     // Copy no code emits is a sentence that can never be read.
-    let codes: BTreeSet<String> = NoticeCode::ALL
-        .iter()
-        .map(|code| code.i18n_key().to_string())
-        .collect();
-    for (locale, catalog) in &catalogs {
-        for key in catalog.keys().filter(|k| k.starts_with(NOTICE_PREFIX)) {
-            if !codes.contains(key) {
-                failures.push(format!(
-                    "{locale}.json defines {key}, which no NoticeCode emits"
-                ));
+    let orphan = |prefix: &str, owned: &BTreeSet<String>, who: &str, failures: &mut Vec<String>| {
+        for (locale, catalog) in &catalogs {
+            for key in catalog.keys().filter(|k| k.starts_with(prefix)) {
+                if !owned.contains(key) {
+                    failures.push(format!("{locale}.json defines {key}, which {who} emits"));
+                }
             }
         }
-    }
+    };
+    orphan(
+        NOTICE_PREFIX,
+        &owned_keys(
+            NOTICE_PREFIX,
+            NoticeCode::ALL.iter().map(|code| code.i18n_key()),
+        ),
+        "no NoticeCode",
+        &mut failures,
+    );
+    let blocker_keys: Vec<&str> = BlockerCode::ALL
+        .iter()
+        .flat_map(|code| [code.title_key(), code.detail_key()])
+        .collect();
+    orphan(
+        BLOCKER_PREFIX,
+        &owned_keys(BLOCKER_PREFIX, blocker_keys),
+        "no BlockerCode",
+        &mut failures,
+    );
+    orphan(
+        CTA_PREFIX,
+        &owned_keys(CTA_PREFIX, CtaCode::ALL.iter().map(|code| code.i18n_key())),
+        "no CtaCode",
+        &mut failures,
+    );
 
     // A step row the renderer knows but the run model does not is a row that can never appear.
     let known: BTreeSet<&str> = all_i18n_keys().into_iter().collect();
@@ -224,23 +292,34 @@ mod tests {
         dir
     }
 
-    /// A catalog that satisfies both vocabularies: every step row, and every notice's sentence with
-    /// exactly the fields its code sends. Tests that probe one drift start from this.
+    /// A catalog that satisfies every vocabulary: each step row, each notice's sentence, and each
+    /// refusal's headline, instruction and button — all interpolating exactly the fields their codes
+    /// send. Tests that probe one drift start from this.
     fn complete() -> BTreeMap<String, String> {
         let mut map: BTreeMap<String, String> = BTreeMap::new();
         for key in all_i18n_keys() {
             map.insert(key.to_string(), "x".into());
         }
         for code in NoticeCode::ALL {
-            let body = code
-                .params()
-                .iter()
-                .map(|name| format!("{{{{{name}}}}}"))
-                .collect::<Vec<_>>()
-                .join(" ");
-            map.insert(code.i18n_key().to_string(), body);
+            map.insert(code.i18n_key().to_string(), body(code.params()));
+        }
+        for code in BlockerCode::ALL {
+            map.insert(code.title_key().to_string(), "x".into());
+            map.insert(code.detail_key().to_string(), body(code.params()));
+        }
+        for code in CtaCode::ALL {
+            map.insert(code.i18n_key().to_string(), "x".into());
         }
         map
+    }
+
+    /// A sentence carrying exactly the named fields and nothing else.
+    fn body(params: &[&str]) -> String {
+        params
+            .iter()
+            .map(|name| format!("{{{{{name}}}}}"))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     fn write_both(dir: &Path, map: &BTreeMap<String, String>) {
@@ -303,6 +382,72 @@ mod tests {
         let failures = check(dir.path());
         assert_eq!(failures.len(), 2, "{failures:?}");
         assert!(failures.iter().all(|f| f.contains("gpu-overheated")));
+    }
+
+    #[test]
+    fn a_refusal_with_no_headline_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut map = complete();
+        map.remove("blocker.engine-not-installed.title").unwrap();
+        write_both(dir.path(), &map);
+        let failures = check(dir.path());
+        assert_eq!(failures.len(), 2, "{failures:?}");
+        assert!(
+            failures
+                .iter()
+                .all(|f| f.contains("blocker.engine-not-installed.title")),
+            "{failures:?}"
+        );
+    }
+
+    #[test]
+    fn a_refusal_whose_instruction_drops_the_file_it_names_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        // The host sends which file disagrees; copy that stopped using it reads " isn't the file
+        // that was published" with a hole where the name belongs.
+        let mut map = complete();
+        map.insert(
+            "blocker.integrity-mismatch.detail".to_string(),
+            "The model file isn't the one that was published.".into(),
+        );
+        write_both(dir.path(), &map);
+        let failures = check(dir.path());
+        assert!(
+            failures
+                .iter()
+                .any(|f| f.contains("blocker.integrity-mismatch.detail") && f.contains("file")),
+            "{failures:?}"
+        );
+    }
+
+    /// The two refusals about a file are the only ones carrying that measurement, so a headline that
+    /// interpolates it would print braces on the card.
+    #[test]
+    fn a_headline_that_interpolates_something_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut map = complete();
+        map.insert(
+            "blocker.rotation-metadata-missing.title".to_string(),
+            "This file {{file}} wasn't exported by Prism".into(),
+        );
+        write_both(dir.path(), &map);
+        let failures = check(dir.path());
+        assert_eq!(failures.len(), 2, "{failures:?}");
+        assert!(
+            failures.iter().all(|f| f.contains("interpolates")),
+            "{failures:?}"
+        );
+    }
+
+    #[test]
+    fn a_button_label_no_refusal_offers_is_rejected() {
+        let mut map = complete();
+        map.insert(format!("{CTA_PREFIX}flash-firmware"), "x".into());
+        let dir = tempfile::tempdir().unwrap();
+        write_both(dir.path(), &map);
+        let failures = check(dir.path());
+        assert_eq!(failures.len(), 2, "{failures:?}");
+        assert!(failures.iter().all(|f| f.contains("flash-firmware")));
     }
 
     #[test]

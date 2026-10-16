@@ -4,7 +4,7 @@ import { translate, type Locale } from "../i18n";
 import type { EngineInstallProgress, WeightsProgress } from "../lib/ipc";
 import { useChat } from "../state/chat";
 import { useModel } from "../state/model";
-import { useTranscript } from "../state/transcript";
+import { ctaLabel, useTranscript } from "../state/transcript";
 import { ExternalLink } from "./ExternalLink";
 import { Icon } from "./icons";
 
@@ -286,8 +286,12 @@ export function ModelStatus({ locale }: { locale: Locale }) {
       )}
       {status.blocked ? (
         <div className="mt-3 rounded-[var(--radius-md)] border border-danger/40 p-3">
-          <p className="text-quiet font-medium text-danger">{status.blocked.title}</p>
-          <p className="mt-1 text-fine text-muted">{status.blocked.detail}</p>
+          <p className="text-quiet font-medium text-danger">
+            {translate(locale, `blocker.${status.blocked.code}.title`)}
+          </p>
+          <p className="mt-1 text-fine text-muted">
+            {translate(locale, `blocker.${status.blocked.code}.detail`, status.blocked.params)}
+          </p>
           {fetchAction ? (
             // The app fetches the pinned asset itself; the fallback URL text below stays for every
             // other refusal, where no button in the app could clear it.
@@ -314,7 +318,7 @@ export function ModelStatus({ locale }: { locale: Locale }) {
             <div className="mt-2">
               <ExternalLink
                 url={status.blocked.ctaUrl}
-                label={status.blocked.ctaLabel}
+                label={ctaLabel(locale, status.blocked.ctaCode)}
                 locale={locale}
               />
             </div>
