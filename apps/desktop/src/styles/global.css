@@ -171,6 +171,24 @@ body {
   font-size: var(--size-fine);
 }
 
+/* The inspector's rows each carry their kind inside a small chip, which is what makes the column
+ * read as a list of things rather than a list of words. The chip has a fixed size so a row's label
+ * starts at the same x whatever glyph it holds. */
+.insp-chip {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: var(--chip-fill);
+  color: var(--text-muted);
+}
+/* A subagent is a who, so its chip is the same disc the sidebar footer uses for the local user. */
+.insp-chip.round {
+  border-radius: var(--radius-pill);
+}
+
 /* Settings rows and inspector groups sit in a rounded card separated by dashed hairlines. */
 .card {
   border: 1px solid var(--border);
@@ -206,7 +224,11 @@ body {
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-pill);
   background: var(--accent-soft);
-  color: var(--text-strong);
+  /* The accent as ink, not the strongest text: shot 05 draws the active mode pill's label AND its
+   * glyph in the accent (#7dc7aa over a soft ground), and `--accent-ink` is the step already tuned
+   * to hold 4.5:1 on exactly this fill. A `--text-strong` label left the chip tinted around a word
+   * that belonged to no colour in it. */
+  color: var(--accent-ink);
   font-size: var(--size-quiet);
 }
 

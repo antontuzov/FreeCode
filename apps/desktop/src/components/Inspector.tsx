@@ -5,18 +5,26 @@ import type { RunReport } from "../lib/ipc";
 import { useTranscript } from "../state/transcript";
 import { Icon, type IconName } from "./icons";
 
-type Group = { key: string; icon: IconName };
+type Group = {
+  key: string;
+  /** The glyph every row in the group gets. The reference puts a chip behind each row, so a group
+   * with items always draws one; a group that had no glyph of its own would draw a bare word. */
+  icon: IconName;
+  /** A subagent is a who rather than a what, so its chip closes into a disc the way the footer's
+   * avatar does. Everything else is a file, a tool or a page, and those are square. */
+  round?: boolean;
+};
 
 // The five groups the reference inspector shows, in order.
 const GROUPS: Group[] = [
-  { key: "subagents", icon: "subagents" },
+  { key: "subagents", icon: "user", round: true },
   { key: "skills", icon: "skills" },
   { key: "artifact", icon: "artifact" },
   { key: "webReading", icon: "webReading" },
   { key: "source", icon: "source" },
 ];
 
-type Item = { label: string; meta?: string; icon?: IconName };
+type Item = { label: string; meta?: string };
 
 /** `?fixture=1` only — see the note in state/transcript.ts about invented run output. */
 const FIXTURE_ITEMS: Record<string, Item[]> = {
@@ -25,9 +33,9 @@ const FIXTURE_ITEMS: Record<string, Item[]> = {
     { label: "verify-smollm-studio-natively" },
     { label: "tauri-desktop-native-verification" },
   ],
-  artifact: [{ label: "README.md", icon: "artifact" }],
-  webReading: [{ label: "huggingface.co/PrismML-Eng", icon: "webReading" }],
-  source: [{ label: "catalog/models.toml", icon: "artifact" }],
+  artifact: [{ label: "README.md" }],
+  webReading: [{ label: "huggingface.co/PrismML-Eng" }],
+  source: [{ label: "catalog/models.toml" }],
 };
 
 function SectionHeader({
@@ -46,12 +54,15 @@ function SectionHeader({
       aria-expanded={open}
       className="flex w-full items-center gap-2 px-[var(--space-4)] py-[var(--space-3)] text-muted hover:bg-hover hover:text-fg"
     >
+      {/* The chevron follows the name, as it does in the reference, which leaves the name itself at
+       * the column's left edge — where the chips under it start too. A leading chevron would hang
+       * every heading one glyph to the left of its own rows. */}
+      <span className="text-quiet">{label}</span>
       <Icon
         name="chevronDown"
         size={13}
-        className={`disclosure-icon ${open ? "" : "-rotate-90"}`}
+        className={`disclosure-icon shrink-0 ${open ? "" : "-rotate-90"}`}
       />
-      <span className="text-quiet">{label}</span>
     </button>
   );
 }
@@ -73,9 +84,11 @@ function Section({ group, items, locale }: { group: Group; items: Item[]; locale
             items.map((item) => (
               <li
                 key={item.label}
-                className="flex items-center gap-2 border-b border-dashed border-line/60 py-2 text-quiet text-fg last:border-0"
+                className="flex items-center gap-[var(--space-3)] border-b border-dashed border-line/60 py-[var(--space-2)] text-quiet text-fg last:border-0"
               >
-                {item.icon ? <Icon name={item.icon} size={14} /> : null}
+                <span className={`insp-chip ${group.round ? "round" : ""}`}>
+                  <Icon name={group.icon} size={14} />
+                </span>
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
                 {item.meta && <span className="shrink-0 text-micro text-faint">{item.meta}</span>}
               </li>

@@ -12,8 +12,12 @@ const PATHS = {
     "M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z",
   back: "M15 5l-7 7 7 7",
   forward: "M9 5l7 7-7 7",
-  coding: "M8 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 12l2 2 4-4",
-  newTask: "M12 5v14M5 12h14",
+  // A terminal inside a square, not a check: the pill names the mode that edits files, and the
+  // reference draws its prompt rather than its outcome.
+  coding: "M4 4h16v16H4zM7 9l3 3-3 3M13 15h4",
+  // A dial with the hand leaving the ring, not a plus: the gap and the stroke are one gesture, which
+  // is how the reference marks the row that starts a run.
+  newTask: "M11 12l8-8M13.1 4.3A8 8 0 1 0 17.9 8",
   search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35",
   workspace: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   knowledge: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 3v17",
@@ -23,13 +27,16 @@ const PATHS = {
   extensions: "M9 3v3a2 2 0 1 1-4 0V3H3v18h6v-3a2 2 0 1 1 4 0v3h6v-6h-3a2 2 0 1 1 0-4h3V3z",
   settings:
     "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 7 2.6h.1A1.6 1.6 0 0 0 9 1.1V1a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 15 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z",
-  subagents:
-    "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8",
-  skills: "M4 4h16v16H4zM9 9l3 3-3 3M15 9v6",
+  // A prompt with no box around it, unlike `coding`'s: this glyph is only ever drawn inside an
+  // inspector chip, which is already a square. Two squares nested at 14px read as one smudge.
+  skills: "M5 8l4 4-4 4M12 16h7",
   artifact: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6",
   webReading:
     "M2 12a10 10 0 1 0 20 0 10 10 0 1 0-20 0M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20",
-  source: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
+  // Two sheets, the lower one only a line under the first: this group lists what the answer was
+  // assembled from. It used to carry `download`'s arrow verbatim, which is a thing you do to a file
+  // rather than a thing a file can be.
+  source: "M12 3 3 8l9 5 9-5zM3 13l9 5 9-5",
   terminal: "M4 17l6-6-6-6M12 19h8",
   thought: "M12 3a7 7 0 0 0-4 12.7V18a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.3A7 7 0 0 0 12 3zM9 21h6",
   readFile: "M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM9 13h7M9 17h5",

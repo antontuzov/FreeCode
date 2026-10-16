@@ -217,6 +217,14 @@
   --accent-line: color-mix(in oklab, var(--accent) 55%, transparent);
 }
 
+/* The ground a row's icon chip paints itself with. `--ink-quiet` is already the token for fills that
+ * carry no words, and 20% of it over the panel is the reference's chip in light: shot 04 measures the
+ * chip at #e8e9e7 and the app renders #e7e9e6. Dark lands a little under shot 05's #252e29, at
+ * #1f2723 — the same step read against a ground that is itself four units darker. */
+:root {
+  --chip-fill: color-mix(in oklab, var(--ink-quiet) 20%, transparent);
+}
+
 /* ---- surface: glass falls back to solid, never to a half-blurred nothing ---- */
 [data-surface="glass"] {
   --surface-bg: color-mix(in oklab, var(--bg-elevated) 72%, transparent);

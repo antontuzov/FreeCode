@@ -331,7 +331,7 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
           aria-disabled
           title={translate(locale, "common.notInBuild")}
         >
-          <Icon name="skills" />
+          <Icon name="extensions" />
         </button>
       </header>
 
