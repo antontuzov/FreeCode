@@ -455,6 +455,81 @@ select.field-input {
   color: var(--text-faint);
 }
 
+/* ---- the search palette ----
+ * It floats over the shell instead of replacing it the way Settings does: a search asks about what
+ * is already on screen, and the answer lands back in that same transcript. */
+.palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: var(--scrim);
+}
+/* The same glass/solid surface the floating cards use, so the panel agrees with the app's own
+ * `--surface-style` setting rather than inventing a second material. */
+.palette-panel {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - var(--space-6) * 2));
+  max-height: min(440px, 72vh);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-bg);
+  backdrop-filter: var(--surface-blur);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+/* A result is a conversation, so it is selected the way a nav row is — a hover and an outlined
+ * accent for the one the keyboard is on — rather than with a second selection idiom. */
+.palette-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    border-color var(--dur-quick) var(--ease-standard);
+}
+.palette-row:hover {
+  background: var(--bg-hover);
+}
+.palette-row[data-selected="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+/* The words that were searched for, quoted back inside the line they were found in. Without them a
+ * result is a title the query does not appear in, and the user cannot tell why it matched. It is
+ * emphasised rather than painted: a filled highlight disappears on the row the keyboard is on, which
+ * is exactly the one row being looked at. */
+.palette-row mark {
+  background: none;
+  color: var(--text-strong);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 3px;
+}
+/* The panel and its ground arrive by fading, not by the slide `row-enter` uses: the panel is centred
+ * with a transform, and an animation that writes `transform` would spend the entering frames pulling
+ * it back to the left edge. */
+@keyframes surface-enter {
+  from {
+    opacity: 0;
+  }
+}
+.palette-scrim,
+.palette-panel {
+  animation: surface-enter var(--dur-quick) var(--ease-standard);
+}
+
 /* The four interface-style cards. Each paints the style it advertises through `--preview`, so the
  * row stays readable whichever accent is live. */
 /* Shot 02: the tinted preview box carries the selection outline, and the style name sits below it

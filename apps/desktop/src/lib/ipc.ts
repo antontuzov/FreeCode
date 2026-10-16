@@ -322,6 +322,19 @@ export type Session = {
 /** What a sidebar row needs, without every answer's text crossing the boundary to get it. */
 export type SessionSummary = Omit<Session, "schemaVersion" | "turns"> & { turnCount: number };
 
+/**
+ * A summary plus the line the search matched, flattened into one object by the host. Mirrors
+ * `sessions::Hit`.
+ *
+ * `excerpt` is a conversation's own words rather than a second title: it is what tells the user why
+ * this result is theirs, and `role` says whose of the two it was found in — finding a phrase you
+ * typed and finding one the model produced are different things to have found.
+ */
+export type SessionHit = SessionSummary & {
+  role: "user" | "assistant";
+  excerpt: string;
+};
+
 export const ipc = {
   modelStatus: () => invoke<ModelStatus>("model_status"),
   /** Fetch and unpack the pinned fork engine. Progress arrives on `onEngineInstall`. */
@@ -365,6 +378,12 @@ export const ipc = {
   newTask: () => invoke<void>("new_task"),
   /** Every conversation this app has filed, newest first. The sidebar's Workspaces group lists these. */
   listSessions: () => invoke<SessionSummary[]>("list_sessions"),
+  /**
+   * The filed conversations that say what `query` says, the ones matched by a question first. The
+   * host searches them, because the words live in the turns and the turns deliberately stay on disk
+   * until a conversation is opened.
+   */
+  searchSessions: (query: string) => invoke<SessionHit[]>("search_sessions", { query }),
   /**
    * Reopen one. The host answers with the conversation it also just put back into the history, so the
    * transcript and the engine agree on what was said — a row that showed turns the model no longer

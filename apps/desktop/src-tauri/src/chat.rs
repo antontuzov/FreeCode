@@ -923,6 +923,15 @@ pub async fn list_sessions() -> Result<Vec<sessions::Summary>, String> {
     Ok(sessions::list())
 }
 
+/// The filed conversations that say what the query says. What the palette lists.
+///
+/// The search is the host's rather than the window's because the words it looks for are in the
+/// turns, and the turns deliberately do not cross the boundary to fill a sidebar row.
+#[tauri::command]
+pub async fn search_sessions(query: String) -> Result<Vec<sessions::Hit>, String> {
+    Ok(sessions::search(&query))
+}
+
 /// Reopen a filed conversation: its turns go back on screen *and* into the history the next request
 /// is built from, so asking it another question continues that exchange instead of starting a new one
 /// that happens to look like it.

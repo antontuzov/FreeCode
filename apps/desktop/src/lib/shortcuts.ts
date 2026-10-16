@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 
 import type { ShortcutDoc } from "./ipc";
 
-export type ShortcutId = "newTask" | "settings" | "escape";
+export type ShortcutId = "newTask" | "palette" | "settings" | "escape";
 
 /**
  * `cmd` is the platform's primary modifier — ⌘ on macOS, Ctrl on Windows and Linux — because a
@@ -18,6 +18,9 @@ export type ShortcutId = "newTask" | "settings" | "escape";
  */
 export const SHORTCUTS: Record<ShortcutId, ShortcutDoc> = {
   newTask: { cmd: true, shift: false, alt: false, ctrl: false, key: "n" },
+  // The palette is a search over what is already there, so it opens over the shell rather than
+  // replacing it, and the same key closes it — a user who reaches ⌘K twice changed their mind.
+  palette: { cmd: true, shift: false, alt: false, ctrl: false, key: "k" },
   settings: { cmd: true, shift: false, alt: false, ctrl: false, key: "," },
   escape: { cmd: false, shift: false, alt: false, ctrl: false, key: "Escape" },
 };

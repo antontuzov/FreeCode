@@ -39,6 +39,14 @@ const TITLE_MAX: usize = 60;
 /// The suffix that says the title is a prefix of what was asked rather than the whole of it.
 const ELLIPSIS: char = '…';
 
+/// How many conversations one search hands the window. A store this size is scanned in full anyway,
+/// but a result list longer than the palette's panel is not a result list.
+const HIT_MAX: usize = 12;
+
+/// How many characters of the exchange the palette shows around a match — enough to tell the two
+/// conversations that both mention the same model apart, short enough to stay on two lines.
+const EXCERPT_PAD: usize = 48;
+
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +107,23 @@ impl From<&Session> for Summary {
             turn_count: session.turns.len(),
         }
     }
+}
+
+/// A conversation the search found, and the line it found it in.
+///
+/// The summary travels flattened into the same object so the palette's row has the title, the
+/// workspace and the model to draw without a second call — the fields it lists are the ones it shows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hit {
+    #[serde(flatten)]
+    pub summary: Summary,
+    /// Which side of the exchange said the words the query matched. The palette names it, because a
+    /// conversation you matched by what you asked and one you matched by what came back are two
+    /// different things to find.
+    pub role: Role,
+    /// The matched line, cut to around the match and collapsed onto the kind of one line a row holds.
+    pub excerpt: String,
 }
 
 impl Session {
@@ -250,7 +275,7 @@ fn parse(bytes: &[u8]) -> Result<Session, String> {
 /// Every filed conversation, newest first. A file that does not parse is skipped rather than
 /// fatal: one unreadable conversation must not empty the sidebar, and it is left on disk untouched,
 /// because deleting what this build cannot read would turn a bad file into lost work.
-pub fn list_in(dir: &Path) -> Vec<Summary> {
+fn sessions_in(dir: &Path) -> Vec<Session> {
     let mut found = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return found;
@@ -264,15 +289,110 @@ pub fn list_in(dir: &Path) -> Vec<Summary> {
             continue;
         };
         if let Ok(session) = parse(&bytes) {
-            found.push(session.summary());
+            found.push(session);
         }
     }
     found.sort_by_key(|session| std::cmp::Reverse(session.updated_at_ms));
     found
 }
 
+pub fn list_in(dir: &Path) -> Vec<Summary> {
+    sessions_in(dir).iter().map(Session::summary).collect()
+}
+
 pub fn list() -> Vec<Summary> {
     dir().map(|dir| list_in(&dir)).unwrap_or_default()
+}
+
+/// The conversations that say what the query says, best match first.
+///
+/// Every conversation file is read, because the turns are what is searched and the list hands out
+/// summaries on purpose. That is a directory of a few dozen small JSON files, so a scan costs less
+/// than the palette waiting on one would; a store that outgrows it gets an index, not a slower scan.
+pub fn search_in(dir: &Path, query: &str) -> Vec<Hit> {
+    let needle = query.trim();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let mut hits: Vec<Hit> = sessions_in(dir)
+        .iter()
+        .filter_map(|session| hit_of(session, needle))
+        .collect();
+    // `hit_of` already says which side matched, and the sort is stable, so the conversations whose
+    // own questions matched lead — newest first among them — with the ones only an answer mentioned
+    // behind. Both groups were already newest-first, so this is the only reordering.
+    hits.sort_by_key(|hit| hit.role == Role::Assistant);
+    hits.truncate(HIT_MAX);
+    hits
+}
+
+pub fn search(query: &str) -> Vec<Hit> {
+    dir().map(|dir| search_in(&dir, query)).unwrap_or_default()
+}
+
+/// The one turn a conversation is matched by: the first that asked the query, or, if only the
+/// answer said it, the first that did.
+///
+/// Questions are searched before answers rather than the whole exchange in order, because the row a
+/// palette offers for a phrase in the prompt is the conversation that phrase names, and one found
+/// in a paragraph of answer text is a conversation that merely happens to contain it.
+fn hit_of(session: &Session, query: &str) -> Option<Hit> {
+    for role in [Role::User, Role::Assistant] {
+        for turn in session.turns.iter().filter(|turn| turn.role == role) {
+            let Some(excerpt) = excerpt_of(&turn.text, query) else {
+                continue;
+            };
+            return Some(Hit {
+                summary: session.summary(),
+                role,
+                excerpt,
+            });
+        }
+    }
+    None
+}
+
+/// The line around the first case-insensitive occurrence of `query`, or `None` when the text has no
+/// occurrence. Ellipses mark the ends that the cut dropped.
+///
+/// Whitespace is collapsed before the search so an excerpt is one line — the text arrives from a
+/// transcript with paragraphs, newlines and the runs of spaces markdown leaves behind — and the
+/// search is done on that collapsed copy so the cut and the match are measured in the same string.
+/// Matching is per character with a case fold rather than `to_lowercase` on both halves, because a
+/// lowered copy's byte offsets do not line up with the original text the excerpt is quoted from.
+fn excerpt_of(text: &str, query: &str) -> Option<String> {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let chars: Vec<char> = collapsed.chars().collect();
+    let needle: Vec<char> = query
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .map(fold)
+        .collect();
+    if needle.is_empty() || chars.len() < needle.len() {
+        return None;
+    }
+    let folded: Vec<char> = chars.iter().map(|c| fold(*c)).collect();
+    let at = folded.windows(needle.len()).position(|w| w == needle)?;
+    let from = at.saturating_sub(EXCERPT_PAD);
+    let to = (at + needle.len() + EXCERPT_PAD).min(chars.len());
+    let mut out = String::new();
+    if from > 0 {
+        out.push(ELLIPSIS);
+    }
+    out.extend(chars[from..to].iter());
+    if to < chars.len() {
+        out.push(ELLIPSIS);
+    }
+    Some(out)
+}
+
+/// A character as the search sees it. A character whose lowercase is more than one character keeps
+/// its first, which means both sides of the comparison are measured one input character at a time and
+/// the position found is still a position in the text that gets quoted.
+fn fold(c: char) -> char {
+    c.to_lowercase().next().unwrap_or(c)
 }
 
 #[cfg(test)]
@@ -391,5 +511,118 @@ mod tests {
         let first = Session::new("w", "m", "one");
         let second = Session::new("w", "m", "two");
         assert_ne!(first.id, second.id);
+    }
+
+    #[test]
+    fn a_search_finds_the_conversation_whose_question_said_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let asked = session("what pins the engine version?");
+        let unrelated = session("tell me about mint");
+        write_in(dir.path(), &asked).unwrap();
+        write_in(dir.path(), &unrelated).unwrap();
+
+        let hits = search_in(dir.path(), "pins the engine");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].summary.id, asked.id);
+        assert_eq!(hits[0].role, Role::User);
+        assert!(
+            hits[0].excerpt.contains("pins the engine"),
+            "{}",
+            hits[0].excerpt
+        );
+    }
+
+    #[test]
+    fn a_query_is_read_whatever_case_it_and_the_file_were_in() {
+        let dir = tempfile::tempdir().unwrap();
+        write_in(dir.path(), &session("Which LINE-numbers setting ANSWERS?")).unwrap();
+
+        assert_eq!(
+            search_in(dir.path(), "line-numbers setting answers").len(),
+            1
+        );
+        assert_eq!(search_in(dir.path(), "WHICH line-numbers").len(), 1);
+    }
+
+    #[test]
+    fn a_match_only_in_the_answer_still_found_is_named_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut only = Session::new("smollm-studio", "m", "what did you say?");
+        only.push(Role::User, "what did you say?");
+        only.push(Role::Assistant, "the fork commit pins the engine");
+        write_in(dir.path(), &only).unwrap();
+
+        let hits = search_in(dir.path(), "pins the engine");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].role, Role::Assistant);
+    }
+
+    #[test]
+    fn a_question_leads_an_answer_when_both_matched_and_both_are_newest_of_their_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut mentioned = session("tell me about mint");
+        // Filed later, so the newest-first scan would put it first if the match's side did not count.
+        mentioned.updated_at_ms += 1000;
+        mentioned.push(
+            Role::Assistant,
+            "the engine pin you asked about is in the catalog",
+        );
+        let mut asked = session("where is the engine pin recorded?");
+        asked.push(Role::Assistant, "in the catalog");
+        write_in(dir.path(), &mentioned).unwrap();
+        write_in(dir.path(), &asked).unwrap();
+
+        let hits = search_in(dir.path(), "engine pin");
+        assert_eq!(hits.len(), 2);
+        assert_eq!(
+            hits[0].summary.id, asked.id,
+            "the match in a question leads"
+        );
+        assert_eq!(hits[1].summary.id, mentioned.id);
+    }
+
+    #[test]
+    fn an_excerpt_is_one_line_from_around_the_match_and_the_cut_is_shown_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut long = session("explain the download");
+        long.turns[1].text = format!(
+            "the pack is fetched once,   from the catalog\n\nand {} until the needle sits near the \
+             middle of an answer that keeps going far past what the row has room to show",
+            "padding ".repeat(40)
+        );
+        write_in(dir.path(), &long).unwrap();
+
+        let hit = &search_in(dir.path(), "the needle sits")[0];
+        assert_eq!(hit.role, Role::Assistant);
+        assert!(hit.excerpt.starts_with(ELLIPSIS), "{}", hit.excerpt);
+        assert!(hit.excerpt.ends_with(ELLIPSIS), "{}", hit.excerpt);
+        assert!(
+            !hit.excerpt.contains('\n') && !hit.excerpt.contains("  "),
+            "{}",
+            hit.excerpt
+        );
+        assert!(
+            hit.excerpt.chars().count() <= 2 * EXCERPT_PAD + 2 + "the needle sits".len(),
+            "{}",
+            hit.excerpt
+        );
+    }
+
+    #[test]
+    fn a_blank_or_absent_query_finds_nothing_instead_of_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        write_in(dir.path(), &session("kept")).unwrap();
+        assert!(search_in(dir.path(), "   ").is_empty());
+        assert!(search_in(dir.path(), "no such words").is_empty());
+    }
+
+    #[test]
+    fn a_search_reads_the_same_files_the_sidebar_lists_and_ignores_the_broken_one() {
+        let dir = tempfile::tempdir().unwrap();
+        write_in(dir.path(), &session("the catalog pin")).unwrap();
+        std::fs::write(dir.path().join("broken.json"), b"{ not json").unwrap();
+
+        assert_eq!(list_in(dir.path()).len(), 1);
+        assert_eq!(search_in(dir.path(), "catalog pin").len(), 1);
     }
 }

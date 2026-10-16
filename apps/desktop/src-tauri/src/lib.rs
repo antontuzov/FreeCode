@@ -182,8 +182,10 @@ pub fn run() {
             chat::chat_stop,
             chat::new_task,
             // The conversations the app has filed, and the one control that reopens one. The sidebar
-            // lists the first and its rows are the second.
+            // lists the first and its rows are the second; the palette searches all of them by what
+            // was said in them, which is why the search reads the files rather than the list.
             chat::list_sessions,
+            chat::search_sessions,
             chat::open_session
         ])
         .setup(|app| {

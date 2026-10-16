@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { Inspector } from "./components/Inspector";
 import { ModelStatus } from "./components/ModelStatus";
+import { Palette } from "./components/Palette";
 import { Settings } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
@@ -23,6 +24,11 @@ export default function App() {
   const stop = useChat((s) => s.stop);
   const newTask = useChat((s) => s.newTask);
   const [settingsPage, setSettingsPage] = useState<string | null>(query("settings"));
+  // `?search=<query>` opens the palette with that query already typed — the deep link the panel is
+  // captured through, since the window takes no injected keystrokes and a search nobody can type
+  // into is a search nobody can see.
+  const paletteQuery = query("search");
+  const [paletteOpen, setPaletteOpen] = useState(paletteQuery !== null);
   const fixture = fixtureMode();
   const ask = query("ask");
   const askRepeat = Math.max(1, Number(query("ask_repeat")) || 1);
@@ -117,10 +123,14 @@ export default function App() {
   const running = useTranscript((s) => s.running);
   useShortcuts({
     newTask: () => {
-      if (settingsPage !== null) return;
+      // The palette owns the keyboard the same way Settings does: a New task fired from under it
+      // would empty the transcript the rows in front of the user describe.
+      if (settingsPage !== null || paletteOpen) return;
       void newTask();
     },
     settings: () => setSettingsPage((page) => page ?? "appearance"),
+    // Twice closes it, because the second press is the user changing their mind.
+    palette: () => setPaletteOpen((open) => !open),
     escape: () => {
       if (settingsPage !== null) {
         setSettingsPage(null);
@@ -141,7 +151,7 @@ export default function App() {
           locale={locale}
           fixture={fixture}
           onOpenSettings={() => setSettingsPage("appearance")}
-          actions={{ newTask: () => void newTask() }}
+          actions={{ newTask: () => void newTask(), openPalette: () => setPaletteOpen(true) }}
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <Transcript locale={locale} onPickModel={() => setSettingsPage("model")} />
@@ -152,6 +162,13 @@ export default function App() {
           <Inspector locale={locale} fixture={fixture} />
         </div>
       </div>
+      {paletteOpen && (
+        <Palette
+          locale={locale}
+          initial={paletteQuery ?? ""}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
     </div>
   );
 }

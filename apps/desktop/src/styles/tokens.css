@@ -90,6 +90,9 @@
   --border: #1e3a30;
   --border-strong: #2b4c40;
   --shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  /* The ground a floating panel dims the shell to. Only the palette uses it, and it has to be a token
+     because this is the one file allowed to state a colour. */
+  --scrim: rgb(4 10 8 / 62%);
   --code-bg: #0a0f0d; /* 06: review panel code surface */
   --code-theme: "github-dark";
   --success: #4caf7d;
@@ -124,6 +127,10 @@
   --border: #d5e0d9;
   --border-strong: #c0cfc6;
   --shadow: 0 10px 28px rgb(20 40 30 / 12%);
+  /* The shell under the search palette, pushed back so the panel reads as the thing being typed
+     into. Lighter than the dark mode's, because a pale page dims less visibly and the panel already
+     has a border and a shadow of its own. */
+  --scrim: rgb(20 40 30 / 28%);
   --code-bg: #f4f6f5;
   --code-theme: "github-light";
   --success: #2c794a; /* 04's #2c7a4b, one unit down: the gate below holds every ink to AA on every

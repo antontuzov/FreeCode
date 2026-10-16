@@ -7,6 +7,10 @@ import { useSessions } from "../state/sessions";
 type NavRow = {
   key: string;
   icon: IconName;
+  /** Called with the actions when the row is clicked. It has to *run* one: an `a.newTask` without the
+   * parentheses hands back the function and returns, and a row that does that renders, takes the
+   * click and does nothing — a `=> void` signature cannot catch it, because a function returning
+   * something is still assignable to one that returns nothing. */
   onActivate?: (actions: SidebarActions) => void;
   /** The key that fires this row from anywhere in the window, named on hover. Only ever a shortcut
    * `lib/shortcuts.ts` answers, so the hint cannot get ahead of the handler. */
@@ -17,8 +21,10 @@ type NavRow = {
 };
 
 const PRIMARY: NavRow[] = [
-  { key: "newTask", icon: "newTask", shortcut: "newTask", onActivate: (a) => a.newTask },
-  { key: "search", icon: "search", placeholder: true },
+  { key: "newTask", icon: "newTask", shortcut: "newTask", onActivate: (a) => a.newTask() },
+  // The row that opens the palette. `placeholder` went with it: the search has a store to search
+  // now, so the honest sentence about this build not having one stopped being honest.
+  { key: "search", icon: "search", shortcut: "palette", onActivate: (a) => a.openPalette() },
 ];
 
 const PLACES: NavRow[] = [
@@ -111,6 +117,8 @@ function Row({
 export type SidebarActions = {
   /** Forget the conversation and keep the server: the one row this build can honour. */
   newTask: () => void;
+  /** Put the search over the shell. */
+  openPalette: () => void;
 };
 
 export function Sidebar({
