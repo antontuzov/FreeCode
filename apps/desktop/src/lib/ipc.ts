@@ -498,10 +498,48 @@ export type KnowledgeCenter = {
   models: CatalogModel[];
 };
 
+/* ---- the Extensions page: the tool registry as the agent is handed it ---- */
+
+/**
+ * `smollm_config::PermissionClass` in its snake_case wire spelling: what a call can do to the machine.
+ */
+export type PermissionClass = "read_only" | "workspace_write" | "side_effect" | "network";
+
+/**
+ * What the run would do with a call right now. `auto` runs without interrupting, `ask` pauses for the
+ * user, `blocked` refuses — and all three are answered by `smollm_core::approvals::evaluate` against
+ * the settings in force, which is what keeps this page from describing a policy the loop ignores.
+ */
+export type ToolDecision = "auto" | "ask" | "blocked";
+
+/** One declared tool. Mirrors `extensions::ToolRow`. */
+export type ExtensionTool = {
+  id: string;
+  title: string;
+  description: string;
+  permission: PermissionClass;
+  requiresNetwork: boolean;
+  /** Whether a call reaches an executor in this build. A declared tool with no executor still gets a
+   * transcript row, so the page names the gap instead of hiding the row. */
+  runnable: boolean;
+  decision: ToolDecision;
+};
+
+/** Mirrors `extensions::Inventory`. */
+export type ExtensionInventory = {
+  tools: ExtensionTool[];
+  runnable: number;
+  workspaceRoot: string;
+  approvalMode: ApprovalMode;
+  networkAllowed: boolean;
+};
+
 export const ipc = {
   modelStatus: () => invoke<ModelStatus>("model_status"),
   /** Every model and packing the catalog pins, with the ones on this machine marked. */
   knowledgeCenter: () => invoke<KnowledgeCenter>("knowledge_center"),
+  /** Every tool the agent is offered, with the current approvals and sandbox applied to each row. */
+  extensionsInventory: () => invoke<ExtensionInventory>("extensions_inventory"),
   /** Fetch and unpack the pinned fork engine. Progress arrives on `onEngineInstall`. */
   installEngine: () => invoke<InstallOutcome>("install_engine"),
   onEngineInstall: (onProgress: (progress: EngineInstallProgress) => void): Promise<() => void> =>

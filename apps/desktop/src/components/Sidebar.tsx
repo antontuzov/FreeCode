@@ -41,7 +41,14 @@ const PLACES: NavRow[] = [
   },
   { key: "sites", icon: "sites", placeholder: true },
   { key: "automations", icon: "automations", placeholder: true },
-  { key: "extensions", icon: "extensions", placeholder: true },
+  // The row's local meaning: this app installs no add-ons, but it does have a set of capabilities the
+  // agent is handed, and the page the row opens is that list — with what this build runs of it.
+  {
+    key: "extensions",
+    icon: "extensions",
+    tipKey: "sidebar.extensionsAbout",
+    onActivate: (a) => a.openExtensions(),
+  },
 ];
 
 type Conversation = {
@@ -131,6 +138,8 @@ export type SidebarActions = {
   openPalette: () => void;
   /** Open the Knowledge Center: the catalog and this machine's share of it. */
   openKnowledge: () => void;
+  /** Open the Extensions page: the tools the agent is offered, and which of them this build runs. */
+  openExtensions: () => void;
 };
 
 export function Sidebar({

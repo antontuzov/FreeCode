@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { Extensions } from "./components/Extensions";
 import { Inspector } from "./components/Inspector";
 import { Knowledge } from "./components/Knowledge";
 import { ModelStatus } from "./components/ModelStatus";
@@ -30,6 +31,10 @@ export default function App() {
   // cannot make. An id the catalog does not have falls back to the machine page.
   const knowledgePage = query("knowledge");
   const [knowledge, setKnowledge] = useState(knowledgePage !== null);
+  // `?extensions=1` opens the Extensions page, for the same reason as the other deep links: the row
+  // that opens it is a click the native window cannot be given, and a page nobody can reach is a page
+  // nobody can see.
+  const [extensions, setExtensions] = useState(query("extensions") !== null);
   // `?search=<query>` opens the palette with that query already typed — the deep link the panel is
   // captured through, since the window takes no injected keystrokes and a search nobody can type
   // into is a search nobody can see.
@@ -135,13 +140,14 @@ export default function App() {
     newTask: () => {
       // The palette owns the keyboard the same way Settings does: a New task fired from under it
       // would empty the transcript the rows in front of the user describe.
-      if (settingsPage !== null || paletteOpen || knowledge) return;
+      if (settingsPage !== null || paletteOpen || knowledge || extensions) return;
       void newTask();
     },
     // Knowledge Center is a surface rather than a page of the shell, so ⌘, leaves it: staying on two
     // full-window pages at once would mean a back button that returns to a third.
     settings: () => {
       setKnowledge(false);
+      setExtensions(false);
       setSettingsPage((page) => page ?? "appearance");
     },
     // Twice closes it, because the second press is the user changing their mind.
@@ -151,6 +157,8 @@ export default function App() {
         setSettingsPage(null);
       } else if (knowledge) {
         setKnowledge(false);
+      } else if (extensions) {
+        setExtensions(false);
       } else if (running) {
         void stop();
       }
@@ -171,6 +179,10 @@ export default function App() {
     );
   }
 
+  if (extensions) {
+    return <Extensions locale={locale} onBack={() => setExtensions(false)} />;
+  }
+
   return (
     <div className="flex h-full flex-col bg-bg text-fg">
       <div className="flex min-h-0 flex-1">
@@ -182,6 +194,7 @@ export default function App() {
             newTask: () => void newTask(),
             openPalette: () => setPaletteOpen(true),
             openKnowledge: () => setKnowledge(true),
+            openExtensions: () => setExtensions(true),
           }}
         />
         <div className="flex min-w-0 flex-1 flex-col">

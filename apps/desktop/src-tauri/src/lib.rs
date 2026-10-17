@@ -11,6 +11,7 @@ mod brand;
 mod chat;
 mod clipboard;
 mod engine;
+mod extensions;
 mod knowledge;
 mod paths;
 mod sessions;
@@ -56,6 +57,16 @@ async fn knowledge_center(app: AppHandle) -> Result<Center, String> {
     tauri::async_runtime::spawn_blocking(move || Center::build(&root, &settings))
         .await
         .map_err(|e| format!("catalog listing failed: {e}"))?
+}
+
+/// The Extensions page: the tool registry as the agent is handed it, with the current approval dial
+/// and sandbox applied to every row by the same engine that decides a call mid-run.
+#[tauri::command]
+async fn extensions_inventory(app: AppHandle) -> Result<extensions::Inventory, String> {
+    let (root, settings) = root_and_settings(&app)?;
+    tauri::async_runtime::spawn_blocking(move || extensions::Inventory::build(&root, &settings))
+        .await
+        .map_err(|e| format!("tool inventory failed: {e}"))
 }
 
 #[tauri::command]
@@ -186,6 +197,8 @@ pub fn run() {
             model_status,
             // What the catalog pins and what this machine has of it, for the Knowledge Center.
             knowledge_center,
+            // What the agent can reach and what this build runs, for the Extensions page.
+            extensions_inventory,
             install_engine,
             download_weights,
             load_appearance,
