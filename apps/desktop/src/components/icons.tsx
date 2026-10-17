@@ -32,9 +32,18 @@ const PATHS = {
   sites: "M3 5h18v14H3zM3 10h18M8 5v5",
   automations:
     "M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
-  extensions: "M9 3v3a2 2 0 1 1-4 0V3H3v18h6v-3a2 2 0 1 1 4 0v3h6v-6h-3a2 2 0 1 1 0-4h3V3z",
+  // A jigsaw piece with a knob on its top edge and another on its right, off the reference crop. Each
+  // knob is one arc of radius 2 over a chord of 2.6: because the chord is shorter than the diameter,
+  // the major arc closes more than half the circle and the two ends pinch in, which is the neck — so
+  // the ball-on-stem look costs one command rather than the six points a stem would be drawn with.
+  extensions:
+    "M7 9.3h1.7a2 2 0 1 1 2.6 0H13a1.5 1.5 0 0 1 1.5 1.5v1.7a2 2 0 1 1 0 2.6v1.7a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5V10.8A1.5 1.5 0 0 1 7 9.3z",
+  // Eight lobes on a polar profile (radius 6.6→8.6, flattened tops), sampled every 7.5° rather than
+  // hand-plotted: the reference's cog has rounded teeth in narrow notches, which no short arc chain
+  // draws without a dozen magic numbers. Edit the profile by changing the generator's constants, not
+  // by nudging individual points — the outline is one curve, and a lone vertex breaks it.
   settings:
-    "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 7 2.6h.1A1.6 1.6 0 0 0 9 1.1V1a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 15 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z",
+    "M12 3.4L13.1 3.5L13.7 5.6L14.5 5.9L15.3 6.3L17.2 5.2L18.1 5.9L18.8 6.8L17.7 8.7L18.1 9.5L18.4 10.3L20.5 10.9L20.6 12L20.5 13.1L18.4 13.7L18.1 14.5L17.7 15.3L18.8 17.2L18.1 18.1L17.2 18.8L15.3 17.7L14.5 18.1L13.7 18.4L13.1 20.5L12 20.6L10.9 20.5L10.3 18.4L9.5 18.1L8.7 17.7L6.8 18.8L5.9 18.1L5.2 17.2L6.3 15.3L5.9 14.5L5.6 13.7L3.5 13.1L3.4 12L3.5 10.9L5.6 10.3L5.9 9.5L6.3 8.7L5.2 6.8L5.9 5.9L6.8 5.2L8.7 6.3L9.5 5.9L10.3 5.6L10.9 3.5zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
   // A prompt with no box around it, unlike `coding`'s: this glyph is only ever drawn inside an
   // inspector chip, which is already a square. Two squares nested at 14px read as one smudge.
   skills: "M5 8l4 4-4 4M12 16h7",

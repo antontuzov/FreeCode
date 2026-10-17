@@ -1,4 +1,4 @@
-//! Appearance settings: the four interface styles, light/dark, glass and the code editor facet.
+//! Appearance settings: the interface styles, light/dark, glass and the code editor facet.
 //!
 //! Every field here maps to one control on Settings › Appearance, and each one resolves to CSS
 //! custom properties in `apps/desktop/src/theme`. No component may hardcode a hex value: a theme
@@ -15,8 +15,8 @@ pub enum ThemeMode {
     System,
 }
 
-/// The four interface styles, in the card order shown in the reference screenshot. The selected
-/// card paints the accent token palette.
+/// The interface styles, in the card order shown in the reference screenshot. The selected card
+/// paints the accent token palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum InterfaceStyle {
@@ -25,6 +25,9 @@ pub enum InterfaceStyle {
     Mint,
     Bee,
     Parchment,
+    /// The reference app's own chrome: a cool periwinkle wash under a green action colour. Unlike the
+    /// other four, its wash is not its accent's hue — see `--style-rain-tint` in tokens.css.
+    Rain,
 }
 
 impl InterfaceStyle {
@@ -34,6 +37,7 @@ impl InterfaceStyle {
             Self::Mint => "Mint",
             Self::Bee => "Bee",
             Self::Parchment => "Parchment",
+            Self::Rain => "Rain",
         }
     }
 }

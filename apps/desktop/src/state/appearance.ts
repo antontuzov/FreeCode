@@ -79,7 +79,13 @@ function devOverrides(): Partial<AppearanceState> {
   const mode = q.get("mode");
   if (mode === "light" || mode === "dark" || mode === "system") forced.themeMode = mode;
   const accent = q.get("accent");
-  if (accent === "forest" || accent === "mint" || accent === "bee" || accent === "parchment") {
+  if (
+    accent === "forest" ||
+    accent === "mint" ||
+    accent === "bee" ||
+    accent === "parchment" ||
+    accent === "rain"
+  ) {
     forced.accent = accent;
   }
   const font = q.get("font");

@@ -7,15 +7,15 @@
 // px — which is small text under WCAG 1.4.3 and therefore needs 4.5:1, not the 3:1 reserved for
 // large headings. So the floor is asserted where the colours are actually declared.
 //
-// Since the four interface styles repaint the whole window rather than only the accent, a token is
+// Since every interface style repaints the whole window rather than only the accent, a token is
 // no longer one colour per mode: `--bg-panel` is a different colour for every style. So the contract
-// is evaluated eight times — each mode × each accent — and the grounds it reads are the ones that
+// is evaluated once per mode and style — each mode × each accent — and the grounds it reads are the ones that
 // accent actually paints. A tint tuned for Mint that drops `--text-faint` under the floor on a Bee
 // sidebar is exactly the bug this file exists to catch.
 //
 // Two kinds of pair are asserted, and the difference between them is how a window marks a selection.
-// A SURFACE carries any word the app puts on it, so every grey, every semantic colour and all four
-// styles' inks are checked against every surface — the four because a code fence is highlighted from
+// A SURFACE carries any word the app puts on it, so every grey, every semantic colour and every
+// style's ink are checked against every surface — the last because a code fence is highlighted from
 // all of them at once, in whichever style is live. A FILL is `--accent-soft` laid on a surface, which
 // is what a selected row and a link chip are drawn with, and it costs the ink standing on it some
 // contrast: in dark mode the fill is LIGHTER than the card behind it, in light mode DARKER than the
@@ -229,13 +229,13 @@ const TEXT_INKS = [
   "--warning",
   "--danger",
 ];
-const ACCENTS = ["forest", "mint", "bee", "parchment"];
+const ACCENTS = ["forest", "mint", "bee", "parchment", "rain"];
 // The surfaces a style's translucent fill is laid on: the page, the sidebar, a card. Not
 // `--bg-sunken`, which is a code gutter and the user's own bubble — both of which paint their own
 // label rather than a chip, so no fill is ever stacked on them.
 const FILL_BASES = ["--bg", "--bg-panel", "--bg-elevated"];
-// The greys and the four style inks, because a code fence is syntax-highlighted from all four
-// families at once whatever the selected style: `--style-bee-ink` is a type name in every mode.
+// The greys and every style ink, because a code fence is syntax-highlighted from all of them
+// at once whatever the selected style: `--style-bee-ink` is a type name in every mode.
 const SURFACE_INKS = [
   ...TEXT_INKS,
   ...ACCENTS.map((family) => `--style-${family}-ink`),

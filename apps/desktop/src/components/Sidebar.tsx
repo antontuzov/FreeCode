@@ -311,10 +311,23 @@ export function Sidebar({
       </div>
 
       <div className="flex flex-col gap-1 p-[var(--space-3)]">
-        <span className="pill w-fit">
-          <Icon name="coding" />
-          {translate(locale, "sidebar.coding")}
-        </span>
+        <div className="flex items-center gap-1">
+          <span className="pill w-fit">
+            <Icon name="coding" />
+            {translate(locale, "sidebar.coding")}
+          </span>
+          {/* The reference hangs a puzzle badge off the mode pill rather than only in the Places
+              list: the capabilities a run may use belong beside the mode that grants them. */}
+          <button
+            type="button"
+            aria-label={translate(locale, "sidebar.extensions")}
+            title={translate(locale, "sidebar.extensionsAbout")}
+            className="icon-btn"
+            onClick={() => actions.openExtensions()}
+          >
+            <Icon name="extensions" size={14} />
+          </button>
+        </div>
         {PRIMARY.map((r) => row(r))}
       </div>
 

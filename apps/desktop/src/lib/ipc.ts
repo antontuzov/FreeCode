@@ -98,7 +98,7 @@ export type WeightsProgress =
   | { phase: "done"; downloaded: WeightsDownloaded };
 
 export type ThemeMode = "light" | "dark" | "system";
-export type Accent = "forest" | "mint" | "bee" | "parchment";
+export type Accent = "forest" | "mint" | "bee" | "parchment" | "rain";
 export type Language = "en" | "zh";
 export type TerminalTheme = "follow_theme" | "light" | "dark" | "custom";
 export type FontStyle = "sans" | "serif" | "mono";

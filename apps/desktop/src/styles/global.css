@@ -686,6 +686,9 @@ select.field-input {
 .swatch-parchment {
   --preview: var(--style-parchment);
 }
+.swatch-rain {
+  --preview: var(--style-rain);
+}
 
 /* The twelve mascot tiles the app can wear. Each is shown against both ends of the live palette —
  * raised surface down to gutter — because the tile goes over whatever the OS puts behind it, and a

@@ -204,9 +204,9 @@ export function ShortcutChips({
 }
 
 /**
- * One of the four interface-style cards. It paints the style it advertises through `--preview`, so
- * all four stay distinguishable whatever accent is live; selection is the outline plus the filled
- * dot, never colour alone.
+ * One of the interface-style cards. It paints the style it advertises through `--preview`, so all
+ * five stay distinguishable whatever accent is live; selection is the outline plus the filled dot,
+ * never colour alone.
  */
 export function StyleCard({
   style,
@@ -214,7 +214,7 @@ export function StyleCard({
   selected,
   onSelect,
 }: {
-  style: "forest" | "mint" | "bee" | "parchment";
+  style: "forest" | "mint" | "bee" | "parchment" | "rain";
   name: string;
   selected: boolean;
   onSelect: () => void;

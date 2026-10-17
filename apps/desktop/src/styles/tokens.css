@@ -2,9 +2,9 @@
  *
  * Three colour axes, all of which the Appearance page drives:
  *   data-theme-mode = light | dark
- *   data-accent     = forest | mint | bee | parchment
+ *   data-accent     = forest | mint | bee | parchment | rain
  *   data-surface    = glass | solid   (glass degrades to solid when blur is unavailable)
- * Every screen must render correctly in all 2 x 4 x 2 combinations, so components consume these
+ * Every screen must render correctly in all 2 x 5 x 2 combinations, so components consume these
  * variables exclusively and never mix a color literal with them.
  *
  * The second axis is a whole-window one, not a button colour: the grounds, rules and turn markers are
@@ -20,9 +20,11 @@
  *
  * The neutrals below are measured, not eyeballed: each one is a pixel read out of
  * docs/reference-ui with scripts/probe-reference-palette.swift (see the citation on the line).
- * The four accent families are measured in light mode from the interface-style cards in shot 02;
- * their dark-mode counterparts are the same hues lifted for contrast on the near-black green, and
- * are marked as derived rather than claimed as measurements.
+ * The four original accent families are measured in light mode from the interface-style cards in
+ * shot 02; their dark-mode counterparts are the same hues lifted for contrast on the near-black
+ * green, and are marked as derived rather than claimed as measurements. The fifth, Rain, is measured
+ * off the 2026-10-17 shots of the reference app's own cool chrome, and is the one family whose wash
+ * and whose action colour are deliberately not the same hue — see its block.
  */
 
 :root {
@@ -202,10 +204,12 @@
   --style-mint: #50a990; /* 02: the Mint style card, and the default in 04-06 */
   --style-bee: #c4b267; /* 02: the Bee style card */
   --style-parchment: #c96542; /* 02: the Parchment style card — terracotta, not beige */
+  --style-rain: #536e5c; /* 2026-10-17: the reference's own send square, read off the live window */
   --style-forest-contrast: #f4faf7;
   --style-mint-contrast: #08130f;
   --style-bee-contrast: #1b1608;
   --style-parchment-contrast: #1f120d;
+  --style-rain-contrast: #f4faf7;
   /* The accent as INK. The four families above are measured off a card in shot 02, where they sit
      against white as a swatch and never have to be read as words; used as text they are far too
      light for the near-white ground — Mint, the default, puts a 12px link at 2.4:1 on its own soft
@@ -219,6 +223,7 @@
   --style-mint-ink: #316a5a;
   --style-bee-ink: #6a6035;
   --style-parchment-ink: #94472d;
+  --style-rain-ink: #46604f;
   /* The style read as a SURFACE rather than as a swatch or as ink. The four families above are four
      different lightnesses — Bee is a pale gold and Forest a deep leaf — so mixing the family colour
      itself into a ground would make the window brighter as well as warmer every time the style
@@ -229,6 +234,13 @@
   --style-mint-tint: var(--style-mint);
   --style-bee-tint: #a8964b;
   --style-parchment-tint: #db7652;
+  /* Rain is the one family whose wash is NOT its action colour, and that is the point of it: the
+     reference's chrome is a cool periwinkle while its send square stays the deep green, so a style
+     that reproduced the green in both places would be a second Forest. The tint is solved rather than
+     sampled — it is the slate blue that, at the 12% the light grounds mix at, lands `--bg-panel` on
+     the #e8eef4 measured off the reference's own sidebar, at Mint's normalized lightness so choosing
+     Rain repaints the chrome without brightening it. */
+  --style-rain-tint: #8294d6;
 
   --accent: var(--style-mint);
   --accent-contrast: var(--style-mint-contrast);
@@ -260,6 +272,12 @@
   --accent-ink: var(--style-parchment-ink);
   --accent-tint: var(--style-parchment-tint);
 }
+[data-accent="rain"] {
+  --accent: var(--style-rain);
+  --accent-contrast: var(--style-rain-contrast);
+  --accent-ink: var(--style-rain-ink);
+  --accent-tint: var(--style-rain-tint);
+}
 
 /* On the near-black green a light-mode accent sinks in; the same hue lifted ~14% is what shots 05
  * and 06 actually show (mint measures #62c9a8 there). */
@@ -268,10 +286,12 @@
   --style-mint: #62c9a8; /* 05: measured */
   --style-bee: #e0cf7d;
   --style-parchment: #e0805c;
+  --style-rain: #63b58d;
   --style-forest-contrast: #08130f;
   --style-mint-contrast: #08130f;
   --style-bee-contrast: #1b1608;
   --style-parchment-contrast: #1f120d;
+  --style-rain-contrast: #08130f;
   /* Dark mostly needs no ink step — the lifted accents are already the readable ones against every
      surface — but a link chip paints `--accent-soft` for itself, and that fill composited over a
      card is LIGHTER than the card, which costs a pale ink contrast rather than gaining it. Forest
@@ -281,13 +301,19 @@
   --style-mint-ink: var(--style-mint);
   --style-bee-ink: var(--style-bee);
   --style-parchment-ink: #ef9f80;
+  /* Rain needed the same second step Forest and Parchment did, for the same reason: its chip fill is a
+     slate, and a slate costs a pale green more contrast than the card under it does. */
+  --style-rain-ink: #7ac6a2;
   /* The same normalization against this mode's Mint, which is the lifted #62c9a8. Bee's swatch is
      brighter than it and Parchment's is deeper; both give up that difference here, because the
-     surfaces they tint are the ones every grey in the window is read against. */
+     surfaces they tint are the ones every grey in the window is read against. Rain keeps its own
+     cool hue here too — the dark window's cast is its only difference from a Forest one, and if the
+     tint went green the two styles would be the same window. */
   --style-forest-tint: #78c797;
   --style-mint-tint: var(--style-mint);
   --style-bee-tint: #c4b362;
   --style-parchment-tint: #f79571;
+  --style-rain-tint: #85abdd;
 }
 
 /* Soft fills carry the style without claiming its contrast budget: selected rows, the user's
