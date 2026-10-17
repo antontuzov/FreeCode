@@ -6,6 +6,7 @@
 //! hardware probe and header parse run on the async runtime instead of the event-loop thread.
 
 mod appearance;
+mod brand;
 mod chat;
 mod clipboard;
 mod engine;
@@ -176,6 +177,10 @@ pub fn run() {
         // in an answer. The UI cannot reach it directly — the capability scopes it to `http` and
         // `https`, so a `file://` or a `javascript:` address in a model's own text never launches.
         .plugin(tauri_plugin_opener::init())
+        // The duck this launch wears, handed to the page before any of its own scripts run, so the
+        // window and the Dock tile are the same picture from the first frame rather than a moment
+        // apart. See `brand`.
+        .append_invoke_initialization_script(brand::init_script())
         .invoke_handler(tauri::generate_handler![
             model_status,
             // What the catalog pins and what this machine has of it, for the Knowledge Center.
@@ -212,9 +217,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building SmoLLM Studio");
 
-    app.run(|app_handle, event| {
-        if matches!(event, tauri::RunEvent::Exit) {
-            release_engine(app_handle);
-        }
+    app.run(|app_handle, event| match event {
+        // The mascot goes on the Dock here rather than in `setup`, because in a dev build Tauri puts
+        // the built icon there itself when the event loop reports Ready — after the setup hook and
+        // before this callback. Whoever answers Ready last is the one whose face you see.
+        tauri::RunEvent::Ready => brand::set_dock_tile(app_handle),
+        tauri::RunEvent::Exit => release_engine(app_handle),
+        _ => {}
     });
 }

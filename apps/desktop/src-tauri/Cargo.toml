@@ -34,5 +34,13 @@ arboard = { version = "3", default-features = false }
 [target.'cfg(unix)'.dependencies]
 tokio = { workspace = true }
 
+# Tauri 2.12 has no `set_dock_icon`, so the mascot the Dock wears is set through AppKit directly.
+# The two `NSApplication`/`NSImage` features are the whole ask: opting into only those classes is what
+# keeps this a handful of small crates rather than the AppKit binding tree. See `brand`.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
+objc2-foundation = { version = "0.3", features = ["NSData"] }
+
 [dev-dependencies]
 tempfile = { workspace = true }

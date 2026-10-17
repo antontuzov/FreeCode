@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cut the mascot sheet into the twelve logos the empty transcript screen picks one of at random.
+"""Cut the mascot sheet into the twelve logos the app wears, one per launch, at random.
 
 The sheet is a 4x3 grid of painterly duck heads on black, one expression per tile. The app ships the
 twelve crops, not the sheet: the grid lines are the only thing the sheet has that a single logo does
@@ -12,6 +12,14 @@ every third logo. A gutter here is a line that is black end to end; the cut goes
 Each cell is then centre-cropped to a square, because the tile is drawn into a circle in the window
 and a square is the largest circle-free shape that keeps every head the same size.
 
+Each crop is written twice, because two different things read it:
+
+* `…/src/assets/mascots/mascot-NN.webp`, loaded by the webview, where the browser's own decoder makes
+  the file's cost the app's bundle size. Full-bleed square, because CSS draws the window's circle.
+* `…/src-tauri/mascots/mascot-NN.png`, `include_bytes!` by `brand.rs` and handed to `NSImage` as the
+  Dock tile. This one carries its own circle: the Dock clips nothing, so a square tile reads as a
+  black-cornered stamp among the round icons. Alpha PNG, because transparency has no JPEG encoding.
+
 The source sheet is the artwork, not build output, so it is not committed. Re-run with the path:
 
     python3 scripts/render-mascot-logos.py ~/Desktop/Joker/sheet.png
@@ -20,13 +28,22 @@ The source sheet is the artwork, not build output, so it is not committed. Re-ru
 from pathlib import Path
 import sys
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 OUT_DIR = Path("apps/desktop/src/assets/mascots")
+# The host's copy of the same twelve, for the Dock tile. See the docstring for why it is a round PNG.
+HOST_OUT_DIR = Path("apps/desktop/src-tauri/mascots")
 # Displayed at 72px on a 2x screen. 256 keeps it sharp on a 3x panel and leaves the whole set at a
 # few tens of kilobytes, which is what an avatar should cost.
 TILE = 256
 WEBP_QUALITY = 82
+# The Dock canvas is bigger than the icon on it, and every round tile in a real Dock sits inset with
+# transparent margin around it. Filling the square edge to edge makes ours look oversized next to
+# them, so the disc takes this fraction of the canvas.
+DOCK_INSET = 0.86
+# The disc is cut at 4x and downscaled: an ellipse drawn at 256px lands on whole pixels and the
+# Dock's own smoothing turns that into a scalloped edge.
+SUPERSAMPLE = 4
 # A line is a gutter when the brightest pixel along it is still black. 8/255 is below any feather
 # the art itself draws, and above the JPEG-ish noise a screenshot of it would carry.
 BLACK_MAX = 8
@@ -48,6 +65,20 @@ def gutters(length: int, line_at, other: int) -> list[int]:
     # Edge bands are the sheet's own margin, not a seam between two logos.
     inner = [b for b in bands if b[0] > 0 and b[-1] < length - 1]
     return [(b[0] + b[-1]) // 2 for b in inner]
+
+
+def dock_tile(cell: Image.Image) -> Image.Image:
+    """The square crop as a round icon on transparent margin, which is what the Dock draws unmasked."""
+    big = TILE * SUPERSAMPLE
+    disc = int(big * DOCK_INSET)
+    margin = (big - disc) // 2
+    mask = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(mask).ellipse((margin, margin, big - margin, big - margin), fill=255)
+    art = cell.convert("RGBA")
+    # Only the alpha is cut; the duck's own colours run right out to the square's edge under the
+    # transparent ring, so there is no half-lit seam to composite against.
+    art.putalpha(mask.resize((TILE, TILE), Image.LANCZOS))
+    return art
 
 
 def main() -> int:
@@ -72,6 +103,7 @@ def main() -> int:
     cols = list(zip([0] + v, v + [w]))
     rows = list(zip([0] + hz, hz + [h]))
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    HOST_OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     n = 0
     for y0, y1 in rows:
@@ -84,12 +116,17 @@ def main() -> int:
             n += 1
             out = OUT_DIR / f"mascot-{n:02d}.webp"
             cell.save(out, "WEBP", quality=WEBP_QUALITY, method=6)
-            print(f"{out} {cell.width}x{cell.height} {out.stat().st_size / 1024:.1f} KiB")
+            host = HOST_OUT_DIR / f"mascot-{n:02d}.png"
+            dock_tile(cell).save(host, "PNG", optimize=True)
+            print(
+                f"{out} {cell.width}x{cell.height} {out.stat().st_size / 1024:.1f} KiB"
+                f" | {host} {host.stat().st_size / 1024:.1f} KiB"
+            )
 
     if n != 12:
         print(f"FAIL wrote {n} tiles, not 12")
         return 1
-    print(f"OK — 12 tiles in {OUT_DIR}")
+    print(f"OK — 12 tiles in {OUT_DIR} and {HOST_OUT_DIR}")
     return 0
 
 
