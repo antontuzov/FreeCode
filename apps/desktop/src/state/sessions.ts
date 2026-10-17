@@ -21,6 +21,7 @@ function asRows(session: Session): Row[] {
     kind: "turn" as const,
     role: turn.role,
     text: turn.text,
+    image: turn.image,
   }));
 }
 

@@ -136,13 +136,20 @@ pub enum NoticeCode {
     /// The exchange happened but did not reach the conversation store, so the sidebar will not show it
     /// after the window closes.
     NotFiled,
+    /// The model has no projector file on this machine, so the picture it would have read cannot be.
+    ProjectorAbsent,
+    /// The server the conversation is running on was started without a projector, and taking the
+    /// picture means starting it again with one.
+    ProjectorLoading,
+    /// The selected model publishes no projector at all, so it cannot be given a picture.
+    ModelTakesNoImages,
 }
 
 impl NoticeCode {
     /// Every code the host can emit. `verify-transcript-i18n` walks this to require one catalog entry
     /// per code, so a notice added here without its sentence in both locales fails the build instead
     /// of rendering its own key in the middle of a transcript.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 10] = [
         Self::EffortNotSupported,
         Self::EngineRestarted,
         Self::ToolCallWithoutTools,
@@ -150,6 +157,9 @@ impl NoticeCode {
         Self::ContextTrimmed,
         Self::BudgetExhausted,
         Self::NotFiled,
+        Self::ProjectorAbsent,
+        Self::ProjectorLoading,
+        Self::ModelTakesNoImages,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -161,6 +171,9 @@ impl NoticeCode {
             Self::ContextTrimmed => "notice.context-trimmed",
             Self::BudgetExhausted => "notice.budget-exhausted",
             Self::NotFiled => "notice.not-filed",
+            Self::ProjectorAbsent => "notice.projector-absent",
+            Self::ProjectorLoading => "notice.projector-loading",
+            Self::ModelTakesNoImages => "notice.model-takes-no-images",
         }
     }
 
@@ -177,6 +190,9 @@ impl NoticeCode {
             Self::ContextTrimmed => &[],
             Self::BudgetExhausted => &["maxTokens"],
             Self::NotFiled => &["why"],
+            Self::ProjectorAbsent => &["model", "file"],
+            Self::ProjectorLoading => &["file"],
+            Self::ModelTakesNoImages => &["model"],
         }
     }
 }

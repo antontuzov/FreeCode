@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
+import { toPictureDataUrl } from "../lib/image";
 import { shortcutLabel } from "../lib/shortcuts";
 import { useChat } from "../state/chat";
 import { useTranscript } from "../state/transcript";
@@ -21,12 +22,40 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   const error = useChat((s) => s.error);
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<ApprovalMode>("ask");
+  const [picture, setPicture] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const notInBuild = translate(locale, "common.notInBuild");
 
+  // The picture is shrunk and re-encoded here, before it ever crosses to the host, because a phone
+  // photo's bytes are far past what a vision projector samples — and the host charges the attached
+  // picture for the engine's whole image-token budget either way.
+  const pickPicture = async (picked: File | undefined) => {
+    if (!picked) return;
+    setPreparing(true);
+    setAttachError(null);
+    try {
+      setPicture(await toPictureDataUrl(picked));
+    } catch {
+      // A file the browser cannot decode as an image is the one way this fails without the engine
+      // being involved, so it is said here rather than left as a picture button that did nothing.
+      setPicture(null);
+      setAttachError(translate(locale, "composer.picture.failed"));
+    } finally {
+      setPreparing(false);
+      // Cleared so choosing the same file twice fires `change` again, which the browser otherwise
+      // suppresses and the user reads as the button having stopped working.
+      if (picker.current) picker.current.value = "";
+    }
+  };
+
   const submit = () => {
-    if (!draft.trim()) return;
-    void send(draft);
+    if (!draft.trim() && !picture) return;
+    // A picture with no words is a question — "what is in this?" needs no saying.
+    void send(draft, picture ?? undefined);
     setDraft("");
+    setPicture(null);
   };
 
   return (
@@ -55,9 +84,46 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
             {error}
           </p>
         )}
+        {attachError && (
+          <p role="alert" className="px-[var(--space-4)] pb-1 text-fine text-danger">
+            {attachError}
+          </p>
+        )}
+        {picture && (
+          <div className="flex items-center gap-2 px-[var(--space-4)] pb-2">
+            {/* The shrunk bytes, not the file the user picked: what is on screen is exactly what the
+                model will be given, so a picture that resized badly is visible before it is sent. */}
+            <img
+              src={picture}
+              alt=""
+              className="size-12 rounded-[var(--radius-md)] border border-line object-cover"
+            />
+            <span className="text-fine text-muted">{translate(locale, "composer.picture")}</span>
+            <button
+              type="button"
+              onClick={() => setPicture(null)}
+              className="icon-btn"
+              aria-label={translate(locale, "composer.picture.remove")}
+            >
+              <Icon name="close" size={12} />
+            </button>
+          </div>
+        )}
         <div className="flex items-center gap-2 px-[var(--space-3)] pb-[var(--space-3)]">
-          {/* Nothing this build can add to a prompt yet: attachments wait on the vision path, voice
-              on the input it would transcribe into. Named on hover, like the sidebar's unbuilt rows. */}
+          {/* A plain file input, because the webview answers one with the native open panel — no
+              dialog plugin and no filesystem capability handed to the interface. Only a picture is
+              asked for: the engine reads images, and nothing else has a path to an answer. */}
+          <input
+            ref={picker}
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            id="composer-picture"
+            onChange={(e) => void pickPicture(e.target.files?.[0])}
+          />
+          {/* Still nothing to add a prompt but a picture: context attachments wait on the retrieval
+              path, voice on the input it would transcribe into. Named on hover, like the sidebar's
+              unbuilt rows. */}
           <button
             type="button"
             className="icon-btn"
@@ -69,10 +135,15 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           </button>
           <button
             type="button"
+            onClick={() => picker.current?.click()}
             className="icon-btn"
             aria-label={translate(locale, "composer.attach")}
-            aria-disabled
-            title={notInBuild}
+            aria-busy={preparing || undefined}
+            title={
+              preparing
+                ? translate(locale, "composer.picture.busy")
+                : translate(locale, "composer.attach")
+            }
           >
             <Icon name="attach" />
           </button>
@@ -117,7 +188,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           <button
             type="button"
             onClick={() => (running ? void stop() : submit())}
-            disabled={!running && !draft.trim()}
+            disabled={!running && !draft.trim() && !picture}
             aria-label={translate(locale, running ? "composer.stop" : "composer.send")}
             // The key the interrupt answers to, named only while there is a reply to interrupt.
             title={running ? shortcutLabel("escape") : undefined}

@@ -26,7 +26,11 @@ use crate::LlamaError;
 
 /// `common.sh bonsai_image_max_tokens()`: Metal / Vulkan / CPU cap images at 1024 vision tokens for
 /// latency; CUDA and ROCm run uncapped.
-const IMAGE_TOKEN_CAP: u32 = 1024;
+///
+/// Public because the host charges this same number when it asks the server how big a prompt is
+/// before sending it: a picture reaches `/tokenize` only as the text the template leaves in its
+/// place, so the tokens the projector expands it into have to be added from the flag that bounds them.
+pub const IMAGE_TOKEN_CAP: u32 = 1024;
 /// KNOWN_ISSUES.md, "A single conversation keeps re-processing its prompt on the server": for
 /// single-user use start the server with `-np 1 --cache-ram 24576`.
 const PROMPT_CACHE_MIB: u32 = 24576;

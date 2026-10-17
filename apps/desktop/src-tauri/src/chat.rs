@@ -21,7 +21,11 @@
 //!     minutes; the window must still repaint. Callers take a snapshot and drop the guard.
 //!   * **reasoning is displayed, never replayed.** Only the answer text goes back into the history
 //!     the next request is built from (`AgentConstraints::do_not_echo_reasoning_into_history`).
+//!   * **a picture needs a server that was started for one.** `--mmproj` is a launcher argument, so a
+//!     run that carries an image is answered by a server holding the projector the model's card names,
+//!     and reaching that is a deliberate relaunch with its cost announced — see [`Needs`].
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -33,9 +37,9 @@ use smollm_config::{ReasoningEffort, Settings};
 use smollm_core::events::{AgentEvent, NoticeCode, RunReport};
 use smollm_llama::{
     prompt_tokens, start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message, Reply,
-    ReplyDelta, ServerHandle, StreamControl,
+    ReplyDelta, ServerHandle, StreamControl, IMAGE_TOKEN_CAP,
 };
-use smollm_models::ModelEntry;
+use smollm_models::{gguf, IntegrityStatus, ModelEntry};
 
 use crate::{appearance, sessions, status};
 use sessions::{Role, Session};
@@ -294,20 +298,83 @@ fn emit(app: &AppHandle, event: AgentEvent) {
     let _ = app.emit(EVENT, event);
 }
 
+/// What the next request needs from the engine beyond the text it replays.
+///
+/// A tag rather than a `bool` because the value at the call site is the whole decision: `--mmproj`
+/// cannot be handed to a server that is already up, so asking for a picture is asking for a different
+/// process, and that is worth naming where it is passed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Needs {
+    TextOnly,
+    Projector,
+}
+
+impl Needs {
+    fn from_request(carries_image: bool) -> Self {
+        if carries_image {
+            Needs::Projector
+        } else {
+            Needs::TextOnly
+        }
+    }
+}
+
+/// Where the projector a picture-run needs comes from, for the model the guard selected.
+#[derive(Debug)]
+enum Projector {
+    /// The model's card publishes no projector at all. No file on this machine would make it read a
+    /// picture, which is a fact about the model rather than about the download.
+    Unsupported,
+    /// The card names one and this machine does not have it, or has a file of the wrong length —
+    /// which is what an interrupted transfer leaves, and the download is the fix for both.
+    Absent { file: String },
+    /// The card names it and it is here at the published size.
+    Present { file: String, path: PathBuf },
+}
+
+/// Find the projector the model's card recommends, the same size-only probe the packs get.
+///
+/// The catalog's `recommended` pick is the one that goes out, because a projector has to match the
+/// language pack under it and the card is what says which one does. A torn file is `Absent` rather
+/// than a second sentence: the status card's download re-fetches it and says so on the way.
+fn projector(weights: &Path, model: &ModelEntry) -> Projector {
+    let Some(proj) = model.recommended_vision() else {
+        return Projector::Unsupported;
+    };
+    let path = weights.join(&proj.file);
+    let present = matches!(
+        gguf::check_size(&path, proj.size_bytes),
+        Ok(IntegrityStatus::Ok)
+    );
+    if present {
+        Projector::Present {
+            file: proj.file.clone(),
+            path,
+        }
+    } else {
+        Projector::Absent {
+            file: proj.file.clone(),
+        }
+    }
+}
+
 /// The user's setting translated into the launcher's vocabulary.
 ///
 /// `offload_all_layers` off is the CPU-decode path (`-ngl 0`), and the context field is documented
 /// in the Settings surface as "tokens the server reserves", so it goes to `-c` as given rather than
 /// being second-guessed by the RAM tier.
-fn tuning(settings: &Settings) -> LaunchTuning {
+///
+/// `vision_projector` is `None` unless a request asked for one and [`projector`] found it on disk: a
+/// projector is resident memory the text path never uses, so it is loaded for the runs that read
+/// pictures rather than for every server the app starts.
+fn tuning(settings: &Settings, vision_projector: Option<PathBuf>) -> LaunchTuning {
     LaunchTuning {
         context_tokens: Some(settings.sampling.budget.clamped().context_tokens),
         layers_override: (!settings.local_model.offload_all_layers).then_some(0),
         flash_attention: settings.local_model.flash_attention,
         dedicated_server_slots: settings.local_model.dedicated_server_slots,
         thinking: !settings.sampling.non_thinking_mode,
-        // A projector cannot be attached to a running slot, so the lazy path fetches one and
-        // relaunches rather than passing it here on faith. See `vision_projector` in the launcher.
+        vision_projector,
         ..LaunchTuning::default()
     }
 }
@@ -378,11 +445,57 @@ fn resolve_effort(model: &ModelEntry, stored: ReasoningEffort) -> (String, Optio
     )
 }
 
+/// Resolve the projector a picture-run has to have, announcing what stands in its way.
+///
+/// Answers the file name beside the path because the notice that fires when it is missing names the
+/// file the user is being asked to fetch. Only a run that carries a picture pays this: the assembly
+/// re-read here is the guard's directory scan and host probe, and the text path already gets the
+/// server the slot holds without it.
+///
+/// An `Err` is a refusal the transcript has already been told about in its own language — the same
+/// split `launch` uses for a guard blocker, where the string only has to identify the problem to
+/// whoever reads the log.
+async fn projector_for(app: &AppHandle) -> Result<(String, PathBuf), String> {
+    let (root, settings) = crate::root_and_settings(app)?;
+    let blocking_root = root.clone();
+    let probe_settings = settings.clone();
+    let assembly = tauri::async_runtime::spawn_blocking(move || {
+        status::assemble(&blocking_root, &probe_settings)
+    })
+    .await
+    .map_err(|e| format!("engine resolution failed: {e}"))??;
+    let weights = status::weights_dir(&root, &settings);
+    let model = assembly.model.name.clone();
+    match projector(&weights, &assembly.model) {
+        Projector::Unsupported => {
+            emit(
+                app,
+                AgentEvent::notice(NoticeCode::ModelTakesNoImages, &[("model", model.as_str())]),
+            );
+            Err(format!("{model} publishes no projector file"))
+        }
+        Projector::Absent { file } => {
+            emit(
+                app,
+                AgentEvent::notice(
+                    NoticeCode::ProjectorAbsent,
+                    &[("model", model.as_str()), ("file", file.as_str())],
+                ),
+            );
+            Err(format!(
+                "{model}'s projector {file} is not in {}",
+                weights.display()
+            ))
+        }
+        Projector::Present { file, path } => Ok((file, path)),
+    }
+}
+
 /// Start the supervised server, or report the guard's refusal to allow it.
 ///
 /// The refusal is emitted as `EngineBlocked` rather than only returned: the transcript has to show
 /// the blocker with its install action, which is the shape the acceptance criteria name.
-async fn launch(app: &AppHandle) -> Result<Running, String> {
+async fn launch(app: &AppHandle, vision_projector: Option<PathBuf>) -> Result<Running, String> {
     let (root, settings) = crate::root_and_settings(app)?;
     let blocking_root = root.clone();
     let probe_settings = settings.clone();
@@ -409,7 +522,7 @@ async fn launch(app: &AppHandle) -> Result<Running, String> {
         .as_ref()
         .ok_or("the load guard allowed a run with no resolved engine")?;
 
-    let tuning = tuning(&settings);
+    let tuning = tuning(&settings, vision_projector);
     let handle = start_server(
         LaunchRequest {
             root: &root,
@@ -445,37 +558,86 @@ async fn launch(app: &AppHandle) -> Result<Running, String> {
     Ok(running)
 }
 
-/// The live server's snapshot, if the child is still alive.
+/// What the slot holds that is still a child process, judged against the configuration this run needs.
+enum Live {
+    /// No server, or one that exited since it answered `/health` — that case is reaped here, its death
+    /// parked for [`Slot::begin`], because a relaunch has to know what it is replacing.
+    Nothing,
+    /// A server that is alive and answers this run as it stands. Boxed because a `Turn` carries the
+    /// whole request, and an enum sized by it would make every one of these returns a 1.3 KB copy.
+    Reuse(Box<Turn>),
+    /// A server that is alive but was started without what this run needs, so it is being replaced on
+    /// purpose. Nothing died: the handle comes out so the caller can shut it down with no lock held
+    /// and the restart budget stays where it was. Boxed for the same reason as [`Live::Reuse`].
+    Replace(Box<ServerHandle>),
+}
+
+/// The live server, if the child is still alive — and only a reuse if it can answer at all.
 ///
 /// A server that exited since it answered `/health` is released here, which reaps the child and frees
 /// its port, and the death is parked in the slot with its log: whether another one gets started is
 /// [`Slot::begin`]'s decision, since that is the place which knows both the budget and the
 /// configuration the next launch would use.
-fn live_turn(app: &AppHandle) -> Option<Turn> {
+fn live(app: &AppHandle, wanted: &LaunchTuning) -> Live {
     let state = app.state::<ChatState>();
     let mut slot = lock(&state.slot);
-    let running = slot.running.as_mut()?;
-    if running.handle.is_running() {
-        return Some(running.turn.clone());
-    }
-    let crash = Crash {
-        log: running.handle.log_tail(),
-        tuning: running.tuning.clone(),
+    let Some(running) = slot.running.as_mut() else {
+        return Live::Nothing;
     };
-    slot.running = None;
-    slot.note_death(crash);
-    None
+    if !running.handle.is_running() {
+        let crash = Crash {
+            log: running.handle.log_tail(),
+            tuning: running.tuning.clone(),
+        };
+        slot.running = None;
+        slot.note_death(crash);
+        return Live::Nothing;
+    }
+    if &running.tuning == wanted {
+        return Live::Reuse(Box::new(running.turn.clone()));
+    }
+    let running = slot
+        .running
+        .take()
+        .expect("a live server was just borrowed");
+    Live::Replace(Box::new(running.handle))
 }
 
-async fn ensure_running(app: &AppHandle) -> Result<Turn, String> {
-    if let Some(turn) = live_turn(app) {
-        return Ok(turn);
-    }
+async fn ensure_running(app: &AppHandle, needs: Needs) -> Result<Turn, String> {
     let settings = appearance::load_settings()?;
+    // Resolved before the slot is read, because whether this run can reuse the live server is exactly
+    // the question the projector answers, and a model that cannot take the picture is refused here
+    // rather than after a launch that would have to refuse it anyway.
+    let (vision_file, vision_projector) = match needs {
+        Needs::TextOnly => (None, None),
+        Needs::Projector => {
+            let (file, path) = projector_for(app).await?;
+            (Some(file), Some(path))
+        }
+    };
+    let wanted = tuning(&settings, vision_projector.clone());
+    match live(app, &wanted) {
+        Live::Reuse(turn) => return Ok(*turn),
+        Live::Replace(handle) => {
+            // The wait is the picture's cost, and it is the reload rather than the answer that takes the
+            // seconds, so it is named before the shutdown instead of looking like a slow first reply. A
+            // run that needs no projector is replacing the live server for some other reason — the
+            // settings moved under it — and that relaunch is the guard's to describe, so this stays
+            // quiet rather than sending a notice whose file name would be blank.
+            if let Some(file) = &vision_file {
+                emit(
+                    app,
+                    AgentEvent::notice(NoticeCode::ProjectorLoading, &[("file", file.as_str())]),
+                );
+            }
+            handle.shutdown().await;
+        }
+        Live::Nothing => {}
+    }
     let kind = {
         let state = app.state::<ChatState>();
         let mut slot = lock(&state.slot);
-        slot.begin(&tuning(&settings))?
+        slot.begin(&wanted)?
     };
     // Announced, not swallowed: a relaunch that said nothing would just look like a slow first
     // answer, and the reason the last one died is the only clue to what to change.
@@ -495,7 +657,7 @@ async fn ensure_running(app: &AppHandle) -> Result<Turn, String> {
             ),
         );
     }
-    let outcome = launch(app).await;
+    let outcome = launch(app, vision_projector).await;
     let state = app.state::<ChatState>();
     let mut slot = lock(&state.slot);
     slot.launching = false;
@@ -516,6 +678,34 @@ fn conversation(state: &ChatState, system_prompt: &str) -> Vec<Message> {
     }
     messages.extend(history.iter().cloned());
     messages
+}
+
+/// The user's side of a turn, with its picture still in it.
+///
+/// One place builds this because three readers have to agree on what was asked: the request that goes
+/// out now, the copy filed beside it, and the history a reopened conversation is rebuilt from.
+fn prompt(text: &str, image: Option<String>) -> Message {
+    match image {
+        Some(url) => Message::user_with_image(text, url),
+        None => Message::user(text),
+    }
+}
+
+/// The tokens the pictures in a request cost beyond what the server just counted.
+///
+/// [`prompt_tokens`] asks the server to template the messages and tokenize the string it gets back,
+/// and a picture is in that string only as the placeholder the template writes for it — the vision
+/// tokens the projector expands it into never pass through `/tokenize`. So the pre-check charges the
+/// launcher's own cap, once per picture, because the replay sends all of them again. Where the
+/// launcher leaves the cap off (a CUDA or ROCm decode, see [`IMAGE_TOKEN_CAP`]) this is the cheap
+/// reading of the cost, which is the direction a warning that arrives late is safer than one that
+/// arrives never.
+fn picture_tokens(request: &ChatRequest) -> u64 {
+    request
+        .messages
+        .iter()
+        .map(|m| m.images.len() as u64 * IMAGE_TOKEN_CAP as u64)
+        .sum()
 }
 
 async fn stream_turn(
@@ -568,7 +758,7 @@ pub async fn start_engine(app: AppHandle) -> Result<EngineView, String> {
         let state = app.state::<ChatState>();
         lock(&state.slot).re_arm();
     }
-    Ok(ensure_running(&app).await?.view)
+    Ok(ensure_running(&app, Needs::TextOnly).await?.view)
 }
 
 /// Release the engine and its port, so the weights stop occupying memory until something asks for
@@ -607,7 +797,7 @@ pub struct EngineStatus {
 pub fn engine_status(state: tauri::State<'_, ChatState>) -> EngineStatus {
     // Asked of the child, not of the slot. A server that died since it answered `/health` is not
     // running, and a status card that goes on naming its port is how a dead engine gets believed
-    // alive — the release and the restart stay with [`live_turn`], which is where a turn needs them.
+    // alive — the release and the restart stay with [`live`], which is where a turn needs them.
     let mut slot = lock(&state.slot);
     let mut view = None;
     if let Some(running) = slot.running.as_mut() {
@@ -684,15 +874,49 @@ fn run_report(reply: &Reply, elapsed: Duration) -> Option<RunReport> {
     })
 }
 
+/// The largest `data:` URL a picture crosses the boundary as.
+///
+/// The composer rescales before sending, so this is not a size the app aims at — it is the point past
+/// which the string is not a snapshot of a picture. The cost of getting it wrong is not one request:
+/// the URL is replayed into every later turn of the conversation, over the wire and into the filed
+/// copy, for as long as that conversation stays open.
+const IMAGE_MAX_CHARS: usize = 12 * 1024 * 1024;
+
+/// Whether a string is the base64 picture the launcher could hand to a projector.
+fn is_picture(url: &str) -> bool {
+    url.starts_with("data:image/") && url.contains(";base64,") && url.len() <= IMAGE_MAX_CHARS
+}
+
 /// Send one prompt to the local engine and stream the answer as `agent-event`s. The return value is
 /// the finished answer, so a listener that missed a delta can still close the turn.
+///
+/// `image` is the attached picture as a `data:` URL, and a prompt may be a picture with no text under
+/// it: "what is this?" is the reason the control exists. The picture goes into the history the way it
+/// went out, so every later turn of this conversation still has it in front of the model.
 #[tauri::command]
-pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
+pub async fn chat_send(
+    app: AppHandle,
+    text: String,
+    image: Option<String>,
+) -> Result<String, String> {
     let text = text.trim().to_string();
-    if text.is_empty() {
+    let image = image.filter(|url| !url.is_empty());
+    if let Some(url) = &image {
+        if !is_picture(url) {
+            return Err("the attached file is not a picture this engine can be given".into());
+        }
+    }
+    if text.is_empty() && image.is_none() {
         return Err("there is nothing to send".into());
     }
-    let turn = ensure_running(&app).await?;
+    // A picture already in the history needs the same projector as one arriving now: the replay below
+    // puts it back on the wire whether or not this prompt carries it.
+    let carries_picture = image.is_some() || {
+        let state = app.state::<ChatState>();
+        let held = lock(&state.history);
+        held.iter().any(|m| !m.images.is_empty())
+    };
+    let turn = ensure_running(&app, Needs::from_request(carries_picture)).await?;
     let state = app.state::<ChatState>();
     {
         let mut slot = lock(&state.slot);
@@ -718,7 +942,7 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
             local: status::local_badge(true, settings.privacy.allow_remote_providers),
         },
     );
-    lock(&state.history).push(Message::user(&text));
+    lock(&state.history).push(prompt(&text, image.clone()));
     // Filed before the request goes out rather than after the answer lands. A run that dies mid-stream
     // leaves the question on screen and nowhere else, and the one copy of what was asked that survives
     // the window is the copy in the conversation store.
@@ -729,6 +953,7 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
         &model_label,
         Role::User,
         &text,
+        image.clone(),
     );
     // Read before the request goes out and acted on after it lands: the replay this turn is about to
     // do is already too big for the window, but what the run did with that is only known once the
@@ -751,7 +976,9 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
     )
     .await
     {
-        Ok(sent) if leaves_no_room(sent, turn.view.context_tokens) => {
+        // Counted with the pictures charged on top, because the server's tokenize pass never sees
+        // them; see [`picture_tokens`].
+        Ok(sent) if leaves_no_room(sent + picture_tokens(&request), turn.view.context_tokens) => {
             let tokens = sent.to_string();
             let window = turn.view.context_tokens.to_string();
             emit(
@@ -784,6 +1011,7 @@ pub async fn chat_send(app: AppHandle, text: String) -> Result<String, String> {
                     &model_label,
                     Role::Assistant,
                     &reply.text,
+                    None,
                 );
             }
             if let Some(total) = reply.total_tokens {
@@ -901,12 +1129,13 @@ fn file_turn(
     model: &str,
     role: Role,
     text: &str,
+    image: Option<String>,
 ) {
     let session = {
         let mut cell = lock(&state.session);
         let session = cell.get_or_insert_with(|| Session::new(workspace, model, text));
         session.model = model.to_string();
-        session.push(role, text);
+        session.push(role, text, image);
         session.clone()
     };
     if let Err(why) = sessions::write(&session) {
@@ -967,7 +1196,10 @@ fn history_of(session: &Session) -> Vec<Message> {
         .turns
         .iter()
         .map(|turn| match turn.role {
-            Role::User => Message::user(&turn.text),
+            // The same builder the live turn used, so reopening a conversation replays the picture it
+            // was answered from rather than the words alone — and the engine is then asked for the
+            // projector it needs by the same check any other turn goes through.
+            Role::User => prompt(&turn.text, turn.image.clone()),
             Role::Assistant => Message::assistant(&turn.text),
         })
         .collect()
@@ -1008,9 +1240,9 @@ mod tests {
     #[test]
     fn a_reopened_conversation_goes_back_into_the_history_in_the_order_it_was_said() {
         let mut session = Session::new("smollm-studio", "model", "first question");
-        session.push(Role::User, "first question");
-        session.push(Role::Assistant, "first answer");
-        session.push(Role::User, "and then?");
+        session.push(Role::User, "first question", None);
+        session.push(Role::Assistant, "first answer", None);
+        session.push(Role::User, "and then?", None);
 
         // The same vector the run built the first time, so the next prompt continues this exchange
         // rather than answering a transcript the engine never held.
@@ -1076,9 +1308,9 @@ mod tests {
     #[test]
     fn leaving_the_gpu_switch_on_offloads_every_layer() {
         let settings = Settings::default();
-        assert_eq!(tuning(&settings).layers_override, None);
-        assert!(tuning(&settings).thinking);
-        assert_eq!(tuning(&settings).context_tokens, Some(32_768));
+        assert_eq!(tuning(&settings, None).layers_override, None);
+        assert!(tuning(&settings, None).thinking);
+        assert_eq!(tuning(&settings, None).context_tokens, Some(32_768));
     }
 
     #[test]
@@ -1087,14 +1319,14 @@ mod tests {
         // demo's `BONSAI_NGL=0` does.
         let mut settings = Settings::default();
         settings.local_model.offload_all_layers = false;
-        assert_eq!(tuning(&settings).layers_override, Some(0));
+        assert_eq!(tuning(&settings, None).layers_override, Some(0));
     }
 
     #[test]
     fn instruct_mode_switches_the_server_to_the_instruct_sampling_profile() {
         let mut settings = Settings::default();
         settings.sampling.non_thinking_mode = true;
-        assert!(!tuning(&settings).thinking);
+        assert!(!tuning(&settings, None).thinking);
     }
 
     #[test]
@@ -1241,7 +1473,7 @@ mod tests {
 
     #[test]
     fn a_server_that_dies_is_restarted_and_each_restart_is_counted() {
-        let tuning = tuning(&Settings::default());
+        let tuning = tuning(&Settings::default(), None);
         let mut slot = Slot::default();
         assert_eq!(slot.begin(&tuning), Ok(Launch::First));
 
@@ -1259,7 +1491,7 @@ mod tests {
 
     #[test]
     fn a_budget_spent_on_the_same_configuration_is_a_refusal_that_quotes_the_server() {
-        let tuning = tuning(&Settings::default());
+        let tuning = tuning(&Settings::default(), None);
         let mut slot = Slot::default();
         slot.begin(&tuning).unwrap();
         for _ in 1..=MAX_RESTARTS {
@@ -1287,7 +1519,7 @@ mod tests {
     fn changing_the_launch_configuration_is_a_new_attempt_not_a_spent_budget() {
         // The bound exists to stop the host retrying the same doomed launch, so the setting that
         // changes what is launched has to re-arm it: that is the documented fix for the common cause.
-        let was_tried = tuning(&Settings::default());
+        let was_tried = tuning(&Settings::default(), None);
         let mut slot = Slot::default();
         slot.begin(&was_tried).unwrap();
         for _ in 1..=MAX_RESTARTS {
@@ -1306,7 +1538,7 @@ mod tests {
 
     #[test]
     fn an_answer_that_finished_pays_for_the_deaths_before_it() {
-        let tuning = tuning(&Settings::default());
+        let tuning = tuning(&Settings::default(), None);
         let mut slot = Slot::default();
         slot.begin(&tuning).unwrap();
         died_under(&mut slot, &tuning).unwrap();
@@ -1317,12 +1549,120 @@ mod tests {
 
     #[test]
     fn one_launch_can_be_in_flight_at_a_time() {
-        let tuning = tuning(&Settings::default());
+        let tuning = tuning(&Settings::default(), None);
         let mut slot = Slot::default();
         slot.begin(&tuning).expect("the first start is allowed");
         assert_eq!(
             slot.begin(&tuning),
             Err("the engine is already starting".into())
         );
+    }
+
+    /// A file the renderer cannot hand to a projector is refused before a server is started for it,
+    /// because the alternative is a run that spends ten seconds loading weights to fail at the wire.
+    #[test]
+    fn only_an_encoded_picture_is_accepted() {
+        assert!(is_picture("data:image/jpeg;base64,/9j/4AAQSkZJRg=="));
+        // A `data:` URL of any other kind has no path to an answer: the engine reads images.
+        assert!(!is_picture("data:application/pdf;base64,JVBERi0="));
+        // And a raw path or a http URL is not bytes at all — the renderer shrinks and encodes first.
+        assert!(!is_picture("/Users/me/photo.jpg"));
+        assert!(!is_picture("https://example.com/photo.jpg"));
+        assert!(!is_picture("data:image/png"));
+        // Past the ceiling the request body is the problem, not the picture, and the sender's own
+        // limit is what says so.
+        assert!(!is_picture(&format!(
+            "data:image/jpeg;base64,{}",
+            "A".repeat(IMAGE_MAX_CHARS)
+        )));
+    }
+
+    /// The pre-check asks the server to tokenize the templated prompt, where a picture is only the
+    /// placeholder the template writes — so the vision tokens have to be charged here or a picture-heavy
+    /// conversation is announced as fitting the window it is about to overflow.
+    #[test]
+    fn each_attached_picture_is_charged_the_engines_own_image_cap() {
+        let mut request = ChatRequest::new(vec![
+            prompt("what is in this?", Some("data:image/jpeg;base64,AA".into())),
+            Message::assistant("a chart"),
+            prompt("and in this one?", Some("data:image/jpeg;base64,BB".into())),
+        ]);
+        assert_eq!(picture_tokens(&request), 2 * IMAGE_TOKEN_CAP as u64);
+        request.messages[0].images.clear();
+        request.messages[2].images.clear();
+        assert_eq!(picture_tokens(&request), 0, "a text-only run pays nothing");
+    }
+
+    /// A reopened conversation replays from the filed turns, so a picture that is not filed is a
+    /// prompt about a photo the model can no longer see.
+    #[test]
+    fn a_filed_picture_comes_back_into_the_history_with_its_prompt() {
+        let mut session = Session::new("smollm-studio", "model", "what is in this?");
+        session.push(
+            Role::User,
+            "what is in this?",
+            Some("data:image/jpeg;base64,/9j/".into()),
+        );
+        session.push(Role::Assistant, "a chart", None);
+        let history = history_of(&session);
+        assert_eq!(history[0].images.len(), 1, "the picture replays");
+        assert!(history[1].images.is_empty(), "the answer carries none");
+        // And a picture anywhere in the history is enough to require the projector, whether or not the
+        // prompt arriving now has one.
+        assert!(matches!(Needs::from_request(true), Needs::Projector));
+        assert!(matches!(Needs::from_request(false), Needs::TextOnly));
+    }
+
+    /// The default model publishes no projector, which is the reachability gap this host refuses on
+    /// rather than launching a server that would answer a picture with a guess.
+    #[test]
+    fn the_projector_a_model_publishes_is_what_decides_whether_pictures_are_possible() {
+        let dir = tempfile::tempdir().unwrap();
+        let weights = dir.path();
+        assert!(matches!(
+            projector(weights, &seeded("ternary-bonsai-1-7b")),
+            Projector::Unsupported
+        ));
+
+        let four = seeded("ternary-bonsai-2-4b");
+        let file = four
+            .recommended_vision()
+            .expect("the 4B publishes a projector")
+            .file
+            .clone();
+        assert!(matches!(
+            projector(weights, &four),
+            Projector::Absent { .. }
+        ));
+        // Present only at the published length: a torn file is the download's to fix, and starting a
+        // server on one would be a crash the status card already knows how to clear.
+        std::fs::write(weights.join(&file), "torn").unwrap();
+        assert!(matches!(
+            projector(weights, &four),
+            Projector::Absent { .. }
+        ));
+        // The published length of this pack is 366 MB, and a probe that is size-only cannot tell that
+        // from any other length — so the file is stood in for at a length of this test's choosing
+        // rather than written out at the cost of a download.
+        let mut at_length = four.clone();
+        let small = 4_096u64;
+        for proj in at_length.vision.iter_mut() {
+            proj.size_bytes = small;
+        }
+        std::fs::write(weights.join(&file), vec![0u8; small as usize]).unwrap();
+        match projector(weights, &at_length) {
+            Projector::Present { file: named, path } => {
+                assert_eq!(named, file);
+                assert_eq!(path, weights.join(&file));
+            }
+            other => panic!("expected the file at its published size to be present: {other:?}"),
+        }
+        // And the same file no longer at that length reads as absent again: the probe measures, it
+        // does not remember.
+        std::fs::write(weights.join(&file), "torn").unwrap();
+        assert!(matches!(
+            projector(weights, &at_length),
+            Projector::Absent { .. }
+        ));
     }
 }

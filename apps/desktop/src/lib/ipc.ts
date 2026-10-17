@@ -3,6 +3,21 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 
+/**
+ * Which of the twelve mascot ducks this launch wears, one-based, or `null` when nothing set it.
+ *
+ * The host decides before the page's own scripts run and hands the number over as a global, because a
+ * number the UI had to `invoke` for would put one duck in the window and another in the Dock for a
+ * moment, and the two are the same picture on purpose. Bounds belong to whoever has the tiles: this
+ * reports the number, it does not vouch for a count it cannot see.
+ */
+export const hostMascot: number | null = (() => {
+  const injected = (window as unknown as { smollmMascot?: unknown }).smollmMascot;
+  return typeof injected === "number" && Number.isInteger(injected) && injected >= 1
+    ? injected
+    : null;
+})();
+
 /** A packing the app can offer, as chosen for this machine by the catalog + hardware probe. */
 export type PackView = {
   key: string;
@@ -69,6 +84,12 @@ export type WeightsDownloaded = {
   sha256: string;
   path: string;
   sizeBytes: number;
+  /**
+   * The vision projector that came down with this pack, by name. Absent when the model publishes none
+   * and when this machine already had it — a picture cannot be answered without the file, so a press
+   * that fetched it says so instead of leaving the user to work out which of the two the button did.
+   */
+  projector?: string;
 };
 
 /** `smollm_desktop_lib::weights::Phase`, emitted on the `weights-download` event. */
@@ -294,8 +315,17 @@ export type SettingsDoc = {
   };
 };
 
-/** One side of an exchange, as the conversation store filed it. Mirrors `sessions::Turn`. */
-export type SessionTurn = { role: "user" | "assistant"; text: string };
+/**
+ * One side of an exchange, as the conversation store filed it. Mirrors `sessions::Turn`.
+ *
+ * `image` is a `data:<mime>;base64,…` URL, kept so a reopened conversation shows the picture the
+ * answer was given to rather than a prompt about a photo that is no longer there.
+ */
+export type SessionTurn = {
+  role: "user" | "assistant";
+  text: string;
+  image?: string;
+};
 
 /**
  * A filed conversation. Mirrors `sessions::Session`.
@@ -440,8 +470,12 @@ export const ipc = {
   /**
    * Send one prompt and stream the answer on `agent-event`. The promise settles when the run is
    * over, with the finished text — so a listener that missed a delta can still close the turn.
+   *
+   * `image` is a `data:<mime>;base64,…` URL. Asking with a picture is what makes the host start the
+   * engine with its vision projector, so the first one after a text-only run also pays a reload.
    */
-  chatSend: (text: string) => invoke<string>("chat_send", { text }),
+  chatSend: (text: string, image?: string) =>
+    invoke<string>("chat_send", { text, image: image ?? null }),
   /**
    * Start a new task: forget the conversation in flight and keep the server up. This is what the
    * sidebar's "New task" row is — the history the next request is built from is the only thing a new

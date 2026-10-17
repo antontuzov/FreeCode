@@ -61,6 +61,13 @@ pub enum Role {
 pub struct Turn {
     pub role: Role,
     pub text: String,
+    /// A prompt's attached picture, as the `data:` URL the engine was handed. Filed because the rule
+    /// above is the rule: it is part of what the model was told, and a reopened conversation that
+    /// replayed the question without it would answer a different question than the one on screen.
+    /// `skip_serializing_if` keeps every text-only line — which is all of them until a picture is
+    /// attached — exactly the file it was before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,10 +147,11 @@ impl Session {
         }
     }
 
-    pub fn push(&mut self, role: Role, text: &str) {
+    pub fn push(&mut self, role: Role, text: &str, image: Option<String>) {
         self.turns.push(Turn {
             role,
             text: text.to_string(),
+            image,
         });
         self.updated_at_ms = now_ms();
     }
@@ -401,8 +409,8 @@ mod tests {
 
     fn session(prompt: &str) -> Session {
         let mut session = Session::new("smollm-studio", "Ternary Bonsai 1.7B (PQ2_0)", prompt);
-        session.push(Role::User, prompt);
-        session.push(Role::Assistant, "an answer");
+        session.push(Role::User, prompt, None);
+        session.push(Role::Assistant, "an answer", None);
         session
     }
 
@@ -422,7 +430,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut first = session("first");
         write_in(dir.path(), &first).unwrap();
-        first.push(Role::User, "and then");
+        first.push(Role::User, "and then", None);
         write_in(dir.path(), &first).unwrap();
 
         assert_eq!(list_in(dir.path()).len(), 1);
@@ -548,8 +556,8 @@ mod tests {
     fn a_match_only_in_the_answer_still_found_is_named_as_one() {
         let dir = tempfile::tempdir().unwrap();
         let mut only = Session::new("smollm-studio", "m", "what did you say?");
-        only.push(Role::User, "what did you say?");
-        only.push(Role::Assistant, "the fork commit pins the engine");
+        only.push(Role::User, "what did you say?", None);
+        only.push(Role::Assistant, "the fork commit pins the engine", None);
         write_in(dir.path(), &only).unwrap();
 
         let hits = search_in(dir.path(), "pins the engine");
@@ -566,9 +574,10 @@ mod tests {
         mentioned.push(
             Role::Assistant,
             "the engine pin you asked about is in the catalog",
+            None,
         );
         let mut asked = session("where is the engine pin recorded?");
-        asked.push(Role::Assistant, "in the catalog");
+        asked.push(Role::Assistant, "in the catalog", None);
         write_in(dir.path(), &mentioned).unwrap();
         write_in(dir.path(), &asked).unwrap();
 

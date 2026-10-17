@@ -18,7 +18,8 @@ type ChatStore = {
   /** Set once the host has announced anything about the current send. */
   announced: boolean;
   refresh: () => Promise<void>;
-  send: (text: string) => Promise<void>;
+  /** A picture is a `data:` URL the composer shrank; a prompt may be nothing but one. */
+  send: (text: string, image?: string) => Promise<void>;
   stop: () => Promise<void>;
   start: () => Promise<void>;
   release: () => Promise<void>;
@@ -39,17 +40,18 @@ export const useChat = create<ChatStore>((set, get) => ({
       set({ engine: null, error: String(error) });
     }
   },
-  send: async (text) => {
+  send: async (text, image) => {
     const trimmed = text.trim();
-    if (!trimmed || get().sending) return;
+    // A picture alone is a question: "what is in this?" needs no words.
+    if ((!trimmed && !image) || get().sending) return;
     const transcript = useTranscript.getState();
     // The bubble appears on the click, not on the reply: the engine may be about to spend ten
     // seconds paging the pack into memory, and a window that shows nothing looks frozen.
-    transcript.pushPrompt(trimmed);
+    transcript.pushPrompt(trimmed, image);
     transcript.setRunning(true);
     set({ sending: true, error: null, announced: false });
     try {
-      await ipc.chatSend(trimmed);
+      await ipc.chatSend(trimmed, image);
     } catch (error) {
       // The transcript is where a send's failure belongs: the composer repeating it puts the same
       // sentence on screen twice, 200 px apart. A refusal or a dead stream already announced itself on

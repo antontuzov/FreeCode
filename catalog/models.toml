@@ -756,8 +756,10 @@ severity = "severe"
 # "use the Q8_0 mmproj. With the current fork build, the BF16 mmproj can crash llama-server when
 # several image requests run at once; Q8_0 is not affected and quality is nearly the same." The
 # launcher already takes `--mmproj` and pairs it with `--image-max-tokens 1024`
-# (crates/smollm-llama/src/launch.rs, from common.sh's `bonsai_image_max_tokens()`); what is not
-# built yet is the composer's image attachment, so no UI path reaches a projector from the app today.
+# (crates/smollm-llama/src/launch.rs, from common.sh's `bonsai_image_max_tokens()`), and the composer's
+# attach button is what asks for it: a prompt carrying a picture starts the server with this file
+# loaded, so the picture reaches it. Weight download fetches this pack with the model pack it belongs
+# to, and skips it when the machine already holds it at the published size.
 # For small or dense text in a picture the card raises the budget instead: `--image-min-tokens 1024`.
 key = "mmproj-Q8_0"
 file = "Ternary-Bonsai-2-4B-mmproj-Q8_0.gguf"

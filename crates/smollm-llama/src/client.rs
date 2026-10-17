@@ -87,6 +87,12 @@ pub enum Role {
 pub struct Message {
     pub role: Role,
     pub content: String,
+    /// For a `Role::User` turn: pictures, as `data:<mime>;base64,…` URLs, in the order attached. The
+    /// engine wants them on the wire as OpenAI's multimodal `content` array (see [`message_json`]) and
+    /// resolves each one against the projector launched with `--mmproj`; a request that carries one
+    /// while no projector is loaded is what the fork refuses. Empty means the plain string form, which
+    /// is what every text-only turn has always sent.
+    pub images: Vec<String>,
     /// For an assistant turn: the calls it made. Replayed so the template sees its own history; the
     /// reasoning that produced them is deliberately not part of the message.
     pub tool_calls: Vec<ToolCall>,
@@ -99,6 +105,7 @@ impl Message {
         Self {
             role,
             content: content.into(),
+            images: Vec::new(),
             tool_calls: Vec::new(),
             call_id: None,
         }
@@ -109,6 +116,14 @@ impl Message {
     }
     pub fn user(content: impl Into<String>) -> Self {
         Self::new(Role::User, content)
+    }
+    /// A prompt with a picture under it. The text may be empty — "what is this?" is the whole reason
+    /// the control exists — but the picture is not optional here, or this is just [`Message::user`].
+    pub fn user_with_image(content: impl Into<String>, image_data_url: impl Into<String>) -> Self {
+        Self {
+            images: vec![image_data_url.into()],
+            ..Self::new(Role::User, content)
+        }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
         Self::new(Role::Assistant, content)
@@ -230,7 +245,23 @@ pub fn clamp_budget(max_tokens: u32, context_tokens: u32, constraints: &AgentCon
 fn message_json(m: &Message, constraints: &AgentConstraints) -> Value {
     let mut obj = serde_json::Map::new();
     obj.insert("role".into(), json!(m.role));
-    obj.insert("content".into(), json!(m.content));
+    // A turn with pictures goes out as OpenAI's content *array*, with the text part first: the fork
+    // hands the array to the chat template as written, and the template's picture slots are filled in
+    // attachment order. The empty text part stays rather than vanishing, because a message of just
+    // `{"type":"image_url"}` is a shape no Bonsai template was written against — the string form it
+    // replaces was always present.
+    let content = if m.images.is_empty() {
+        json!(m.content)
+    } else {
+        let mut parts = vec![json!({ "type": "text", "text": m.content })];
+        parts.extend(
+            m.images
+                .iter()
+                .map(|url| json!({ "type": "image_url", "image_url": { "url": url } })),
+        );
+        Value::Array(parts)
+    };
+    obj.insert("content".into(), content);
     if let Some(id) = &m.call_id {
         obj.insert("tool_call_id".into(), json!(id));
     }
@@ -819,6 +850,53 @@ mod tests {
             body["messages"][0]["tool_calls"][0]["function"]["arguments"],
             "{\"path\":\"a.txt\"}"
         );
+    }
+
+    #[test]
+    fn a_picture_turn_goes_out_as_multimodal_content_and_a_text_one_does_not() {
+        let m = model();
+        // The regression this guards is the opposite one: turning `content` into an array for every
+        // message would change the body of every chat this app has ever sent.
+        let plain = chat_body(&ChatRequest::new(vec![Message::user("hi")]), &m, CTX).expect("body");
+        assert_eq!(plain["messages"][0]["content"], "hi");
+
+        let with_pic = chat_body(
+            &ChatRequest::new(vec![Message::user_with_image(
+                "what is this?",
+                "data:image/jpeg;base64,AAAA",
+            )]),
+            &m,
+            CTX,
+        )
+        .expect("body");
+        let content = with_pic["messages"][0]["content"]
+            .as_array()
+            .expect("an image turn sends an array");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "what is this?");
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(
+            content[1]["image_url"]["url"],
+            "data:image/jpeg;base64,AAAA"
+        );
+
+        // An attached picture with no question is still a request the template can render: the text
+        // part is present, empty.
+        let silent = chat_body(
+            &ChatRequest::new(vec![Message::user_with_image(
+                "",
+                "data:image/png;base64,BBBB",
+            )]),
+            &m,
+            CTX,
+        )
+        .expect("body");
+        let parts = silent["messages"][0]["content"]
+            .as_array()
+            .expect("an image turn sends an array");
+        assert_eq!(parts[0]["text"], "");
+        assert_eq!(parts.len(), 2);
     }
 
     #[test]

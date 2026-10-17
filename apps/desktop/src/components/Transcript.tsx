@@ -171,11 +171,22 @@ function TurnRow({
       <li
         ref={anchor}
         data-flash={flash ? "true" : undefined}
-        className="turn-anchor row-enter flex justify-end py-1.5"
+        className="turn-anchor row-enter flex flex-col items-end gap-1.5 py-1.5"
       >
-        <p className="max-w-[80%] whitespace-pre-wrap break-words rounded-[var(--radius-lg)] bg-accent-soft px-[var(--space-3)] py-1.5 text-quiet text-fg-strong">
-          {turn.text}
-        </p>
+        {turn.image && (
+          // The exact bytes the model was given, from the host's own history: a reopened conversation
+          // shows the picture its answer was about instead of a sentence describing one that is gone.
+          <img
+            src={turn.image}
+            alt={translate(locale, "transcript.picture")}
+            className="max-h-40 max-w-[80%] rounded-[var(--radius-lg)] border border-line object-cover"
+          />
+        )}
+        {turn.text && (
+          <p className="max-w-[80%] whitespace-pre-wrap break-words rounded-[var(--radius-lg)] bg-accent-soft px-[var(--space-3)] py-1.5 text-quiet text-fg-strong">
+            {turn.text}
+          </p>
+        )}
       </li>
     );
   }
@@ -219,7 +230,7 @@ function RowView({ row, locale }: { row: Row; locale: Locale }) {
 
 /** One prompt and the answer it got. `n` is the turn's position, spoken and titled but not drawn:
  *  the marker itself is a dash, and a column of numbers would be the loudest thing on the screen. */
-type Checkpoint = { id: string; n: number; text: string };
+type Checkpoint = { id: string; n: number; text: string; picture: boolean };
 
 /**
  * A checkpoint is a user turn: the question the pair is named after. Steps are not counted — they
@@ -230,15 +241,17 @@ function checkpointsOf(rows: Row[]): Checkpoint[] {
   const out: Checkpoint[] = [];
   for (const row of rows) {
     if (isTurn(row) && row.role === "user")
-      out.push({ id: row.id, n: out.length + 1, text: row.text });
+      out.push({ id: row.id, n: out.length + 1, text: row.text, picture: Boolean(row.image) });
   }
   return out;
 }
 
-/** The prompt in one line, for the marker's tooltip and accessible name. */
-function previewOf(text: string): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine;
+/** The prompt in one line, for the marker's tooltip and accessible name. A picture asked with no
+ * words has none to preview, so it is named by what it is rather than left blank. */
+function previewOf(checkpoint: Checkpoint, locale: Locale): string {
+  const oneLine = checkpoint.text.replace(/\s+/g, " ").trim();
+  if (oneLine) return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine;
+  return checkpoint.picture ? translate(locale, "transcript.checkpoint.picture") : "";
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -404,10 +417,10 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
                     type="button"
                     onClick={() => jump(c.id)}
                     data-active={c.id === active ? "true" : undefined}
-                    title={previewOf(c.text)}
+                    title={previewOf(c, locale)}
                     aria-label={translate(locale, "transcript.checkpoint", {
                       n: c.n,
-                      text: previewOf(c.text),
+                      text: previewOf(c, locale),
                     })}
                     className="checkpoint"
                   />

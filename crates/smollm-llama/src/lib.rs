@@ -37,7 +37,9 @@ pub use engine::{
 pub use install::{
     install, plan_for, prepare_scratch, tag_dir, unpack, Installed, Phase, PARTS_DIR, STAGING_DIR,
 };
-pub use launch::{context_from_ram, layers_to_offload, LaunchPlan, LaunchRequest, LaunchTuning};
+pub use launch::{
+    context_from_ram, layers_to_offload, LaunchPlan, LaunchRequest, LaunchTuning, IMAGE_TOKEN_CAP,
+};
 pub use load_guard::{
     caveat_matches, check, Blocker, BlockerCode, CallToAction, CtaCode, FileState, GuardReport,
     GuardRequest, Warning, WarningCode,

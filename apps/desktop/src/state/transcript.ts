@@ -109,6 +109,12 @@ export type Turn = {
   role: "user" | "assistant";
   text: string;
   /**
+   * The attached picture, as a `data:` URL, on the prompt that carried it. Display only to this row —
+   * the host holds the history and replays the picture itself, so a reopened conversation shows what
+   * the answer was given to instead of a sentence about a photo that is gone.
+   */
+  image?: string;
+  /**
    * The reasoning that streamed before the answer. Display only: the host replays the answer text
    * into the next request and never this, because re-rendered reasoning makes the fork's prompt
    * cache miss on every turn (Bonsai-demo#183).
@@ -309,7 +315,7 @@ type TranscriptStore = {
   /** Presets the run report for the fixture; a real run fills it from its own timings. */
   setLastRun: (run: RunReport | null) => void;
   /** The prompt's own row, added on send so the bubble appears before the engine answers. */
-  pushPrompt: (text: string) => void;
+  pushPrompt: (text: string, image?: string) => void;
   apply: (event: AgentEvent) => void;
 };
 
@@ -323,8 +329,10 @@ export const useTranscript = create<TranscriptStore>((set) => ({
   setRunning: (running) => set({ running, runStartedAt: running ? Date.now() : null }),
   setContextUsed: (contextUsed) => set({ contextUsed }),
   setLastRun: (lastRun) => set({ lastRun }),
-  pushPrompt: (text) =>
-    set((s) => ({ rows: [...s.rows, { id: nextId("turn"), kind: "turn", role: "user", text }] })),
+  pushPrompt: (text, image) =>
+    set((s) => ({
+      rows: [...s.rows, { id: nextId("turn"), kind: "turn", role: "user", text, image }],
+    })),
   apply: (event) =>
     set((s) => {
       const running =
@@ -358,7 +366,18 @@ export const useTranscript = create<TranscriptStore>((set) => ({
  * than an empty one, so the real rows arrive with the agent loop and this stays opt-in.
  */
 export const FIXTURE_ROWS: Row[] = [
-  { id: "fq", kind: "turn", role: "user", text: "continue" },
+  // A picture on the prompt, because the native window takes no injected clicks and the file panel a
+  // pick would open is not something a capture can drive: this row is how the attached-picture bubble
+  // gets looked at on the real surface. It is a stand-in for the JPEG bytes the composer produces, not
+  // a second format the app accepts.
+  {
+    id: "fq",
+    kind: "turn",
+    role: "user",
+    text: "continue",
+    image:
+      "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTYwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzNmN2Y2YSIvPjx0ZXh0IHg9IjEyIiB5PSI1OCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjAiIGZpbGw9IiNmZmZmZmY+cGljdHVyZTwvdGV4dD48L3N2Zz4=",
+  },
   { id: "f1", kind: "processed" },
   {
     id: "f1t",
