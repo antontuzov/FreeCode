@@ -21,6 +21,9 @@ smollm-config = { workspace = true }
 smollm-models = { workspace = true }
 smollm-llama = { workspace = true }
 smollm-core = { workspace = true }
+# The tool round runs the registry's read-only executors, so the host needs the sandbox policy and
+# the offered specs directly — `smollm-core` alone only carries the vocabulary.
+smollm-tools = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

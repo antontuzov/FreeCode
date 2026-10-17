@@ -10,7 +10,7 @@
 import { create } from "zustand";
 
 import { translate, type Locale } from "../i18n";
-import type { AgentEvent, RunReport } from "../lib/ipc";
+import type { AgentEvent, HostStep, HostStepStatus, RunReport } from "../lib/ipc";
 
 export type StepKind =
   | "processed"
@@ -227,6 +227,93 @@ function onOpenTurn(rows: Row[], mutate: (turn: Turn) => Turn): Row[] {
   return turn ? rows.map((row) => (row === turn ? mutate(turn) : row)) : rows;
 }
 
+/** The host's four states in the row's three. A call that failed and one that was refused both read as
+ * a problem line, and what tells them apart is the sentence under the label rather than its colour. */
+function hostStatus(status: HostStepStatus): StepStatus {
+  if (status === "done") return "ok";
+  if (status === "running") return "running";
+  return "error";
+}
+
+/**
+ * A host step as a row. `detail` is the path or pattern the call acted on, which the reference draws as
+ * the chip beside the label, and the outcome's one-line summary is the sentence under it. Both are
+ * measurements: "Read file" and "3 lines" are the catalog's words, and `verify-transcript-i18n` is what
+ * keeps the kind's key on both sides.
+ */
+function hostRow(step: HostStep, summary?: string): Step {
+  return {
+    id: step.id,
+    kind: step.kind,
+    subject: step.detail || undefined,
+    detail: summary,
+    status: hostStatus(step.status),
+  };
+}
+
+/**
+ * Where a step row goes: above the answer the run is still writing.
+ *
+ * A round that said something before it asked for a tool leaves that sentence in the answer row, which
+ * would then sit *under* the read it promised. So a row that has already spoken closes, and the next
+ * round writes into a fresh one below the tool rows: the transcript keeps the order the run produced,
+ * and each row still holds one continuous piece of prose.
+ */
+function pushStep(rows: Row[], step: Step): Row[] {
+  const turn = openTurn(rows);
+  if (!turn) return [...rows, step];
+  const at = rows.indexOf(turn);
+  if (!turn.text && !turn.thought) return [...rows.slice(0, at), step, ...rows.slice(at)];
+  return [
+    ...rows.slice(0, at),
+    { ...turn, streaming: false },
+    step,
+    ...rows.slice(at + 1),
+    {
+      id: nextId("turn"),
+      kind: "turn",
+      role: "assistant",
+      text: "",
+      streaming: true,
+      local: turn.local,
+    },
+  ];
+}
+
+/** A row a tool opened, which is what a batch header may claim. Notices and refusals are `blocked`
+ * rows that a run produced alongside those tools, and folding one under "Ran 2 tools" would say the
+ * batch ran it. */
+function isToolStep(row: Row): boolean {
+  return !isTurn(row) && row.kind !== "toolBatch" && row.kind !== "blocked";
+}
+
+/**
+ * The round's header, taking the tool rows it counts as its children. They are already the run's tail —
+ * each opened as its call ran — so the header folds them rather than repeating them, which is how the
+ * reference draws one collapsible "Ran N tools" line per round.
+ */
+function closeBatch(rows: Row[], header: Step): Row[] {
+  const turn = openTurn(rows);
+  const end = turn ? rows.indexOf(turn) : rows.length;
+  let start = end;
+  while (start > 0) {
+    const row = rows[start - 1];
+    if (!row || !isToolStep(row)) break;
+    start -= 1;
+  }
+  const children = rows.slice(start, end) as Step[];
+  if (children.length === 0) return rows;
+  return [...rows.slice(0, start), { ...header, children }, ...rows.slice(end)];
+}
+
+/** The row a finished call leaves: replaced in place, so its position in the run does not move when
+ * its outcome arrives. A step that never opened a row (a window that re-rendered mid-round) is appended
+ * rather than dropped, because a call that ran and shows nothing is the worse failure. */
+function finishStep(rows: Row[], step: HostStep, summary: string): Row[] {
+  if (!rows.some((row) => row.id === step.id)) return pushStep(rows, hostRow(step, summary));
+  return rows.map((row) => (row.id === step.id ? hostRow(step, summary) : row));
+}
+
 function reduce(rows: Row[], event: AgentEvent): Row[] {
   switch (event.type) {
     case "runStarted":
@@ -248,6 +335,14 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
       }));
     case "answerDelta":
       return onOpenTurn(rows, (turn) => ({ ...turn, text: `${turn.text}${event.text}` }));
+    case "toolStarted":
+      return pushStep(rows, hostRow(event.step));
+    case "toolFinished":
+      return finishStep(rows, event.step, event.outcome.summary);
+    case "toolBatchClosed":
+      // The header arrives when the round is over, so it never renders the live dot its own rows had
+      // while they ran — the host's step is still in its opening state, and the batch is not.
+      return closeBatch(rows, { ...hostRow(event.step), status: "ok" });
     case "runFinished":
       return onOpenTurn(rows, (turn) => ({
         ...turn,

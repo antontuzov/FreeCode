@@ -3568,6 +3568,7 @@ dependencies = [
  "smollm-core",
  "smollm-llama",
  "smollm-models",
+ "smollm-tools",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
@@ -3617,12 +3618,15 @@ dependencies = [
 name = "smollm-tools"
 version = "0.1.0"
 dependencies = [
+ "glob",
+ "regex",
  "serde",
  "serde_json",
  "smollm-config",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "walkdir",
 ]
 
 [[package]]

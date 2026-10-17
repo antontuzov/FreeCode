@@ -193,11 +193,6 @@ export type RunReport = {
 };
 
 /**
- * `smollm_core::AgentEvent` on the `agent-event` channel. Only the variants this host can emit are
- * listed: the tool-step variants arrive with the agent loop, and their payloads are Rust
- * `TranscriptStep`s rather than the UI's own row shape, so they get their mapping then.
- */
-/**
  * `smollm_core::NoticeCode`: what a run worked around rather than refused. The wire spelling is the
  * Rust enum's kebab-case and each code names a `notice.<code>` sentence in both locale catalogs, with
  * `params` filling the fields that sentence interpolates — the host measures, the catalog owns the
@@ -206,13 +201,78 @@ export type RunReport = {
  */
 export type NoticeParams = Record<string, string>;
 
+/**
+ * `smollm_core::transcript::StepKind` in its camelCase wire spelling. The set is the UI's own row
+ * vocabulary, so a kind the host adds is a type error here until the transcript and both locale
+ * catalogs have it — which is the point of declaring it twice.
+ */
+export type HostStepKind =
+  | "processed"
+  | "toolBatch"
+  | "running"
+  | "thought"
+  | "terminal"
+  | "editFile"
+  | "readFile"
+  | "searchContent"
+  | "tool"
+  | "contextCompressed"
+  | "subagent"
+  | "artifact"
+  | "webReading"
+  | "source"
+  | "blocked";
+
+/** `smollm_core::transcript::StepStatus`. */
+export type HostStepStatus = "running" | "done" | "blocked" | "failed";
+
+/**
+ * `smollm_core::transcript::TranscriptStep`: one row as the host declares it.
+ *
+ * The host owns which row exists and what it measured; the catalog owns the words around it. `params`
+ * carries the numbers a label interpolates, and `detail` the path or pattern the call acted on, which
+ * the transcript shows as the row's chip rather than inside a sentence.
+ */
+export type HostStep = {
+  id: string;
+  kind: HostStepKind;
+  params: Record<string, string | number>;
+  status: HostStepStatus;
+  detail: string;
+  /** The registry id, which is what tells a generic "Ran tool" row which tool it ran. */
+  toolId: string | null;
+  collapsedByDefault: boolean;
+};
+
+/**
+ * `smollm_core::events::ToolOutcome`. Only the two fields a read can answer with are here: the rest of
+ * the Rust struct — an exit code, a diff, artifacts — belongs to a build that writes and runs, and this
+ * one does neither.
+ */
+export type HostToolOutcome = {
+  ok: boolean;
+  summary: string;
+};
+
+/**
+ * `smollm_core::AgentEvent` on the `agent-event` channel. Only the variants this host can emit are
+ * listed. A tool step arrives as the Rust `TranscriptStep` the host built for it rather than as the
+ * UI's own row shape, because which row exists and what it measured is the host's answer; how it reads
+ * is the catalog's, which is why the transcript maps one onto the other instead of trusting the wire.
+ */
 export type AgentEvent =
   | { type: "runStarted"; runId: string; modelLabel: string; local: boolean }
   | { type: "thoughtDelta"; text: string }
   | { type: "answerDelta"; text: string }
+  /** A tool row opens while the call runs, and closes with the outcome under it. The batch header
+   * arrives last, counting the rows the round opened rather than the calls the model made. */
+  | { type: "toolStarted"; step: HostStep }
+  | { type: "toolFinished"; step: HostStep; outcome: HostToolOutcome }
+  | { type: "toolBatchClosed"; step: HostStep }
   | { type: "engineBlocked"; info: BlockedInfo }
   | { type: "warning"; code: string; params: NoticeParams }
-  /** `totalDiff` is the "+N −M" pill's running total, which the tool loop is what produces.
+  /** `totalDiff` is the "+N −M" pill's running total. The loop this build runs only reads a
+   * workspace, so it has nothing to stage and this stays null.
    * `contextUsed` is the percent of the window the finished run left filled, counted by the server;
    * null when the stream never reported its usage frame. `run` is what the run cost, and it is null
    * unless the server timed it — a stopped stream never gets that far. */
@@ -473,9 +533,17 @@ export const ipc = {
    *
    * `image` is a `data:<mime>;base64,…` URL. Asking with a picture is what makes the host start the
    * engine with its vision projector, so the first one after a text-only run also pays a reload.
+   *
+   * `tools` is the composer's Coding control. Off, the host sends one request and answers in prose,
+   * and a tool call the model emits anyway is a notice. On, the four read-only tools are offered and
+   * each call the model asks for becomes a transcript row.
    */
-  chatSend: (text: string, image?: string) =>
-    invoke<string>("chat_send", { text, image: image ?? null }),
+  chatSend: (text: string, image?: string, tools?: boolean) =>
+    invoke<string>("chat_send", {
+      text,
+      image: image ?? null,
+      tools: tools ?? false,
+    }),
   /**
    * Start a new task: forget the conversation in flight and keep the server up. This is what the
    * sidebar's "New task" row is — the history the next request is built from is the only thing a new

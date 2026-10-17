@@ -1,21 +1,29 @@
-//! Agent tools: their declarations, their permission classes, and the sandbox every path goes
-//! through.
+//! Agent tools: their declarations, their permission classes, the sandbox every path goes through,
+//! and the executors that answer from it.
 //!
-//! Two pieces, both free of I/O so they can be tested and reasoned about:
+//! Three pieces:
 //!   * [`registry`] — the tool list the model is handed, with a JSON schema and a
 //!     [`PermissionClass`] per entry, plus the OpenAI-shaped `tools` payload;
-//!   * [`sandbox`] — lexical + canonicalized containment, protected paths, and the network gate.
+//!   * [`sandbox`] — lexical + canonicalized containment, protected paths, and the network gate;
+//!   * [`exec`] — the read-only executors, and [`exec::execute`] as the one entry point that runs a
+//!     call after [`authorize`] has cleared it.
 //!
-//! Executors (running the command, applying the diff) arrive with the agent loop in Phase 3. The
-//! engine's tool-call quirk is already accounted for here: an empty `arguments` object must be sent
-//! as `"{}"`, because the fork answers HTTP 500 otherwise (llama.cpp#112).
+//! Writes, shells and network calls still have no executor here: a loop that offers a tool has to be
+//! able to say *why* it refused one, which is what [`ToolsError::NoExecutor`] is for. The engine's
+//! tool-call quirk is already accounted for here: an empty `arguments` object must be sent as `"{}"`,
+//! because the fork answers HTTP 500 otherwise (llama.cpp#112).
 
+pub mod exec;
 pub mod registry;
 pub mod sandbox;
 
 use std::path::Path;
 
-pub use registry::{find, registry, summary, tool_specs, ToolCall, ToolDescriptor};
+pub use exec::{execute, Executed, MAX_RESULT_BYTES};
+pub use registry::{
+    executable_specs, find, is_executable, registry, summary, tool_specs, ToolCall, ToolDescriptor,
+    EXECUTABLE,
+};
 pub use sandbox::{Access, SandboxPolicy, SandboxViolation};
 
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +34,14 @@ pub enum ToolsError {
     PermissionDenied(String, &'static str),
     #[error("tool {0} needs a configured remote provider before it can run")]
     NetworkNotConfigured(String),
+    #[error("this build has no executor for {0}: it is declared but not implemented")]
+    NoExecutor(String),
+    #[error("{tool} could not read {path} ({reason})")]
+    Io {
+        tool: String,
+        path: String,
+        reason: String,
+    },
     #[error(transparent)]
     Sandbox(#[from] SandboxViolation),
     #[error("invalid arguments for {tool}: {reason}")]

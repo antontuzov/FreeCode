@@ -5,6 +5,7 @@
 //! from `smollm-models` / `smollm-llama` / `smollm-config`. Commands are `async` so the blocking
 //! hardware probe and header parse run on the async runtime instead of the event-loop thread.
 
+mod agent;
 mod appearance;
 mod brand;
 mod chat;

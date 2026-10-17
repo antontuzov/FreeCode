@@ -41,11 +41,20 @@ use smollm_llama::{
 };
 use smollm_models::{gguf, IntegrityStatus, ModelEntry};
 
-use crate::{appearance, sessions, status};
+use crate::{agent, appearance, sessions, status};
 use sessions::{Role, Session};
 
 /// Event name the transcript subscribes to for the duration of the window.
 pub const EVENT: &str = "agent-event";
+
+/// How many rounds of tool calls one answer may take before the run answers without more reading.
+///
+/// The bound is about cost rather than about correctness: every round replays the whole conversation
+/// plus everything the round before it read, so the window fills by one tool result per round no
+/// matter what the model does with it, and a 1.7B model that has decided to keep looking needs to be
+/// stopped out loud rather than left to page the context full. Four is the number of reads a question
+/// about this workspace can be answered with — list it, find the file, read it, search the rest.
+const MAX_TOOL_ROUNDS: usize = 4;
 
 /// Sized for the largest pack the catalog offers, not the default one: a cold first load pages 5.95 GB
 /// of weights in from disk, and the observed warm load of that file on an M1 was under 11 s, so this is
@@ -742,12 +751,28 @@ fn picture_tokens(request: &ChatRequest) -> u64 {
         .sum()
 }
 
+/// Stream one round of an answer.
+///
+/// `offered` is whether this run put tools on the request. A call arriving without any is the model
+/// emitting one anyway and has to be said out loud, because the answer text is truncated at that
+/// point and silence reads as a stalled server. With tools offered the same delta is simply the call
+/// the loop is about to run, and [`agent::run_batch`] gives it a row — two announcements for one event
+/// would put the same tool in the transcript twice.
+/// The two halves of an interruption, which always travel together: the flag a Stop press sets for
+/// whichever run is live, and the flag that run sets to record that it saw the press. One round that
+/// could halt a stream without recording the halt would leave the transcript holding an answer and no
+/// way to say it was cut short.
+struct Stops<'a> {
+    requested: &'a AtomicBool,
+    stopped: &'a AtomicBool,
+}
+
 async fn stream_turn(
     app: &AppHandle,
     turn: &Turn,
     request: &ChatRequest,
-    stop_requested: &AtomicBool,
-    stopped: &AtomicBool,
+    offered: bool,
+    stops: &Stops<'_>,
 ) -> Result<Reply, String> {
     let sink = app.clone();
     let on_delta = move |deltas: &[ReplyDelta]| {
@@ -755,22 +780,23 @@ async fn stream_turn(
             let event = match delta {
                 ReplyDelta::Thought(text) => AgentEvent::ThoughtDelta { text: text.clone() },
                 ReplyDelta::Answer(text) => AgentEvent::AnswerDelta { text: text.clone() },
-                // Nothing asked for a tool call: the chat path sends no `tools`, so this is the model
-                // emitting one anyway. Said out loud rather than dropped, because the answer text is
-                // truncated at that point and silence would read as a stalled server.
                 ReplyDelta::ToolCall { name, .. } => {
+                    if offered {
+                        // The row for this call arrives with the round's batch, a moment from now.
+                        continue;
+                    }
                     let name = name.clone().unwrap_or_default();
                     AgentEvent::notice(NoticeCode::ToolCallWithoutTools, &[("name", name.as_str())])
                 }
             };
             emit(&sink, event);
         }
-        if !stop_requested.load(Ordering::Relaxed) {
+        if !stops.requested.load(Ordering::Relaxed) {
             return StreamControl::Continue;
         }
         // Recorded here instead of reading the request flag afterwards: a click that lands after the
         // last chunk would otherwise label a complete answer as one that was stopped.
-        stopped.store(true, Ordering::Relaxed);
+        stops.stopped.store(true, Ordering::Relaxed);
         StreamControl::Stop
     };
     smollm_llama::stream_chat(
@@ -782,6 +808,123 @@ async fn stream_turn(
     )
     .await
     .map_err(|e| e.to_string())
+}
+
+/// The request for one round: the history as the host holds it now, with the run's own budget and the
+/// tools the composer asked for.
+///
+/// Rebuilt per round rather than extended, because the only thing a round adds is in the history — and
+/// the system prompt is read fresh, so a Settings change made mid-run is in the next request.
+fn request_for(state: &ChatState, settings: &Settings, turn: &Turn, tools: bool) -> ChatRequest {
+    let mut request = ChatRequest::new(conversation(state, &settings.sampling.system_prompt));
+    request.max_tokens = turn.max_tokens;
+    request.reasoning_effort = Some(turn.effort.clone());
+    if tools {
+        // Only the four reads this build has executors for: a schema the host cannot run is a promise
+        // the model would be asked to break.
+        request.tools = smollm_tools::executable_specs();
+    }
+    request
+}
+
+/// Whether the answer stopped to ask for a tool rather than finishing in prose.
+fn wants_tools(reply: &Reply) -> bool {
+    !reply.tool_calls.is_empty()
+}
+
+/// Ask, run what the answer calls for, and ask again — until the model answers in prose.
+///
+/// Each round replays the whole conversation with the previous round's calls and their results inside
+/// it, so the window grows by a tool result per round: the prompt is measured again before each
+/// follow-up, and one that no longer fits stops the loop rather than letting the server drop the
+/// beginning of the task in silence. [`MAX_TOOL_ROUNDS`] is the second guard, for a model that keeps
+/// calling and never answers.
+///
+/// The final `Reply` is the one that came in prose. A round that was refused a follow-up leaves the
+/// last text the model wrote standing as the answer, which is what the user sees either way — and the
+/// notice above it says why it stopped.
+async fn run_rounds(
+    app: &AppHandle,
+    state: &ChatState,
+    turn: &Turn,
+    settings: &Settings,
+    mut request: ChatRequest,
+    tools: bool,
+    stops: &Stops<'_>,
+) -> Result<Reply, String> {
+    let mut reply = stream_turn(app, turn, &request, tools, stops).await?;
+    if !tools {
+        return Ok(reply);
+    }
+    // Built here rather than by the caller: a chat with the control off does not need a workspace at
+    // all, and a machine with no coding project open must keep answering plain questions. Asked once,
+    // because the root does not move inside a run.
+    let policy = agent::policy_for(app, settings)?;
+    let mut rounds = 0usize;
+    while wants_tools(&reply) && !stops.stopped.load(Ordering::Relaxed) {
+        if rounds == MAX_TOOL_ROUNDS {
+            let cap = MAX_TOOL_ROUNDS.to_string();
+            emit(
+                app,
+                AgentEvent::notice(NoticeCode::ToolLoopCapped, &[("rounds", cap.as_str())]),
+            );
+            break;
+        }
+        rounds += 1;
+        let calls = reply.tool_calls.clone();
+        // The reads go on the blocking pool: a walk of the workspace is exactly the kind of thing the
+        // event loop must not wait on, and the rows it emits are events, not replies.
+        let (host, batch_settings, batch_policy, batch_calls) =
+            (app.clone(), settings.clone(), policy.clone(), calls.clone());
+        let ran = tauri::async_runtime::spawn_blocking(move || {
+            agent::run_batch(&host, &batch_calls, &batch_settings, &batch_policy)
+        })
+        .await
+        .map_err(|e| format!("the tool round stopped: {e}"))?;
+        agent::close_batch(app, &calls);
+
+        // The replay the fork's template needs: the assistant's own call list, then one result per
+        // `call_id`. Both go in even for a call that was refused, because a call with no answer at all
+        // is what makes the next prompt untemplateable.
+        {
+            let mut history = lock(&state.history);
+            history.push(Message {
+                tool_calls: calls,
+                ..Message::assistant(reply.text.clone())
+            });
+            for one in &ran {
+                history.push(Message::tool_result(&one.call_id, &one.result));
+            }
+        }
+
+        request = request_for(state, settings, turn, tools);
+        // Measured again for the same reason the first prompt is: a conversation that filled the window
+        // during this run cannot be replayed, and the server would answer from its tail without saying
+        // it dropped the task.
+        if let Ok(sent) = prompt_tokens(
+            &turn.view.base_url,
+            &request,
+            &turn.model,
+            turn.view.context_tokens,
+        )
+        .await
+        {
+            if leaves_no_room(sent + picture_tokens(&request), turn.view.context_tokens) {
+                let tokens = sent.to_string();
+                let window = turn.view.context_tokens.to_string();
+                emit(
+                    app,
+                    AgentEvent::notice(
+                        NoticeCode::PromptTooLong,
+                        &[("tokens", tokens.as_str()), ("window", window.as_str())],
+                    ),
+                );
+                break;
+            }
+        }
+        reply = stream_turn(app, turn, &request, tools, stops).await?;
+    }
+    Ok(reply)
 }
 
 /// Start the engine on request. Explicit, so it re-arms the restart budget — a press is the user
@@ -927,11 +1070,16 @@ fn is_picture(url: &str) -> bool {
 /// `image` is the attached picture as a `data:` URL, and a prompt may be a picture with no text under
 /// it: "what is this?" is the reason the control exists. The picture goes into the history the way it
 /// went out, so every later turn of this conversation still has it in front of the model.
+///
+/// `tools` is the composer's Coding control. Off, this is the chat it has always been: one request,
+/// one streamed answer, and a tool call the model emits anyway becomes a notice. On, the four
+/// read-only tools are offered and [`run_rounds`] answers what the model asks for.
 #[tauri::command]
 pub async fn chat_send(
     app: AppHandle,
     text: String,
     image: Option<String>,
+    tools: bool,
 ) -> Result<String, String> {
     let text = text.trim().to_string();
     let image = image.filter(|url| !url.is_empty());
@@ -993,9 +1141,7 @@ pub async fn chat_send(
     // do is already too big for the window, but what the run did with that is only known once the
     // server reports its own count.
     let outgrew = outgrew_window(*lock(&state.last_fill), turn.view.context_tokens);
-    let mut request = ChatRequest::new(conversation(&state, &settings.sampling.system_prompt));
-    request.max_tokens = turn.max_tokens;
-    request.reasoning_effort = Some(turn.effort.clone());
+    let request = request_for(&state, &settings, &turn, tools);
 
     // Asked of the server, because the size that decides whether the prompt fits is the size the
     // server counts it at — and asked before the run, because the notice above can only reach a
@@ -1031,7 +1177,11 @@ pub async fn chat_send(
     };
 
     let started = Instant::now();
-    let outcome = stream_turn(&app, &turn, &request, &state.stop_requested, &stopped).await;
+    let stops = Stops {
+        requested: &state.stop_requested,
+        stopped: &stopped,
+    };
+    let outcome = run_rounds(&app, &state, &turn, &settings, request, tools, &stops).await;
     lock(&state.slot).streaming = false;
 
     match outcome {

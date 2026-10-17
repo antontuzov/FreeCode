@@ -1,13 +1,14 @@
 //! The tool registry: one description of every capability the agent may reach for, with the
 //! permission class that gates it and the JSON schema the model is handed.
 //!
-//! The executors land in Phase 3; what lives here is the contract they all obey — a tool cannot
-//! exist unless it has an id, a schema, and a declared permission class, because both the approval
-//! engine and the sandbox make decisions from those two facts alone.
+//! What lives here is the contract every executor obeys — a tool cannot exist unless it has an id, a
+//! schema, and a declared permission class, because both the approval engine and the sandbox make
+//! their decisions from those two facts alone. Only [`EXECUTABLE`] of them have an executor yet, in
+//! [`crate::exec`]; the rest wait on the write and shell halves of the loop.
 //!
-//! One detail from `KNOWN_ISSUES.md` is baked into [`tool_specs`]: this model emits tool calls whose
-//! `arguments` are empty or non-JSON, and the fork's server answers those with HTTP 500 (issue
-//! #112), so callers must normalize an empty argument object to `"{}"` before replaying a call.
+//! One detail from `KNOWN_ISSUES.md` is baked into [`ToolCall::arguments_wire`]: this model emits tool
+//! calls whose `arguments` are empty or non-JSON, and the fork's server answers those with HTTP 500
+//! (issue #112), so callers must normalize an empty argument object to `"{}"` before replaying a call.
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -453,17 +454,41 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
     registry()
         .into_iter()
         .filter(|t| allow_network || !t.requires_network)
-        .map(|t| {
-            json!({
-                "type": "function",
-                "function": {
-                    "name": t.id,
-                    "description": t.description,
-                    "parameters": t.input_schema,
-                }
-            })
-        })
+        .map(spec)
         .collect()
+}
+
+/// The tools this build can actually run: the four workspace reads whose executors live in
+/// [`crate::exec`].
+///
+/// The rest of the registry is a declaration with no verb behind it — a schema, a permission class,
+/// and nothing that touches the disk. Offering one of those would invite the model to ask for an edit
+/// or a shell command that can only come back refused, so a run that carries tools hands over this
+/// list and nothing else.
+pub const EXECUTABLE: &[&str] = &["read_file", "list_dir", "glob", "grep_search"];
+
+pub fn is_executable(tool_id: &str) -> bool {
+    EXECUTABLE.contains(&tool_id)
+}
+
+/// The declaration side for [`EXECUTABLE`] only.
+pub fn executable_specs() -> Vec<Value> {
+    registry()
+        .into_iter()
+        .filter(|t| is_executable(t.id))
+        .map(spec)
+        .collect()
+}
+
+fn spec(t: ToolDescriptor) -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": t.id,
+            "description": t.description,
+            "parameters": t.input_schema,
+        }
+    })
 }
 
 pub fn find(tool_id: &str) -> Option<ToolDescriptor> {
@@ -591,5 +616,24 @@ mod tests {
             summary("git_commit", &json!({ "message": "Add guard\n\nbody"}))
                 .starts_with("Commit: Add guard")
         );
+    }
+
+    /// A tool with no executor must not be offered: the model would ask for an edit or a command and
+    /// every round of that is a refusal the run has to explain.
+    #[test]
+    fn only_the_reads_with_executors_are_offered_to_a_run() {
+        for id in EXECUTABLE {
+            assert!(
+                find(id).is_some_and(|t| t.is_read_only()),
+                "{id} is offered and not a read"
+            );
+        }
+        assert!(!is_executable("write_file"));
+        assert!(!is_executable("terminal"));
+        // `codebase_search` is a declared read with no index behind it, so it stays out too.
+        assert!(!is_executable("codebase_search"));
+        let specs = executable_specs();
+        assert_eq!(specs.len(), EXECUTABLE.len());
+        assert!(specs.iter().all(|s| s["type"] == json!("function")));
     }
 }

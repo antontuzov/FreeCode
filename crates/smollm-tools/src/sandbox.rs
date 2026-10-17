@@ -176,6 +176,32 @@ impl SandboxPolicy {
         None
     }
 
+    /// The protected-location rules for one already-resolved path, as the violation they amount to.
+    fn violation_at(&self, resolved: &Path, shown: &str) -> Option<SandboxViolation> {
+        if let Some(hit) = self.is_denied(resolved) {
+            return Some(SandboxViolation::DeniedPath {
+                path: shown.to_string(),
+                hit,
+            });
+        }
+        DENIED_DIRS.iter().find_map(|dir| {
+            contains_dir(resolved, Path::new(dir)).then(|| SandboxViolation::DeniedDirectory {
+                path: shown.to_string(),
+                hit: (*dir).to_string(),
+            })
+        })
+    }
+
+    /// Whether `path` names something a call may never touch, without resolving it.
+    ///
+    /// The directory walkers need this: they are already inside the workspace, so containment is
+    /// settled, but a walk must not *enumerate* a `.env` or a `.ssh` either — a listing is an answer
+    /// the same way the file's contents are.
+    pub fn is_protected(&self, path: &Path) -> bool {
+        self.violation_at(path, &path.display().to_string())
+            .is_some()
+    }
+
     /// The one entry point tools use: resolve `raw` for `access` or return the reason it is
     /// refused.
     pub fn resolve_path(&self, raw: &Path, access: Access) -> Result<PathBuf, SandboxViolation> {
@@ -183,16 +209,8 @@ impl SandboxPolicy {
         let resolved = self.resolve(&candidate);
         let shown = resolved.display().to_string();
 
-        if let Some(hit) = self.is_denied(&resolved) {
-            return Err(SandboxViolation::DeniedPath { path: shown, hit });
-        }
-        for dir in DENIED_DIRS {
-            if contains_dir(&resolved, Path::new(dir)) {
-                return Err(SandboxViolation::DeniedDirectory {
-                    path: shown.clone(),
-                    hit: (*dir).to_string(),
-                });
-            }
+        if let Some(violation) = self.violation_at(&resolved, &shown) {
+            return Err(violation);
         }
 
         let root = self.resolve(&self.workspace_root);
@@ -369,6 +387,28 @@ mod tests {
             p.resolve_path(&link, Access::Write).is_err(),
             "canonicalization must defeat the symlink"
         );
+    }
+
+    #[test]
+    fn a_walk_can_ask_the_protected_question_without_resolving_a_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = policy(dir.path());
+        // The predicate the directory walkers need: an enumeration is an answer, so a `.env` or a
+        // `.git` inside the workspace is held back the same way reading it would be.
+        for f in [
+            ".env",
+            ".git/config",
+            "node_modules/.bin/tool",
+            "secrets/id_ed25519",
+        ] {
+            assert!(p.is_protected(&dir.path().join(f)), "{f} would be listed");
+        }
+        for f in ["src/lib.rs", "Cargo.toml", "README.md"] {
+            assert!(
+                !p.is_protected(&dir.path().join(f)),
+                "{f} would be held back"
+            );
+        }
     }
 
     #[test]

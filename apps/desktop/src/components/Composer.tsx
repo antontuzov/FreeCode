@@ -11,10 +11,16 @@ import { ModelPicker } from "./ModelPicker";
 const APPROVAL_MODES = ["auto", "ask", "plan"] as const;
 type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
+/** `?coding=1` stands in for the press of the Coding control the native window cannot be given, so the
+ * control's on state — and the tool rows it earns — can be looked at in the real app. */
+const CODING_SEEDED = new URLSearchParams(window.location.search).get("coding") === "1";
+
 /**
  * The composer's approval selector is the agent loop's permission dial, so its default is the
  * conservative one and every mode is named out loud rather than shown as an icon the user has to
- * decode. Wiring it to the loop is Phase 4; until then it holds state and nothing more.
+ * decode. The loop does read the approval document now — a call the policy refuses comes back as a
+ * blocked row — but this control does not write it, so pressing it changes nothing, and it says so on
+ * hover rather than pretending to.
  */
 export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel: () => void }) {
   const running = useTranscript((s) => s.running);
@@ -23,6 +29,10 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   const error = useChat((s) => s.error);
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<ApprovalMode>("ask");
+  // The Coding control: whether the next prompt offers the workspace reads. It is per prompt rather
+  // than per conversation, because each round costs the context window a tool result, and that is a
+  // price the user agrees to one question at a time rather than once per chat.
+  const [coding, setCoding] = useState(CODING_SEEDED);
   const [picture, setPicture] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -54,7 +64,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   const submit = () => {
     if (!draft.trim() && !picture) return;
     // A picture with no words is a question — "what is in this?" needs no saying.
-    void send(draft, picture ?? undefined);
+    void send(draft, picture ?? undefined, coding);
     setDraft("");
     setPicture(null);
   };
@@ -147,6 +157,19 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
             }
           >
             <Icon name="attach" />
+          </button>
+          {/* The Coding control, as the reference draws it: one line icon in the row, not a second
+              labelled pill. It reads as pressed because the state is the whole point of the click —
+              the title is what says what each side of it costs. */}
+          <button
+            type="button"
+            onClick={() => setCoding((on) => !on)}
+            className={`icon-btn ${coding ? "bg-accent-soft text-fg-strong" : ""}`}
+            aria-label={translate(locale, "composer.coding")}
+            aria-pressed={coding}
+            title={translate(locale, coding ? "composer.coding.on" : "composer.coding.off")}
+          >
+            <Icon name="coding" />
           </button>
           <button
             type="button"

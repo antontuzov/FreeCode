@@ -18,8 +18,10 @@ type ChatStore = {
   /** Set once the host has announced anything about the current send. */
   announced: boolean;
   refresh: () => Promise<void>;
-  /** A picture is a `data:` URL the composer shrank; a prompt may be nothing but one. */
-  send: (text: string, image?: string) => Promise<void>;
+  /** A picture is a `data:` URL the composer shrank; a prompt may be nothing but one. `tools` is the
+   * composer's Coding control, and it is per prompt rather than per conversation: the round it opens
+   * costs the window a tool result each, which is a price the user agrees to one question at a time. */
+  send: (text: string, image?: string, tools?: boolean) => Promise<void>;
   stop: () => Promise<void>;
   start: () => Promise<void>;
   release: () => Promise<void>;
@@ -40,7 +42,7 @@ export const useChat = create<ChatStore>((set, get) => ({
       set({ engine: null, error: String(error) });
     }
   },
-  send: async (text, image) => {
+  send: async (text, image, tools) => {
     const trimmed = text.trim();
     // A picture alone is a question: "what is in this?" needs no words.
     if ((!trimmed && !image) || get().sending) return;
@@ -51,7 +53,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     transcript.setRunning(true);
     set({ sending: true, error: null, announced: false });
     try {
-      await ipc.chatSend(trimmed, image);
+      await ipc.chatSend(trimmed, image, tools);
     } catch (error) {
       // The transcript is where a send's failure belongs: the composer repeating it puts the same
       // sentence on screen twice, 200 px apart. A refusal or a dead stream already announced itself on

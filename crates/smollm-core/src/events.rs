@@ -127,6 +127,10 @@ pub enum NoticeCode {
     EngineRestarted,
     /// The model emitted a tool call in a chat that offers it no tools.
     ToolCallWithoutTools,
+    /// The model asked for a tool this build has no executor for, while tools were offered.
+    ToolNotOffered,
+    /// The tool loop gave up before the answer came, because the run kept calling tools.
+    ToolLoopCapped,
     /// The prompt was already too big for the window when the run was measured.
     PromptTooLong,
     /// The server could not replay the whole conversation and dropped its earliest turns.
@@ -149,10 +153,12 @@ impl NoticeCode {
     /// Every code the host can emit. `verify-transcript-i18n` walks this to require one catalog entry
     /// per code, so a notice added here without its sentence in both locales fails the build instead
     /// of rendering its own key in the middle of a transcript.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::EffortNotSupported,
         Self::EngineRestarted,
         Self::ToolCallWithoutTools,
+        Self::ToolNotOffered,
+        Self::ToolLoopCapped,
         Self::PromptTooLong,
         Self::ContextTrimmed,
         Self::BudgetExhausted,
@@ -167,6 +173,8 @@ impl NoticeCode {
             Self::EffortNotSupported => "notice.effort-not-supported",
             Self::EngineRestarted => "notice.engine-restarted",
             Self::ToolCallWithoutTools => "notice.tool-call-without-tools",
+            Self::ToolNotOffered => "notice.tool-not-offered",
+            Self::ToolLoopCapped => "notice.tool-loop-capped",
             Self::PromptTooLong => "notice.prompt-too-long",
             Self::ContextTrimmed => "notice.context-trimmed",
             Self::BudgetExhausted => "notice.budget-exhausted",
@@ -186,6 +194,8 @@ impl NoticeCode {
             Self::EffortNotSupported => &["model", "accepted", "chosen", "sent"],
             Self::EngineRestarted => &["attempt", "max", "log"],
             Self::ToolCallWithoutTools => &["name"],
+            Self::ToolNotOffered => &["name"],
+            Self::ToolLoopCapped => &["rounds"],
             Self::PromptTooLong => &["tokens", "window"],
             Self::ContextTrimmed => &[],
             Self::BudgetExhausted => &["maxTokens"],
