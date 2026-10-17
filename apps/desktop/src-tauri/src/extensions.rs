@@ -113,16 +113,21 @@ mod tests {
         inv.tools.iter().find(|r| r.id == id).expect("tool")
     }
 
-    /// The four reads are what the Coding control actually offers today, and the page has to say so:
-    /// a list that showed all eighteen as live would describe an agent this build does not have.
+    /// The four reads and the one workspace write are what the Coding control actually offers today, and
+    /// the page has to say so: a list that showed all eighteen as live would describe an agent this
+    /// build does not have.
     #[test]
-    fn the_reads_are_the_tools_a_call_can_run_through() {
+    fn the_reads_and_the_workspace_write_are_the_tools_a_call_can_run_through() {
         let inv = inventory(&Settings::default());
-        assert_eq!(inv.runnable, 4, "{:?}", inv.tools);
+        assert_eq!(inv.runnable, 5, "{:?}", inv.tools);
         for id in ["read_file", "list_dir", "glob", "grep_search"] {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "auto", "{id}");
         }
+        // The write is offered, and it is auto under the default dial because the sandbox bounds it to
+        // the workspace — which is the whole reason it can be.
+        assert!(row(&inv, "edit_file").runnable);
+        assert_eq!(row(&inv, "edit_file").decision, "auto");
         assert!(!row(&inv, "write_file").runnable);
     }
 

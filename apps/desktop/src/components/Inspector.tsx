@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
 import type { RunReport } from "../lib/ipc";
-import { useTranscript } from "../state/transcript";
+import { changedFiles, useTranscript, type DiffStat } from "../state/transcript";
 import { Icon, type IconName } from "./icons";
 
 type Group = {
@@ -15,8 +15,10 @@ type Group = {
   round?: boolean;
 };
 
-// The five groups the reference inspector shows, in order.
+// The groups the reference inspector shows, in order: first what the run changed, then the five it
+// draws under it.
 const GROUPS: Group[] = [
+  { key: "files", icon: "editFile" },
   { key: "subagents", icon: "user", round: true },
   { key: "skills", icon: "skills" },
   { key: "artifact", icon: "artifact" },
@@ -24,7 +26,7 @@ const GROUPS: Group[] = [
   { key: "source", icon: "source" },
 ];
 
-type Item = { label: string; meta?: string };
+type Item = { label: string; meta?: string; diff?: DiffStat };
 
 /** `?fixture=1` only — see the note in state/transcript.ts about invented run output. */
 const FIXTURE_ITEMS: Record<string, Item[]> = {
@@ -67,14 +69,32 @@ function SectionHeader({
   );
 }
 
+/** A path split where it is worth keeping: the file name is what a changed-file row is scanned for, so
+ * the directories above it are the part allowed to run out of room. */
+function FileLabel({ path }: { path: string }) {
+  const dir = path.slice(0, path.lastIndexOf("/") + 1);
+  return (
+    <span className="flex min-w-0 flex-1 items-baseline">
+      <span className="truncate text-faint">{dir}</span>
+      <span className="shrink-0">{path.slice(dir.length)}</span>
+    </span>
+  );
+}
+
 function Section({ group, items, locale }: { group: Group; items: Item[]; locale: Locale }) {
   const label = translate(locale, `inspector.${group.key}`);
-  // A group starts open when it has rows and closed when it does not. This build's run reports no
-  // files, tools, pages or subagents — the tool loop that would produce them is not wired, so under
-  // a real answer all five of these are empty at once — and five open headings each followed by
-  // their own apology is a panel that advertises what is missing. The sentence is one press away
-  // either way, so closing says nothing that opening hides.
+  // A group starts open when it has rows and closed when it does not. Most of this build's run reports
+  // no skills, pages or subagents — the loops that would produce them are not wired, so under a real
+  // answer those groups are empty at once — and a column of open headings each followed by their own
+  // apology is a panel that advertises what is missing. The sentence is one press away either way, so
+  // closing says nothing that opening hides.
   const [open, setOpen] = useState(items.length > 0);
+  const has = items.length > 0;
+  // A run that starts editing mid-answer fills this group from nothing, and a count the user has to
+  // press open is a count they will not know to look for.
+  useEffect(() => {
+    if (has) setOpen(true);
+  }, [has]);
 
   return (
     <section className="border-b border-line/60">
@@ -94,7 +114,17 @@ function Section({ group, items, locale }: { group: Group; items: Item[]; locale
                 <span className={`insp-chip ${group.round ? "round" : ""}`}>
                   <Icon name={group.icon} size={14} />
                 </span>
-                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                {item.diff ? (
+                  <FileLabel path={item.label} />
+                ) : (
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                )}
+                {item.diff && (
+                  <span className="shrink-0 font-mono text-micro tabular-nums">
+                    <span className="text-success">+{item.diff.added}</span>{" "}
+                    <span className="text-danger">−{item.diff.removed}</span>
+                  </span>
+                )}
                 {item.meta && <span className="shrink-0 text-micro text-faint">{item.meta}</span>}
               </li>
             ))
@@ -211,9 +241,21 @@ const FIXTURE_RUN: RunReport = {
 };
 
 export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolean }) {
-  const items = fixture ? FIXTURE_ITEMS : {};
+  const rows = useTranscript((s) => s.rows);
   const lastRun = useTranscript((s) => s.lastRun);
   const run = fixture ? FIXTURE_RUN : lastRun;
+  // The changed files come off the transcript's own rows, in both modes: an edit row and a ledger row
+  // are the host's answer to one `Edit`, so listing them from the rows keeps this group and the pill
+  // above the composer reading the same run.
+  const files = useMemo<Item[]>(
+    () =>
+      changedFiles(rows).map(({ path, added, removed }) => ({
+        label: path,
+        diff: { added, removed },
+      })),
+    [rows],
+  );
+  const items = fixture ? FIXTURE_ITEMS : {};
 
   return (
     <aside
@@ -222,7 +264,12 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
     >
       {run ? <RunSection locale={locale} run={run} /> : <UnmeasuredSection locale={locale} />}
       {GROUPS.map((group) => (
-        <Section key={group.key} group={group} items={items[group.key] ?? []} locale={locale} />
+        <Section
+          key={group.key}
+          group={group}
+          items={group.key === "files" ? files : (items[group.key] ?? [])}
+          locale={locale}
+        />
       ))}
     </aside>
   );

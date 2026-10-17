@@ -1,14 +1,18 @@
 //! The tool round: run what one answer asked for, and say in the transcript what each call did.
 //!
-//! This is the half of the agent loop that touches the machine, and it is deliberately the read-only
-//! half. [`smollm_tools::EXECUTABLE`] names the four calls that have executors; anything else the
+//! This is the half of the agent loop that touches the machine. [`smollm_tools::EXECUTABLE`] names the
+//! calls that have executors — four reads of the workspace and one write inside it; anything else the
 //! model asks for is answered with a notice that says so rather than run, which is why the loop can
 //! keep the "Local" badge true and the composer's Coding control can stay an opt-in.
 //!
 //! Every call takes the same road: [`smollm_core::approvals`] decides, [`smollm_tools::authorize`]
 //! resolves its paths against the workspace sandbox inside [`smollm_tools::execute`], and only then
-//! does anything read. The row opens before the read and closes after it, so a call that walks a large
-//! tree shows up as work in progress rather than as a window that stopped answering.
+//! does anything touch the disk. The row opens before the call and closes after it, so a call that
+//! walks a large tree shows up as work in progress rather than as a window that stopped answering.
+//!
+//! A write also leaves a number behind: the lines its replacement cost go on the row, and into the
+//! run's ledger on [`ChatState`], which is what the "+N −M" pill above the composer reads. The ledger
+//! is per file, so a run that edits one file four times says "1 file, +9 −3" rather than "4 files".
 //!
 //! A refusal is said twice, on purpose: the row carries it for the user, and the tool result carries
 //! it for the model, which is the only reader that can act on it. A model handed an empty result
@@ -16,12 +20,12 @@
 //! nothing.
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use smollm_config::Settings;
 use smollm_core::approvals::{evaluate, ApprovalDecision, Pending};
 use smollm_core::events::{AgentEvent, NoticeCode, ToolOutcome};
-use smollm_core::transcript::{tool_batch, StepKind, StepStatus, TranscriptStep};
+use smollm_core::transcript::{tool_batch, DiffStat, StepKind, StepStatus, TranscriptStep};
 use smollm_llama::ToolCall;
 use smollm_tools::{execute, is_executable, SandboxPolicy};
 
@@ -108,7 +112,8 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
             call_id: call.id.clone(),
             result: format!(
                 "{name} is not available in this build: it reads nothing and changes nothing. The \
-                 tools it has are read_file, list_dir, glob and grep_search."
+                 tools it has are read_file, list_dir, glob, grep_search and edit_file, which reach \
+                 nothing outside this workspace."
             ),
         };
     }
@@ -116,29 +121,68 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
     let mut row = started_row(name, &arguments);
     emit(app, AgentEvent::ToolStarted { step: row.clone() });
 
-    let outcome = match cleared(name, &arguments, &call.id, settings, policy) {
+    let staged = match cleared(name, &arguments, &call.id, settings, policy) {
         Ok(()) => match execute(name, &arguments, policy) {
-            Ok(done) => (ToolOutcome::ok(done.summary.clone()), done.content),
+            Ok(done) => {
+                // The executor's own report of what it wrote. Its path is workspace-relative by
+                // construction, which is what makes two calls that named one file — one by its
+                // absolute path, one relatively — land on the same ledger row.
+                let staged = done.edit.map(|edit| {
+                    let diff = DiffStat {
+                        lines_added: edit.added,
+                        lines_removed: edit.removed,
+                        files_changed: 1,
+                    };
+                    (edit.path, diff)
+                });
+                (
+                    ToolOutcome {
+                        diff: staged.as_ref().map(|(_, diff)| *diff),
+                        ..ToolOutcome::ok(done.summary.clone())
+                    },
+                    done.content,
+                    staged,
+                )
+            }
             Err(why) => {
                 let reason = why.to_string();
                 (
                     ToolOutcome::blocked(&reason),
                     format!("{name} did not run: {reason}"),
+                    None,
                 )
             }
         },
         Err(reason) => (
             ToolOutcome::blocked(&reason),
             format!("{name} did not run: {reason}"),
+            None,
         ),
     };
-    let (outcome, result) = outcome;
+    let (outcome, result, edited) = staged;
     row.finish(if outcome.ok {
         StepStatus::Done
     } else {
         StepStatus::Blocked
     });
+    let mut total = None;
+    // The executor reports a write's path and line counts together, so one tuple arm is the whole test
+    // that this call changed the tree.
+    if let Some((path, diff)) = edited {
+        row.diff = Some(diff);
+        row.detail = path.clone();
+        total = Some(app.state::<crate::chat::ChatState>().stage(
+            &path,
+            diff.lines_added,
+            diff.lines_removed,
+        ));
+    }
     emit(app, AgentEvent::ToolFinished { step: row, outcome });
+    // The pill moves while the run is still going rather than arriving only once it ends: an agent
+    // that has changed six files is a different thing to watch than one that has changed none.
+    if let Some(diff) = total {
+        emit(app, AgentEvent::DiffStaged { diff });
+    }
     Ran {
         call_id: call.id.clone(),
         result,
@@ -188,6 +232,7 @@ fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
     let kind = match name {
         "read_file" => StepKind::ReadFile,
         "grep_search" => StepKind::SearchContent,
+        "edit_file" => StepKind::EditFile,
         _ => StepKind::Tool,
     };
     let shown = subject(name, arguments);
@@ -216,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_four_reads_open_a_row() {
+    fn the_offered_reads_and_the_one_write_open_a_row() {
         // The executors and the offer have to agree, or a call would open a row nothing closes.
         for id in smollm_tools::EXECUTABLE {
             assert!(is_executable(id), "{id} is offered but not runnable");
@@ -224,7 +269,12 @@ mod tests {
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(smollm_tools::EXECUTABLE.len(), 4);
+        assert_eq!(smollm_tools::EXECUTABLE.len(), 5);
+        // The write is the row the pill is built from, so it cannot silently degrade to a generic tool.
+        assert_eq!(
+            started_row("edit_file", &json!({ "path": "a/b.rs" })).kind,
+            StepKind::EditFile
+        );
     }
 
     #[test]

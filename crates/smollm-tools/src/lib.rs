@@ -5,11 +5,11 @@
 //!   * [`registry`] — the tool list the model is handed, with a JSON schema and a
 //!     [`PermissionClass`] per entry, plus the OpenAI-shaped `tools` payload;
 //!   * [`sandbox`] — lexical + canonicalized containment, protected paths, and the network gate;
-//!   * [`exec`] — the read-only executors, and [`exec::execute`] as the one entry point that runs a
+//!   * [`exec`] — the workspace executors, and [`exec::execute`] as the one entry point that runs a
 //!     call after [`authorize`] has cleared it.
 //!
-//! Writes, shells and network calls still have no executor here: a loop that offers a tool has to be
-//! able to say *why* it refused one, which is what [`ToolsError::NoExecutor`] is for. The engine's
+//! Shells and network calls still have no executor here: a loop that offers a tool has to be able to
+//! say *why* it refused one, which is what [`ToolsError::NoExecutor`] is for. The engine's
 //! tool-call quirk is already accounted for here: an empty `arguments` object must be sent as `"{}"`,
 //! because the fork answers HTTP 500 otherwise (llama.cpp#112).
 
@@ -19,7 +19,7 @@ pub mod sandbox;
 
 use std::path::Path;
 
-pub use exec::{execute, Executed, MAX_RESULT_BYTES};
+pub use exec::{execute, Edit, Executed, MAX_RESULT_BYTES};
 pub use registry::{
     executable_specs, find, is_executable, registry, summary, tool_specs, ToolCall, ToolDescriptor,
     EXECUTABLE,
@@ -36,7 +36,7 @@ pub enum ToolsError {
     NetworkNotConfigured(String),
     #[error("this build has no executor for {0}: it is declared but not implemented")]
     NoExecutor(String),
-    #[error("{tool} could not read {path} ({reason})")]
+    #[error("{tool} could not open {path} ({reason})")]
     Io {
         tool: String,
         path: String,

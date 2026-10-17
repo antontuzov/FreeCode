@@ -15,13 +15,14 @@ import { useAppearance } from "./state/appearance";
 import { connectAgentEvents, useChat } from "./state/chat";
 import { currentView, useNav } from "./state/nav";
 import { useSessions } from "./state/sessions";
-import { FIXTURE_ROWS, useTranscript } from "./state/transcript";
+import { FIXTURE_DIFF, FIXTURE_ROWS, useTranscript } from "./state/transcript";
 
 export default function App() {
   const load = useAppearance((s) => s.load);
   const language = useAppearance((s) => s.language);
   const setRows = useTranscript((s) => s.setRows);
   const setContextUsed = useTranscript((s) => s.setContextUsed);
+  const setRunDiff = useTranscript((s) => s.setRunDiff);
   const refreshEngine = useChat((s) => s.refresh);
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
@@ -89,7 +90,9 @@ export default function App() {
     // The shot this is compared against has a context meter part-filled. Only the fixture can claim
     // a number; a real run reports none until the engine measures it.
     setContextUsed(40);
-  }, [fixture, setRows, setContextUsed]);
+    // …and a "+N −M files changed" pill, which is the row a run leaves when it edits a file.
+    setRunDiff(FIXTURE_DIFF);
+  }, [fixture, setRows, setContextUsed, setRunDiff]);
 
   // `?ask=<prompt>` sends that prompt on mount; `?ask_repeat=<n>` sends it n times in a row. The
   // native window takes no injected clicks, so this is how a real answer from the local engine gets

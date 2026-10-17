@@ -67,5 +67,9 @@ export const useSessions = create<SessionStore>((set) => ({
     // conversation's rates.
     transcript.setContextUsed(null);
     transcript.setLastRun(null);
+    // And the pill is about a run this window watched rather than about the files on disk, which stay
+    // changed. A reopened conversation shows what it wrote at the time, not a count for an answer that
+    // has since been read elsewhere.
+    transcript.setRunDiff(null);
   },
 }));

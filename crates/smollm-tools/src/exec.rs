@@ -1,11 +1,16 @@
-//! The read-only executors: the four tools that answer from the workspace and change nothing.
+//! The workspace executors: four calls that read it and one that changes a file in it.
 //!
 //! Every one of them takes `(arguments, policy)` and goes through [`authorize`] first, so a call
 //! cannot reach the disk without the sandbox having resolved its path, and the loop has no way to skip
-//! that check. Writes, shells and network calls are deliberately absent — they have no executor in
-//! this build, which is why a run that carries tools offers
+//! that check. Shells and network calls are deliberately absent — they have no executor in this build,
+//! which is why a run that carries tools offers
 //! [`EXECUTABLE`](crate::registry::EXECUTABLE) and refuses anything else out loud instead of
 //! pretending to try it.
+//!
+//! The one write here is `edit_file`, and it is the reason the sandbox's `Access::Write` exists: a
+//! path outside the workspace root, or onto a protected name, is refused by [`authorize`] before this
+//! file opens anything. What is left to the executor is the part a sandbox cannot decide — whether the
+//! text the model quoted is actually in the file, and actually only once.
 //!
 //! Three budgets, and all three are about the *context window* rather than about safety:
 //!   * [`MAX_RESULT_BYTES`] caps what goes back into the prompt. A tool result is prefilled on every
@@ -47,6 +52,11 @@ const MAX_MATCHES: usize = 100;
 /// The depth a walk descends. Past it the workspace is a build artefact, not a source tree.
 const MAX_DEPTH: usize = 12;
 
+/// Lines of the file shown around a change, either side. `grep_search` takes its context from the
+/// call; an edit's hunk has no argument to ask with, and two is what makes a changed line
+/// identifiable in the file it came from without reprinting the file.
+const CTX_LINES: usize = 2;
+
 /// Trees no read enumerates. A budget, not a security rule — the sandbox's denied names are what keep
 /// `.env` and `.ssh` out of an answer.
 const SKIP_DIRS: &[&str] = &[
@@ -62,6 +72,22 @@ const SKIP_DIRS: &[&str] = &[
     "__pycache__",
 ];
 
+/// What one call changed on disk. Only `edit_file` produces one, and the counts are the replacement's
+/// own arithmetic rather than a diff engine's: the lines it took out and the lines it put back, with
+/// the lines it only passed over cancelled from both sides. For a call that swaps one block of text
+/// for another that is exactly what a diff reports for the hunk, not an approximation of one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Edit {
+    /// Workspace-relative, in forward slashes — the same spelling `glob` and `grep_search` answer
+    /// with, so the model can hand it straight back to `read_file`.
+    pub path: String,
+    pub added: u32,
+    pub removed: u32,
+    /// How many copies of `old_string` were replaced. More than one only when the call asked for
+    /// `replace_all`, which is the difference between "fixed a line" and "renamed a symbol".
+    pub occurrences: u32,
+}
+
 /// What one call produced: a clause for the transcript row and the text the model is handed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Executed {
@@ -70,9 +96,12 @@ pub struct Executed {
     /// The tool result, as the model sees it. Never longer than [`MAX_RESULT_BYTES`] plus the sentence
     /// that says what was left out.
     pub content: String,
+    /// The file this call changed, for the run's diff. `None` for every read, which is what keeps a
+    /// "+0 −0" pill off a run that touched nothing.
+    pub edit: Option<Edit>,
 }
 
-/// Run one call. The single entry point: authorization, the read-only gate, then the work.
+/// Run one call. The single entry point: authorization, the executable gate, then the work.
 ///
 /// Takes the tool id and its parsed arguments rather than a [`crate::ToolCall`], because the wire's
 /// own call shape lives in `smollm-llama` and this crate has to stay testable without it.
@@ -90,6 +119,7 @@ pub fn execute(
         "list_dir" => list_dir(tool.id, arguments, policy),
         "glob" => find_files(tool.id, arguments, policy),
         "grep_search" => search_content(tool.id, arguments, policy),
+        "edit_file" => edit_file(tool.id, arguments, policy),
         // Unreachable while [`registry::EXECUTABLE`](crate::registry::EXECUTABLE) and this match move
         // together, and a refusal rather than a panic if they ever do not.
         other => Err(ToolsError::NoExecutor(other.to_string())),
@@ -117,6 +147,7 @@ fn read_file(
         return Ok(Executed {
             summary: "empty".to_string(),
             content: format!("{label} is empty."),
+            edit: None,
         });
     }
 
@@ -128,6 +159,7 @@ fn read_file(
                 "Nothing to show: {label} ends at line {total} and the range asked for starts past line \
                  {total}."
             ),
+            edit: None,
         });
     }
     let to = number_arg(arguments, "end_line")
@@ -139,6 +171,7 @@ fn read_file(
             content: format!(
                 "Nothing to show: the range ends at line {to}, before it starts at line {from}."
             ),
+            edit: None,
         });
     }
 
@@ -166,6 +199,7 @@ fn read_file(
                  it is shown. Search for the words instead of reading the line.",
                 MAX_RESULT_BYTES
             ),
+            edit: None,
         });
     }
     let whole = from == 1 && last >= total;
@@ -177,6 +211,7 @@ fn read_file(
                 format!("lines {from}–{last} of {total}")
             },
             content: kept.join("\n"),
+            edit: None,
         });
     };
     Ok(Executed {
@@ -187,6 +222,7 @@ fn read_file(
             kept.join("\n"),
             MAX_RESULT_BYTES
         ),
+        edit: None,
     })
 }
 
@@ -252,6 +288,7 @@ fn list_dir(tool: &str, arguments: &Value, policy: &SandboxPolicy) -> Result<Exe
         } else {
             lines.join("\n")
         },
+        edit: None,
     })
 }
 
@@ -306,6 +343,7 @@ fn find_files(
         } else {
             with_skips(content, skipped)
         },
+        edit: None,
     })
 }
 
@@ -391,7 +429,171 @@ fn search_content(
         } else {
             with_skips(content, skipped)
         },
+        edit: None,
     })
+}
+
+/// Replace an exact string in one workspace file, and report what it cost in lines.
+///
+/// Three things refuse the write before anything touches the disk: the file has to be text this tool
+/// can read, the text named has to be present, and it has to be present once unless the call asked for
+/// every copy. An ambiguous match is the failure a model makes most often and a person wants least,
+/// so the call names which of the three it hit rather than writing its guess.
+///
+/// The sandbox is not rechecked here. [`crate::authorize`] resolves every path argument against the
+/// policy before an executor runs, which is where a write outside the workspace, into `.git`, or into
+/// a protected name is refused — out loud, in the sentence the row and the model both get.
+fn edit_file(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+) -> Result<Executed, ToolsError> {
+    let label = required(tool, arguments, "path")?.to_string();
+    let path = resolve(policy, &label, Access::Write)?;
+    let old = required(tool, arguments, "old_string")?;
+    let new = required(tool, arguments, "new_string")?;
+    let refuse = |reason: String| ToolsError::InvalidArguments {
+        tool: tool.to_string(),
+        reason,
+    };
+    if old.is_empty() {
+        return Err(refuse(
+            "\"old_string\" is empty, which every position in the file matches.".to_string(),
+        ));
+    }
+    let Some(text) = read_text(tool, &path)? else {
+        return Err(refuse(format!(
+            "{label} is not text this tool can read, so it was not edited."
+        )));
+    };
+
+    let found = text.matches(old).count();
+    let every = flag_arg(arguments, "replace_all");
+    if found == 0 {
+        return Err(refuse(format!(
+            "{label} holds nothing matching \"old_string\", so nothing was written. Read the file and \
+             copy the line as it stands."
+        )));
+    }
+    if found > 1 && !every {
+        return Err(refuse(format!(
+            "{label} holds {found} copies of \"old_string\" and the call named one, so nothing was \
+             written. Include enough of the lines around it to match once, or set replace_all."
+        )));
+    }
+
+    let times = if every { found } else { 1 };
+    let edited = if every {
+        text.replace(old, new)
+    } else {
+        text.replacen(old, new, 1)
+    };
+    fs::write(&path, &edited).map_err(|e| io_error(tool, &label, &e))?;
+
+    let (removed, added) = changed_lines(old, new);
+    let edit = Edit {
+        path: relative(policy, &path),
+        added: (added * times) as u32,
+        removed: (removed * times) as u32,
+        occurrences: times as u32,
+    };
+    let summary = if times > 1 {
+        format!("{times} copies replaced")
+    } else {
+        "1 copy replaced".to_string()
+    };
+    Ok(Executed {
+        content: format!(
+            "Edited {} (+{} −{}): {summary}\n{}",
+            edit.path,
+            edit.added,
+            edit.removed,
+            hunk(&label, &text, old, new)
+        ),
+        summary,
+        edit: Some(edit),
+    })
+}
+
+/// How many lines at each end of a replacement the replacement shares with what it replaced. The two
+/// are what makes "wrap this block in an `if`" read as two added lines rather than as the whole block
+/// rewritten: a line the call carried over unchanged is not one it changed.
+fn shared_edges(before: &[&str], after: &[&str]) -> (usize, usize) {
+    let mut head = 0;
+    while head < before.len() && head < after.len() && before[head] == after[head] {
+        head += 1;
+    }
+    let mut tail = 0;
+    while head + tail < before.len()
+        && head + tail < after.len()
+        && before[before.len() - 1 - tail] == after[after.len() - 1 - tail]
+    {
+        tail += 1;
+    }
+    (head, tail)
+}
+
+/// The lines a replacement takes out and puts back, as `(removed, added)`, with the shared edges
+/// cancelled from both sides.
+fn changed_lines(old: &str, new: &str) -> (usize, usize) {
+    let before: Vec<&str> = old.lines().collect();
+    let after: Vec<&str> = new.lines().collect();
+    let (head, tail) = shared_edges(&before, &after);
+    (before.len() - head - tail, after.len() - head - tail)
+}
+
+/// The change as the model sees it: the lines it took out and put back, with two of the file on either
+/// side, in the `+`/`−` shape a diff uses — and the same shared edges [`changed_lines`] cancels printed
+/// as context, so a hunk and the counts standing over it cannot disagree.
+///
+/// Only the first change gets a hunk: a `replace_all` over forty copies would spend the whole result
+/// budget saying the same forty lines forty times. A hunk past the budget is cut, and says how much of
+/// itself the cut left out.
+fn hunk(label: &str, text: &str, old: &str, new: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let start = text
+        .find(old)
+        .map_or(0, |offset| text[..offset].lines().count());
+    let before: Vec<&str> = old.lines().collect();
+    let after: Vec<&str> = new.lines().collect();
+    let (head, tail) = shared_edges(&before, &after);
+    let end = start + before.len();
+
+    let mut body: Vec<String> = vec![format!("{label}, at line {}:", start + 1)];
+    for i in start.saturating_sub(CTX_LINES)..(start + head) {
+        body.push(format!(" {}", lines.get(i).copied().unwrap_or("")));
+    }
+    for line in &before[head..before.len() - tail] {
+        body.push(format!("-{line}"));
+    }
+    for line in &after[head..after.len() - tail] {
+        body.push(format!("+{line}"));
+    }
+    // The unchanged lines inside the block, printed as context, then the file's own lines after it.
+    let changed_end = end.min(lines.len());
+    for line in &lines[(end - tail).max(start + head).min(changed_end)..changed_end] {
+        body.push(format!(" {line}"));
+    }
+    for line in &lines[changed_end..(end + CTX_LINES).min(lines.len())] {
+        body.push(format!(" {line}"));
+    }
+
+    let mut kept: Vec<String> = Vec::new();
+    let mut used = 0usize;
+    let mut held = 0usize;
+    for line in body {
+        let cost = line.len() + 1;
+        if used + cost > MAX_RESULT_BYTES {
+            held += 1;
+            continue;
+        }
+        used += cost;
+        kept.push(line);
+    }
+    if held > 0 {
+        kept.push(format!("…{held} lines of the change are not shown."));
+    }
+    kept.join("\n")
 }
 
 /// One file's matches, printed with their context merged between neighbours: a hit's line carries
@@ -1010,5 +1212,180 @@ mod tests {
         assert_eq!(human_bytes(512), "512 B");
         assert_eq!(human_bytes(2048), "2.0 KB");
         assert_eq!(human_bytes(5 * 1024 * 1024), "5.0 MB");
+    }
+
+    /// The bytes on disk after a call, which is the only evidence that counts for a write.
+    fn on_disk(dir: &Path, rel: &str) -> String {
+        std::fs::read_to_string(dir.join(rel)).unwrap()
+    }
+
+    #[test]
+    fn an_edit_writes_the_file_and_counts_the_lines_it_cost() {
+        let (d, p) = plain();
+        let got = ran(
+            "edit_file",
+            &json!({ "path": "src/lib.rs", "old_string": "two", "new_string": "TWO\nand a half" }),
+            &p,
+        )
+        .expect("an edit of a workspace file runs");
+        assert_eq!(
+            on_disk(d.path(), "src/lib.rs"),
+            "one\nTWO\nand a half\nthree\n"
+        );
+        let edit = got.edit.expect("a write reports what it wrote");
+        assert_eq!((edit.added, edit.removed, edit.occurrences), (2, 1, 1));
+        // The path is the spelling a follow-up `read_file` takes back.
+        assert_eq!(edit.path, "src/lib.rs");
+        assert_eq!(got.summary, "1 copy replaced");
+    }
+
+    #[test]
+    fn a_replacement_that_carries_a_line_over_costs_only_the_line_it_added() {
+        let (d, p) = plain();
+        let got = ran(
+            "edit_file",
+            &json!({ "path": "src/lib.rs", "old_string": "two", "new_string": "two\nfour" }),
+            &p,
+        )
+        .expect("an edit runs");
+        // The line the call kept is not a line it rewrote, so the edit is one line rather than two.
+        let edit = got.edit.unwrap();
+        assert_eq!((edit.added, edit.removed), (1, 0));
+        assert_eq!(on_disk(d.path(), "src/lib.rs"), "one\ntwo\nfour\nthree\n");
+    }
+
+    #[test]
+    fn wrapping_a_block_costs_its_own_lines_rather_than_the_whole_block() {
+        let (d, p) = plain();
+        // The file's first and last lines are shared and cancel out; what is left is the edit a diff
+        // would print — one line out, three in — rather than "the whole block was rewritten".
+        let got = ran(
+            "edit_file",
+            &json!({
+                "path": "src/lib.rs",
+                "old_string": "one\ntwo\nthree",
+                "new_string": "one\nif ready {\n  two\n}\nthree",
+            }),
+            &p,
+        )
+        .expect("a multi-line edit runs");
+        let edit = got.edit.unwrap();
+        assert_eq!((edit.added, edit.removed), (3, 1));
+        assert_eq!(
+            on_disk(d.path(), "src/lib.rs"),
+            "one\nif ready {\n  two\n}\nthree\n"
+        );
+    }
+
+    #[test]
+    fn an_edit_that_matches_nothing_writes_nothing_and_says_so() {
+        let (d, p) = plain();
+        let why = ran(
+            "edit_file",
+            &json!({ "path": "src/lib.rs", "old_string": "four", "new_string": "4" }),
+            &p,
+        )
+        .expect_err("a match the file does not hold cannot be applied");
+        assert!(why.to_string().contains("holds nothing matching"), "{why}");
+        assert_eq!(on_disk(d.path(), "src/lib.rs"), "one\ntwo\nthree\n");
+    }
+
+    #[test]
+    fn an_ambiguous_edit_is_refused_rather_than_applied_to_the_wrong_copy() {
+        let (d, p) = plain();
+        std::fs::write(d.path().join("src/lib.rs"), "two\ntwo\n").unwrap();
+        let why = ran(
+            "edit_file",
+            &json!({ "path": "src/lib.rs", "old_string": "two", "new_string": "ONE" }),
+            &p,
+        )
+        .expect_err("two copies of the text is not one match");
+        let reason = why.to_string();
+        assert!(reason.contains("2 copies"), "{reason}");
+        // The sentence names the way out, because the model is the reader that can take it.
+        assert!(reason.contains("replace_all"), "{reason}");
+        assert_eq!(on_disk(d.path(), "src/lib.rs"), "two\ntwo\n");
+    }
+
+    #[test]
+    fn replace_all_changes_every_copy_and_counts_the_lines_once_each() {
+        let (d, p) = plain();
+        std::fs::write(d.path().join("src/lib.rs"), "old\nold\nold\n").unwrap();
+        let got = ran(
+            "edit_file",
+            &json!({
+                "path": "src/lib.rs",
+                "old_string": "old",
+                "new_string": "new",
+                "replace_all": true,
+            }),
+            &p,
+        )
+        .expect("a call that asks for every copy gets it");
+        assert_eq!(on_disk(d.path(), "src/lib.rs"), "new\nnew\nnew\n");
+        let edit = got.edit.unwrap();
+        assert_eq!((edit.added, edit.removed, edit.occurrences), (3, 3, 3));
+        assert_eq!(got.summary, "3 copies replaced");
+        // One hunk rather than three: the copies are the same change said three times.
+        assert_eq!(got.content.matches("at line").count(), 1, "{}", got.content);
+    }
+
+    #[test]
+    fn a_hunk_shows_the_changed_line_between_the_lines_around_it() {
+        let (_d, p) = plain();
+        let got = ran(
+            "edit_file",
+            &json!({ "path": "src/lib.rs", "old_string": "two", "new_string": "TWO" }),
+            &p,
+        )
+        .expect("an edit runs");
+        assert_eq!(
+            got.content,
+            "Edited src/lib.rs (+1 −1): 1 copy replaced\nsrc/lib.rs, at line 2:\n one\n-two\n+TWO\n three"
+        );
+    }
+
+    #[test]
+    fn an_edit_outside_the_workspace_is_refused_before_it_can_touch_a_file() {
+        let (d, p) = plain();
+        let outside = d.path().parent().unwrap().join("escaped.rs");
+        let _ = std::fs::remove_file(&outside);
+        let why = ran(
+            "edit_file",
+            &json!({
+                "path": outside,
+                "old_string": "x",
+                "new_string": "y",
+            }),
+            &p,
+        )
+        .expect_err("the workspace root is the boundary of a write");
+        assert!(matches!(why, ToolsError::Sandbox(_)), "{why}");
+        assert!(!outside.exists(), "the refusal wrote the file anyway");
+    }
+
+    #[test]
+    fn a_protected_name_is_refused_for_a_write_as_it_is_for_a_read() {
+        let (d, p) = fixture();
+        let why = ran(
+            "edit_file",
+            &json!({ "path": ".env", "old_string": "TOKEN", "new_string": "token" }),
+            &p,
+        )
+        .expect_err("a secret the sandbox hides cannot be edited through it");
+        assert!(matches!(why, ToolsError::Sandbox(_)), "{why}");
+        assert_eq!(on_disk(d.path(), ".env"), "one TOKEN=secret\n");
+    }
+
+    #[test]
+    fn an_empty_old_string_is_refused_rather_than_matching_every_position() {
+        let (_d, p) = plain();
+        let why = ran(
+            "edit_file",
+            &json!({ "path": "src/lib.rs", "old_string": "", "new_string": "x" }),
+            &p,
+        )
+        .expect_err("an empty match is not an edit");
+        assert!(why.to_string().contains("empty"), "{why}");
     }
 }

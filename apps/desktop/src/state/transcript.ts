@@ -66,6 +66,13 @@ export type Refusal = { code: string; params: Record<string, string> };
 
 export type DiffStat = { added: number; removed: number };
 
+/**
+ * What a run has changed so far, as the pill above the composer reads it. `files` is the host's count
+ * of *distinct* paths, not the number of edit rows: a model that fixes one file four times changed one
+ * file, and saying "4 files" would be a number nobody can check.
+ */
+export type RunDiff = { files: number; added: number; removed: number };
+
 export type Step = {
   id: string;
   kind: StepKind;
@@ -241,10 +248,10 @@ function hostStatus(status: HostStepStatus): StepStatus {
 }
 
 /**
- * A host step as a row. `detail` is the path or pattern the call acted on, which the reference draws as
- * the chip beside the label, and the outcome's one-line summary is the sentence under it. Both are
- * measurements: "Read file" and "3 lines" are the catalog's words, and `verify-transcript-i18n` is what
- * keeps the kind's key on both sides.
+ * A host step as a row. `detail` is the path or pattern the call acted on — for an edit, the file it
+ * wrote as the sandbox resolved it — which the reference draws as the chip beside the label, and the
+ * outcome's one-line summary is the sentence under it. Both are measurements: "Read file" and "3 lines"
+ * are the catalog's words, and `verify-transcript-i18n` is what keeps the kind's key on both sides.
  */
 function hostRow(step: HostStep, summary?: string): Step {
   return {
@@ -252,6 +259,7 @@ function hostRow(step: HostStep, summary?: string): Step {
     kind: step.kind,
     subject: step.detail || undefined,
     detail: summary,
+    diff: step.diff ? { added: step.diff.linesAdded, removed: step.diff.linesRemoved } : undefined,
     status: hostStatus(step.status),
   };
 }
@@ -319,6 +327,32 @@ function finishStep(rows: Row[], step: HostStep, summary: string): Row[] {
   return rows.map((row) => (row.id === step.id ? hostRow(step, summary) : row));
 }
 
+/**
+ * The files this conversation's rows say were edited, newest edit folded into the file it touched.
+ *
+ * Read off the rows rather than off the run's total because the inspector names *which* files, and a
+ * `DiffStat` carries a count of them, not their paths. The two agree by construction: the host writes
+ * the row's numbers and its ledger off the same `Edit`, one path at a time.
+ */
+export function changedFiles(rows: Row[]): (DiffStat & { path: string })[] {
+  const byPath = new Map<string, DiffStat>();
+  // A round's rows live under their "Ran N tools" header once the batch closes, so the walk goes one
+  // level in: an edit that folded away is still a file the workspace lost.
+  const every: Step[] = rows.flatMap((row) =>
+    isTurn(row) ? [] : row.children ? [row, ...row.children] : [row],
+  );
+  for (const row of every) {
+    if (row.kind !== "editFile" || !row.diff || !row.subject) continue;
+    const path = row.subject;
+    const seen = byPath.get(path);
+    byPath.set(path, {
+      added: (seen?.added ?? 0) + row.diff.added,
+      removed: (seen?.removed ?? 0) + row.diff.removed,
+    });
+  }
+  return [...byPath].map(([path, diff]) => ({ path, ...diff }));
+}
+
 function reduce(rows: Row[], event: AgentEvent): Row[] {
   switch (event.type) {
     case "runStarted":
@@ -348,6 +382,10 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
       // The header arrives when the round is over, so it never renders the live dot its own rows had
       // while they ran — the host's step is still in its opening state, and the batch is not.
       return closeBatch(rows, { ...hostRow(event.step), status: "ok" });
+    case "diffStaged":
+      // The pill is store state rather than a row: a run that changed six files already says so in six
+      // rows, and a seventh line repeating the count would be a summary nobody asked for.
+      return rows;
     case "runFinished":
       return onOpenTurn(rows, (turn) => ({
         ...turn,
@@ -409,12 +447,21 @@ type TranscriptStore = {
    * click that sent the prompt rather than from the host's answer.
    */
   runStartedAt: number | null;
+  /**
+   * What the run in flight — or the one that just closed — has changed in the workspace, or null while
+   * it has written nothing. This is the "+N −M files changed" pill above the composer, and it is the
+   * host's ledger rather than an addition the interface makes: the same numbers arrive on `diffStaged`
+   * while the run goes and on `runFinished` when it ends.
+   */
+  runDiff: RunDiff | null;
   setRows: (rows: Row[]) => void;
   setRunning: (running: boolean) => void;
   /** Presets the meter for the fixture, and clears it when the conversation is thrown away. */
   setContextUsed: (percent: number | null) => void;
   /** Presets the run report for the fixture; a real run fills it from its own timings. */
   setLastRun: (run: RunReport | null) => void;
+  /** Presets the pill for the fixture; a real run fills it from its own writes. */
+  setRunDiff: (diff: RunDiff | null) => void;
   /** The prompt's own row, added on send so the bubble appears before the engine answers. */
   pushPrompt: (text: string, image?: string) => void;
   apply: (event: AgentEvent) => void;
@@ -425,11 +472,13 @@ export const useTranscript = create<TranscriptStore>((set) => ({
   running: false,
   contextUsed: null,
   lastRun: null,
+  runDiff: null,
   runStartedAt: null,
   setRows: (rows) => set({ rows }),
   setRunning: (running) => set({ running, runStartedAt: running ? Date.now() : null }),
   setContextUsed: (contextUsed) => set({ contextUsed }),
   setLastRun: (lastRun) => set({ lastRun }),
+  setRunDiff: (runDiff) => set({ runDiff }),
   pushPrompt: (text, image) =>
     set((s) => ({
       rows: [...s.rows, { id: nextId("turn"), kind: "turn", role: "user", text, image }],
@@ -457,6 +506,27 @@ export const useTranscript = create<TranscriptStore>((set) => ({
         // Unlike the meter, the report is about one run rather than about the window, so a run that
         // never timed itself replaces the last one's numbers instead of leaving them up.
         lastRun: event.type === "runFinished" ? event.run : s.lastRun,
+        // The pill is the run's own ledger, and the host clears its copy when a send opens, so this
+        // does too: a prompt that changes nothing shows a pill that has gone, not the last one's count
+        // sitting above a composer it no longer describes.
+        runDiff:
+          event.type === "runStarted"
+            ? null
+            : event.type === "diffStaged"
+              ? {
+                  files: event.diff.filesChanged,
+                  added: event.diff.linesAdded,
+                  removed: event.diff.linesRemoved,
+                }
+              : event.type === "runFinished"
+                ? event.totalDiff
+                  ? {
+                      files: event.totalDiff.filesChanged,
+                      added: event.totalDiff.linesAdded,
+                      removed: event.totalDiff.linesRemoved,
+                    }
+                  : s.runDiff
+                : s.runDiff,
       };
     }),
 }));
@@ -498,7 +568,12 @@ export const FIXTURE_ROWS: Row[] = [
     children: [
       { id: "f2a", kind: "thought", detail: "The catalog pins a fork-only engine." },
       { id: "f2b", kind: "readFile", subject: "agent.rs" },
-      { id: "f2c", kind: "editFile", subject: "agent.rs", diff: { added: 29, removed: 12 } },
+      {
+        id: "f2c",
+        kind: "editFile",
+        subject: "apps/desktop/src-tauri/src/agent.rs",
+        diff: { added: 29, removed: 12 },
+      },
     ],
   },
   { id: "f3", kind: "contextCompressed" },
@@ -518,7 +593,15 @@ export const FIXTURE_ROWS: Row[] = [
     children: [
       { id: "f4a", kind: "terminal", detail: "cargo test -p smollm-core", status: "ok" },
       { id: "f4b", kind: "searchContent", detail: "\\.run\\(" },
-      { id: "f4c", kind: "editFile", subject: "lib.rs", status: "running" },
+      { id: "f4c", kind: "editFile", subject: "crates/smollm-core/src/lib.rs", status: "running" },
+      {
+        id: "f4d",
+        kind: "editFile",
+        subject: "crates/smollm-core/src/events.rs",
+        detail: "1 copy replaced",
+        diff: { added: 7, removed: 2 },
+        status: "ok",
+      },
     ],
   },
   // A refusal, as the load guard reports it, so the card can be looked at without uninstalling the
@@ -540,3 +623,10 @@ export const FIXTURE_ROWS: Row[] = [
     },
   },
 ];
+
+/**
+ * The pill `?fixture=1` shows: the two edits the scripted rows above report, added up. It is written
+ * out rather than derived, so the number here is the shape a real `DiffStaged` arrives with instead of
+ * a second source of truth computed from the rows.
+ */
+export const FIXTURE_DIFF: RunDiff = { files: 2, added: 36, removed: 14 };

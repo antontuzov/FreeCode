@@ -25,6 +25,7 @@
 //!     run that carries an image is answered by a server holding the projector the model's card names,
 //!     and reaching that is a deliberate relaunch with its cost announced — see [`Needs`].
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -35,6 +36,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use smollm_config::{PackingChoice, ReasoningEffort, Settings};
 use smollm_core::events::{AgentEvent, NoticeCode, RunReport};
+use smollm_core::transcript::DiffStat;
 use smollm_llama::{
     prompt_tokens, start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message, Reply,
     ReplyDelta, ServerHandle, StreamControl, IMAGE_TOKEN_CAP,
@@ -299,10 +301,49 @@ pub struct ChatState {
     /// change that doubles the slot from inheriting the old one's verdict.
     last_fill: Mutex<Option<(u32, u64)>>,
     runs: AtomicU64,
+    /// What this run changed on disk, keyed by the workspace-relative path: the line counts every
+    /// accepted edit cost. Keyed rather than summed because a file edited three times is one file
+    /// changed and every one of those lines still counts — which is the one thing [`DiffStat::merge`]
+    /// cannot say, since it takes the larger of two files-changed counts rather than the union.
+    staged: Mutex<BTreeMap<String, (u32, u32)>>,
     /// Set by [`chat_stop`] and read by the run in flight at the next batch of deltas. A plain
     /// flag rather than a dropped future because the answer streamed so far has to survive: the
     /// request ends at a chunk boundary and returns what it had.
     stop_requested: Arc<AtomicBool>,
+}
+
+impl ChatState {
+    /// Open the run's ledger. Called before the request goes out, so a run that changes nothing
+    /// reports nothing rather than quoting the last run's numbers.
+    pub fn begin_run(&self) {
+        lock(&self.staged).clear();
+    }
+
+    /// Charge one accepted edit to the ledger and report the run's total so far, which is what the
+    /// pill above the composer shows while the run is still going.
+    pub fn stage(&self, path: &str, added: u32, removed: u32) -> DiffStat {
+        {
+            let mut held = lock(&self.staged);
+            let entry = held.entry(path.to_string()).or_insert((0, 0));
+            entry.0 += added;
+            entry.1 += removed;
+        }
+        self.staged_diff().expect("the ledger has a row now")
+    }
+
+    /// The run's diff, or `None` while it has changed nothing — the difference between a pill that
+    /// says "+12 −4" and one that says "+0 −0" about a run that only read files.
+    pub fn staged_diff(&self) -> Option<DiffStat> {
+        let held = lock(&self.staged);
+        if held.is_empty() {
+            return None;
+        }
+        Some(DiffStat {
+            lines_added: held.values().map(|(added, _)| added).sum(),
+            lines_removed: held.values().map(|(_, removed)| removed).sum(),
+            files_changed: held.len() as u32,
+        })
+    }
 }
 
 /// Stop and release every server this process owns.
@@ -820,8 +861,8 @@ fn request_for(state: &ChatState, settings: &Settings, turn: &Turn, tools: bool)
     request.max_tokens = turn.max_tokens;
     request.reasoning_effort = Some(turn.effort.clone());
     if tools {
-        // Only the four reads this build has executors for: a schema the host cannot run is a promise
-        // the model would be asked to break.
+        // Only the calls this build has executors for — the four reads and the one workspace edit: a
+        // schema the host cannot run is a promise the model would be asked to break.
         request.tools = smollm_tools::executable_specs();
     }
     request
@@ -1117,6 +1158,9 @@ pub async fn chat_send(
     let settings = appearance::load_settings()?;
     let run_id = format!("run-{}", state.runs.fetch_add(1, Ordering::Relaxed) + 1);
     let stopped = AtomicBool::new(false);
+    // This run's own tally, opened before its first request: the pill reads it, and a run that
+    // changes nothing has to be able to say nothing.
+    state.begin_run();
     let model_label = format!("{} ({})", turn.model.name, turn.view.packing);
     emit(
         &app,
@@ -1228,7 +1272,9 @@ pub async fn chat_send(
                     // the one they cut short, so the flag has to come from the run itself.
                     stopped: stopped.load(Ordering::Relaxed),
                     context_used: context_percent(reply.total_tokens, turn.view.context_tokens),
-                    total_diff: None,
+                    // What the run's accepted edits cost, or nothing at all for a run that only read
+                    // the workspace. `None` is the honest answer there, not a zero.
+                    total_diff: state.staged_diff(),
                     run: run_report(&reply, started.elapsed()),
                 },
             );
@@ -1409,6 +1455,39 @@ mod tests {
         lock(&state.slot).streaming = true;
         assert!(request_stop(&state));
         assert!(state.stop_requested.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_run_that_writes_nothing_leaves_nothing_to_review() {
+        let state = ChatState::default();
+        assert_eq!(state.staged_diff(), None);
+        state.begin_run();
+        // A read-only run and a run that never happened both end with no pill, rather than a "+0 −0"
+        // that looks like a change nobody can find.
+        assert_eq!(state.staged_diff(), None);
+    }
+
+    #[test]
+    fn one_file_edited_twice_is_one_file_and_every_line_it_cost() {
+        let state = ChatState::default();
+        state.begin_run();
+        state.stage("src/lib.rs", 4, 1);
+        let total = state.stage("src/lib.rs", 2, 0);
+        assert_eq!(
+            total,
+            DiffStat {
+                lines_added: 6,
+                lines_removed: 1,
+                files_changed: 1
+            }
+        );
+        // A second file is the only thing that moves the count, which is what `merge` could not say.
+        let total = state.stage("src/exec.rs", 7, 2);
+        assert_eq!(total.files_changed, 2);
+        assert_eq!((total.lines_added, total.lines_removed), (13, 3));
+        // And the next run opens a fresh ledger, so a pill never quotes the run before it.
+        state.begin_run();
+        assert_eq!(state.staged_diff(), None);
     }
 
     #[test]

@@ -132,6 +132,9 @@ export const useChat = create<ChatStore>((set, get) => ({
     transcript.setContextUsed(null);
     // Same for the run report — it describes an answer this transcript no longer holds.
     transcript.setLastRun(null);
+    // The pill counts a run's writes, and this window has no run to count now. The files the last one
+    // edited stay edited on disk; saying so here would be a claim about the workspace, not about a run.
+    transcript.setRunDiff(null);
     // The conversation that was on screen is filed, which is the only reason throwing it away is a
     // control rather than a loss. Its row goes back to the list at once, so the user can see where it
     // went, and no row is highlighted because nothing is open any more.

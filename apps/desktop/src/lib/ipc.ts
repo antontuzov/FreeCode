@@ -231,11 +231,25 @@ export type HostStepKind =
 export type HostStepStatus = "running" | "done" | "blocked" | "failed";
 
 /**
+ * `smollm_core::transcript::DiffStat`: what a write cost, counted by the host. On a row it is that
+ * call's own file, so `filesChanged` is 1; on `diffStaged` and `runFinished` it is the run's ledger,
+ * where `filesChanged` counts *distinct* paths — a run that edits one file four times says one file,
+ * not four.
+ */
+export type HostDiff = {
+  linesAdded: number;
+  linesRemoved: number;
+  filesChanged: number;
+};
+
+/**
  * `smollm_core::transcript::TranscriptStep`: one row as the host declares it.
  *
  * The host owns which row exists and what it measured; the catalog owns the words around it. `params`
  * carries the numbers a label interpolates, and `detail` the path or pattern the call acted on, which
- * the transcript shows as the row's chip rather than inside a sentence.
+ * the transcript shows as the row's chip rather than inside a sentence. On an edit row `detail` is the
+ * written file as the sandbox resolved it — workspace-relative, so two calls that named one file land
+ * on one row of the ledger.
  */
 export type HostStep = {
   id: string;
@@ -243,19 +257,22 @@ export type HostStep = {
   params: Record<string, string | number>;
   status: HostStepStatus;
   detail: string;
+  /** The lines this call cost, or null for a row that changed nothing. */
+  diff: HostDiff | null;
   /** The registry id, which is what tells a generic "Ran tool" row which tool it ran. */
   toolId: string | null;
   collapsedByDefault: boolean;
 };
 
 /**
- * `smollm_core::events::ToolOutcome`. Only the two fields a read can answer with are here: the rest of
- * the Rust struct — an exit code, a diff, artifacts — belongs to a build that writes and runs, and this
- * one does neither.
+ * `smollm_core::events::ToolOutcome`. The three fields a call that reads or edits can answer with are
+ * here; the rest of the Rust struct — an exit code, artifacts — belongs to a build that runs shells
+ * and produces files, and this one does neither.
  */
 export type HostToolOutcome = {
   ok: boolean;
   summary: string;
+  diff: HostDiff | null;
 };
 
 /**
@@ -273,10 +290,13 @@ export type AgentEvent =
   | { type: "toolStarted"; step: HostStep }
   | { type: "toolFinished"; step: HostStep; outcome: HostToolOutcome }
   | { type: "toolBatchClosed"; step: HostStep }
+  /** The run's ledger after one more write landed on it, so the "+N −M" pill moves while the run is
+   * still going rather than arriving only once it ends. */
+  | { type: "diffStaged"; diff: HostDiff }
   | { type: "engineBlocked"; info: BlockedInfo }
   | { type: "warning"; code: string; params: NoticeParams }
-  /** `totalDiff` is the "+N −M" pill's running total. The loop this build runs only reads a
-   * workspace, so it has nothing to stage and this stays null.
+  /** `totalDiff` is the "+N −M" pill's closing total: null when the run wrote nothing, which is the
+   * same answer as "there is nothing to review".
    * `contextUsed` is the percent of the window the finished run left filled, counted by the server;
    * null when the stream never reported its usage frame. `run` is what the run cost: always there,
    * since the host timed the wait itself, with the engine's numbers missing from a stream the user
@@ -286,7 +306,7 @@ export type AgentEvent =
       runId: string;
       stopped: boolean;
       contextUsed: number | null;
-      totalDiff: null;
+      totalDiff: HostDiff | null;
       run: RunReport;
     }
   | { type: "failed"; message: string };

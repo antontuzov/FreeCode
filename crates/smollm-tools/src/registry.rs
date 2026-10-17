@@ -458,14 +458,15 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
         .collect()
 }
 
-/// The tools this build can actually run: the four workspace reads whose executors live in
-/// [`crate::exec`].
+/// The tools this build can actually run: the four workspace reads and the one write whose executors
+/// live in [`crate::exec`].
 ///
 /// The rest of the registry is a declaration with no verb behind it — a schema, a permission class,
-/// and nothing that touches the disk. Offering one of those would invite the model to ask for an edit
-/// or a shell command that can only come back refused, so a run that carries tools hands over this
-/// list and nothing else.
-pub const EXECUTABLE: &[&str] = &["read_file", "list_dir", "glob", "grep_search"];
+/// and nothing that touches the disk. Offering one of those would invite the model to ask for a shell
+/// command or a delete that can only come back refused, so a run that carries tools hands over this
+/// list and nothing else. The write is on it because the sandbox bounds it to the workspace root;
+/// the shell is not, because nothing bounds it.
+pub const EXECUTABLE: &[&str] = &["read_file", "list_dir", "glob", "grep_search", "edit_file"];
 
 pub fn is_executable(tool_id: &str) -> bool {
     EXECUTABLE.contains(&tool_id)
@@ -618,16 +619,33 @@ mod tests {
         );
     }
 
-    /// A tool with no executor must not be offered: the model would ask for an edit or a command and
-    /// every round of that is a refusal the run has to explain.
+    /// A tool with no executor must not be offered: the model would ask for a command and every round
+    /// of that is a refusal the run has to explain.
+    ///
+    /// The other half of the rule is the one that keeps the loop's promise: what is offered may read
+    /// the workspace and change one file of it, and nothing that reaches past the workspace is on the
+    /// list at all. A side-effect or network class appearing here means the sandbox is the only thing
+    /// between a run and a machine.
     #[test]
-    fn only_the_reads_with_executors_are_offered_to_a_run() {
+    fn only_workspace_reads_and_the_one_write_are_offered_to_a_run() {
         for id in EXECUTABLE {
+            let class = find(id).map(|t| t.permission);
             assert!(
-                find(id).is_some_and(|t| t.is_read_only()),
-                "{id} is offered and not a read"
+                matches!(
+                    class,
+                    Some(PermissionClass::ReadOnly) | Some(PermissionClass::WorkspaceWrite)
+                ),
+                "{id} is offered with {class:?}, which the sandbox does not bound"
             );
         }
+        assert_eq!(
+            EXECUTABLE
+                .iter()
+                .filter(|id| find(id).is_some_and(|t| !t.is_read_only()))
+                .count(),
+            1,
+            "exactly one offered tool changes a file"
+        );
         assert!(!is_executable("write_file"));
         assert!(!is_executable("terminal"));
         // `codebase_search` is a declared read with no index behind it, so it stays out too.
