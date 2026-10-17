@@ -6,6 +6,7 @@ import { shortcutLabel } from "../lib/shortcuts";
 import { useChat } from "../state/chat";
 import { useTranscript } from "../state/transcript";
 import { Icon } from "./icons";
+import { ModelPicker } from "./ModelPicker";
 
 const APPROVAL_MODES = ["auto", "ask", "plan"] as const;
 type ApprovalMode = (typeof APPROVAL_MODES)[number];
@@ -167,15 +168,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
 
           <span className="flex-1" />
 
-          <button
-            type="button"
-            onClick={onPickModel}
-            className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-fine text-muted hover:bg-hover hover:text-fg"
-          >
-            <Icon name="bolt" size={13} />
-            {translate(locale, "composer.model")}
-            <Icon name="chevronDown" size={12} />
-          </button>
+          <ModelPicker locale={locale} onOpenSettings={onPickModel} />
           <button
             type="button"
             className="icon-btn"

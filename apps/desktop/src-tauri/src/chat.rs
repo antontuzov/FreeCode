@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use smollm_config::{ReasoningEffort, Settings};
+use smollm_config::{PackingChoice, ReasoningEffort, Settings};
 use smollm_core::events::{AgentEvent, NoticeCode, RunReport};
 use smollm_llama::{
     prompt_tokens, start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message, Reply,
@@ -126,6 +126,9 @@ struct Running {
     /// What this server was started with, kept so a death can be compared against a *change*: the
     /// restart budget is a budget per configuration, not per app run. See [`MAX_RESTARTS`].
     tuning: LaunchTuning,
+    /// The weights this server actually loaded, which is what a later request has to match before it
+    /// may reuse the answer it would otherwise get from another model.
+    weights: ModelKey,
     /// Set when the model's effort contract replaced the saved choice, so the launch can announce it
     /// rather than the override looking like a silent default.
     effort_swap: Option<EffortSwap>,
@@ -158,8 +161,28 @@ impl Running {
                 max_tokens: settings.sampling.budget.clamped().max_tokens,
             },
             tuning,
+            weights: model_key(settings),
             effort_swap,
         }
+    }
+}
+
+/// Which weights a request asks for, in the user's own words rather than as a resolved path.
+///
+/// This is the half of "the same configuration" [`LaunchTuning`] does not carry: two requests can want
+/// the same context size, backend and thinking mode and still need different servers, because one of
+/// them names another model. A running server holds its weights in RAM and cannot be handed another
+/// file, so the pair decides whether the live one may answer at all.
+#[derive(Clone, Debug, PartialEq)]
+struct ModelKey {
+    catalog_id: String,
+    packing: PackingChoice,
+}
+
+fn model_key(settings: &Settings) -> ModelKey {
+    ModelKey {
+        catalog_id: settings.local_model.catalog_id.clone(),
+        packing: settings.local_model.packing.clone(),
     }
 }
 
@@ -167,6 +190,7 @@ impl Running {
 struct Crash {
     log: String,
     tuning: LaunchTuning,
+    weights: ModelKey,
 }
 
 /// What the host is about to do about the engine not running.
@@ -194,14 +218,19 @@ impl Slot {
     /// Decide whether a start may proceed, and reserve the slot if it may.
     ///
     /// A death under a *different* configuration is not the same failure, so changing what the
-    /// launcher actually uses (context size, GPU offload, thinking mode, flash attention) re-arms the
-    /// budget. That is the documented fix for the common cause, so the bound never traps a user who is
-    /// working the problem — it only stops the host from re-running a launch that just failed.
-    fn begin(&mut self, tuning: &LaunchTuning) -> Result<Launch, String> {
+    /// launcher actually uses (context size, GPU offload, thinking mode, flash attention) — or which
+    /// weights it points at — re-arms the budget. That is the documented fix for the common cause, so
+    /// the bound never traps a user who is working the problem — it only stops the host from
+    /// re-running a launch that just failed.
+    fn begin(&mut self, tuning: &LaunchTuning, weights: &ModelKey) -> Result<Launch, String> {
         if self.launching {
             return Err("the engine is already starting".into());
         }
-        if self.crash.as_ref().is_some_and(|c| &c.tuning != tuning) {
+        if self
+            .crash
+            .as_ref()
+            .is_some_and(|c| &c.tuning != tuning || &c.weights != weights)
+        {
             self.deaths = 0;
             self.crash = None;
         }
@@ -578,7 +607,7 @@ enum Live {
 /// its port, and the death is parked in the slot with its log: whether another one gets started is
 /// [`Slot::begin`]'s decision, since that is the place which knows both the budget and the
 /// configuration the next launch would use.
-fn live(app: &AppHandle, wanted: &LaunchTuning) -> Live {
+fn live(app: &AppHandle, wanted: &LaunchTuning, weights: &ModelKey) -> Live {
     let state = app.state::<ChatState>();
     let mut slot = lock(&state.slot);
     let Some(running) = slot.running.as_mut() else {
@@ -588,12 +617,16 @@ fn live(app: &AppHandle, wanted: &LaunchTuning) -> Live {
         let crash = Crash {
             log: running.handle.log_tail(),
             tuning: running.tuning.clone(),
+            weights: running.weights.clone(),
         };
         slot.running = None;
         slot.note_death(crash);
         return Live::Nothing;
     }
-    if &running.tuning == wanted {
+    // Both halves, because the tuning says nothing about which weights are resident: a server started
+    // for one model answers a request for another with the first model's words, which reads as the
+    // switch having worked.
+    if &running.tuning == wanted && &running.weights == weights {
         return Live::Reuse(Box::new(running.turn.clone()));
     }
     let running = slot
@@ -616,7 +649,8 @@ async fn ensure_running(app: &AppHandle, needs: Needs) -> Result<Turn, String> {
         }
     };
     let wanted = tuning(&settings, vision_projector.clone());
-    match live(app, &wanted) {
+    let weights = model_key(&settings);
+    match live(app, &wanted, &weights) {
         Live::Reuse(turn) => return Ok(*turn),
         Live::Replace(handle) => {
             // The wait is the picture's cost, and it is the reload rather than the answer that takes the
@@ -637,7 +671,7 @@ async fn ensure_running(app: &AppHandle, needs: Needs) -> Result<Turn, String> {
     let kind = {
         let state = app.state::<ChatState>();
         let mut slot = lock(&state.slot);
-        slot.begin(&wanted)?
+        slot.begin(&wanted, &weights)?
     };
     // Announced, not swallowed: a relaunch that said nothing would just look like a slow first
     // answer, and the reason the last one died is the only clue to what to change.
@@ -1455,31 +1489,37 @@ mod tests {
 
     const DEAD: &str = "llama_init_from_gguf: unable to load the model";
 
-    fn death(tuning: &LaunchTuning) -> Crash {
+    fn death(tuning: &LaunchTuning, weights: &ModelKey) -> Crash {
         Crash {
             log: DEAD.to_string(),
             tuning: tuning.clone(),
+            weights: weights.clone(),
         }
     }
 
     /// The whole budget, driven on a `Slot` directly: a real `Running` needs a real server.
     /// `launching` is released first because the real `ensure_running` clears it as soon as a launch
     /// resolves, and a death is only ever noticed between two resolved launches.
-    fn died_under(slot: &mut Slot, tuning: &LaunchTuning) -> Result<Launch, String> {
+    fn died_under(
+        slot: &mut Slot,
+        tuning: &LaunchTuning,
+        weights: &ModelKey,
+    ) -> Result<Launch, String> {
         slot.launching = false;
-        slot.note_death(death(tuning));
-        slot.begin(tuning)
+        slot.note_death(death(tuning, weights));
+        slot.begin(tuning, weights)
     }
 
     #[test]
     fn a_server_that_dies_is_restarted_and_each_restart_is_counted() {
         let tuning = tuning(&Settings::default(), None);
+        let weights = model_key(&Settings::default());
         let mut slot = Slot::default();
-        assert_eq!(slot.begin(&tuning), Ok(Launch::First));
+        assert_eq!(slot.begin(&tuning, &weights), Ok(Launch::First));
 
         for attempt in 1..=MAX_RESTARTS {
             assert_eq!(
-                died_under(&mut slot, &tuning),
+                died_under(&mut slot, &tuning, &weights),
                 Ok(Launch::Restart {
                     attempt,
                     log: DEAD.to_string()
@@ -1492,12 +1532,14 @@ mod tests {
     #[test]
     fn a_budget_spent_on_the_same_configuration_is_a_refusal_that_quotes_the_server() {
         let tuning = tuning(&Settings::default(), None);
+        let weights = model_key(&Settings::default());
         let mut slot = Slot::default();
-        slot.begin(&tuning).unwrap();
+        slot.begin(&tuning, &weights).unwrap();
         for _ in 1..=MAX_RESTARTS {
-            died_under(&mut slot, &tuning).expect("inside the budget");
+            died_under(&mut slot, &tuning, &weights).expect("inside the budget");
         }
-        let message = died_under(&mut slot, &tuning).expect_err("past the budget it is refused");
+        let message =
+            died_under(&mut slot, &tuning, &weights).expect_err("past the budget it is refused");
         assert!(message.contains("not being started again"), "{message}");
         // The count the user sees is deaths, and the restarts that were spent on them.
         assert!(
@@ -1520,40 +1562,69 @@ mod tests {
         // The bound exists to stop the host retrying the same doomed launch, so the setting that
         // changes what is launched has to re-arm it: that is the documented fix for the common cause.
         let was_tried = tuning(&Settings::default(), None);
+        let weights = model_key(&Settings::default());
         let mut slot = Slot::default();
-        slot.begin(&was_tried).unwrap();
+        slot.begin(&was_tried, &weights).unwrap();
         for _ in 1..=MAX_RESTARTS {
-            died_under(&mut slot, &was_tried).unwrap();
+            died_under(&mut slot, &was_tried, &weights).unwrap();
         }
-        died_under(&mut slot, &was_tried).expect_err("budget spent");
+        died_under(&mut slot, &was_tried, &weights).expect_err("budget spent");
 
         let mut lowered = was_tried.clone();
         lowered.context_tokens = Some(4_096);
         assert_eq!(
-            slot.begin(&lowered),
+            slot.begin(&lowered, &weights),
             Ok(Launch::First),
             "a configuration that has never died has its own budget"
         );
     }
 
     #[test]
+    fn another_model_under_the_same_launch_settings_is_a_new_attempt_too() {
+        // Every field the launcher passes can be identical between two models — same context, same
+        // offload, same sampling — and still be a different file on disk, which is the thing most
+        // likely to have failed. So the weights are part of the configuration the budget counts.
+        let tuning = tuning(&Settings::default(), None);
+        let first = model_key(&Settings::default());
+        let mut slot = Slot::default();
+        slot.begin(&tuning, &first).unwrap();
+        for _ in 1..=MAX_RESTARTS {
+            died_under(&mut slot, &tuning, &first).unwrap();
+        }
+        died_under(&mut slot, &tuning, &first).expect_err("budget spent");
+
+        let other = ModelKey {
+            catalog_id: "ternary-bonsai-2-4b".into(),
+            packing: PackingChoice::Auto,
+        };
+        assert_eq!(
+            slot.begin(&tuning, &other),
+            Ok(Launch::First),
+            "a model that has never died has its own budget"
+        );
+    }
+
+    #[test]
     fn an_answer_that_finished_pays_for_the_deaths_before_it() {
         let tuning = tuning(&Settings::default(), None);
+        let weights = model_key(&Settings::default());
         let mut slot = Slot::default();
-        slot.begin(&tuning).unwrap();
-        died_under(&mut slot, &tuning).unwrap();
+        slot.begin(&tuning, &weights).unwrap();
+        died_under(&mut slot, &tuning, &weights).unwrap();
         slot.launching = false;
         slot.re_arm();
-        assert_eq!(slot.begin(&tuning), Ok(Launch::First));
+        assert_eq!(slot.begin(&tuning, &weights), Ok(Launch::First));
     }
 
     #[test]
     fn one_launch_can_be_in_flight_at_a_time() {
         let tuning = tuning(&Settings::default(), None);
+        let weights = model_key(&Settings::default());
         let mut slot = Slot::default();
-        slot.begin(&tuning).expect("the first start is allowed");
+        slot.begin(&tuning, &weights)
+            .expect("the first start is allowed");
         assert_eq!(
-            slot.begin(&tuning),
+            slot.begin(&tuning, &weights),
             Err("the engine is already starting".into())
         );
     }

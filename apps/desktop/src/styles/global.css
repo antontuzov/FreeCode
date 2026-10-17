@@ -530,6 +530,56 @@ select.field-input {
   animation: surface-enter var(--dur-quick) var(--ease-standard);
 }
 
+/* ---- the composer's model picker ----
+ * Unlike the palette, it opens from the pill it belongs to and keeps the ground lit: the choice is
+ * about the prompt still sitting in the box above, so covering the window with a scrim would hide the
+ * very words the new model has to answer. */
+.picker-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+.picker-panel {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100vw - var(--space-6) * 2));
+  max-height: min(340px, 46vh);
+  padding-bottom: var(--space-1);
+  overflow-y: auto;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-bg);
+  backdrop-filter: var(--surface-blur);
+  box-shadow: var(--shadow);
+  animation: surface-enter var(--dur-quick) var(--ease-standard);
+}
+/* A model is chosen the way a nav row is — hover, and the accent's soft fill on the one in use — so
+ * the panel has no third selection idiom in it. */
+.picker-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    border-color var(--dur-quick) var(--ease-standard);
+}
+.picker-row:hover {
+  background: var(--bg-hover);
+}
+.picker-row[data-current] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
 /* The four interface-style cards. Each paints the style it advertises through `--preview`, so the
  * row stays readable whichever accent is live. */
 /* Shot 02: the tinted preview box carries the selection outline, and the style name sits below it
