@@ -63,8 +63,8 @@ export function applyToDocument(a: AppearanceState): void {
   root.dataset.platform = platform();
 }
 
-/** Dev-only URL levers — `?mode=light`, `?font=serif`, `?width=wide`, `?lines=off`, `?wrap=on`,
- * `?glass=off` — honoured only by a dev build.
+/** Dev-only URL levers — `?mode=light`, `?accent=bee`, `?font=serif`, `?width=wide`, `?lines=off`,
+ * `?wrap=on`, `?glass=off` — honoured only by a dev build.
  * A screenshot comparison needs a state the native window cannot be clicked into, and the alternative
  * was rewriting the settings file the user's own instance reads, which would have flipped their window
  * to get a picture of ours. Production has no such lever: the appearance comes off disk or from
@@ -78,6 +78,10 @@ function devOverrides(): Partial<AppearanceState> {
   // stored state, so an absent key leaves that state alone where an explicit undefined would erase it.
   const mode = q.get("mode");
   if (mode === "light" || mode === "dark" || mode === "system") forced.themeMode = mode;
+  const accent = q.get("accent");
+  if (accent === "forest" || accent === "mint" || accent === "bee" || accent === "parchment") {
+    forced.accent = accent;
+  }
   const font = q.get("font");
   if (font === "sans" || font === "serif" || font === "mono") forced.fontStyle = font;
   const width = q.get("width");

@@ -7,6 +7,11 @@
  * Every screen must render correctly in all 2 x 4 x 2 combinations, so components consume these
  * variables exclusively and never mix a color literal with them.
  *
+ * The second axis is a whole-window one, not a button colour: the grounds, rules and turn markers are
+ * declared as the style mixed into an untinted ground, so a style choice repaints the sidebar wash and
+ * the user's bubble along with the accents. That is why a token here is not one colour per mode, and
+ * why scripts/check-contrast.mjs evaluates the legibility floor once per style rather than per mode.
+ *
  * Two more axes at the bottom of the file are not colour and are not the palette's business:
  *   data-font-style   = sans | serif | mono      --font-family-ui
  *   data-content-width= standard | wide | full   --content-width
@@ -66,34 +71,56 @@
 
 /* ---- mode: dark ----
  * The reference dark is not neutral grey — every surface carries a green cast, and the sidebar is
- * LIGHTER than the transcript column, which is the opposite of the usual raised-panel convention. */
+ * LIGHTER than the transcript column, which is the opposite of the usual raised-panel convention.
+ *
+ * Every surface below is the style mixed into an untinted ground, so picking Parchment warms the
+ * whole window instead of only its buttons — which is what the interface-style cards in shot 02
+ * promise and this file used to break: the sidebar stayed forest whatever the style was. The literal
+ * in each `color-mix` is the ground with no style in it, and the percentage is how much style goes
+ * in; they are solved from the measured pixels of the DEFAULT style, so Mint still paints exactly
+ * what shots 05 and 06 measure and the other three inherit that lightness in their own hue.
+ * scripts/check-contrast.mjs holds both halves of the claim — Mint's grounds against the reference,
+ * and every ink against all four styles' grounds, since a Bee card sits lighter than a Mint one and
+ * a faint grey loses contrast when the surface under it rises. */
 [data-theme-mode="dark"] {
-  --bg: #0a110e; /* 05: transcript column and right panel */
-  --bg-panel: #112921; /* 05: left sidebar */
-  --bg-elevated: #16332a; /* cards and popovers, lifted one step from --bg-panel */
-  --bg-sunken: #080d0b; /* 05: code and diff gutters */
-  --bg-hover: #1a3a30;
+  /* 05: the transcript column and the right panel; the left sidebar; cards and popovers, lifted one
+     step from the sidebar; the code and diff gutters; the ground a row takes under the pointer. */
+  --bg: color-mix(in oklab, var(--accent-tint) 8%, #040605);
+  --bg-panel: color-mix(in oklab, var(--accent-tint) 16%, #05100c);
+  --bg-elevated: color-mix(in oklab, var(--accent-tint) 14%, #0b1f19);
+  --bg-sunken: color-mix(in oklab, var(--accent-tint) 8%, #030303);
+  --bg-hover: color-mix(in oklab, var(--accent-tint) 16%, #0e231d);
   --text: #e8f0e8; /* 05: primary text */
-  --text-strong: #cfe9d8;
+  /* A heading is the accent read at heading weight, not a different colour: 30% of the style's ink
+     over the body text keeps the near-white lightness and takes the hue from the style. It lands a
+     little off shot 05's #cfe9d8 for Mint, because the same rule now has to serve four styles. */
+  --text-strong: color-mix(in oklab, var(--accent-ink) 30%, var(--text));
   /* Three greys for text, and all three have to clear WCAG AA at the size they are read, which is
      11-13px for the bottom two. The shots measure #93a89c and #6d8278; #6d8278 is 3.3:1 on a card
      (`--bg-elevated`), and the smallest text in the window is exactly what sits on it — turn meta,
      disclosure labels, the language chip on a code fence. So the ladder is re-spaced from the same
      hues: `--text-faint` rises to the floor (4.6:1 on every surface in this mode) and `--text-muted`
-     one step above it, so the two stay distinguishable instead of meeting at the floor. */
+     one step above it, so the two stay distinguishable instead of meeting at the floor. They stay
+     neutral rather than tinted: an ink that follows the style would have to be re-measured for every
+     style, and the gate would then be proving a palette instead of a legibility floor. */
   --text-muted: #a4b9ad; /* derived from 05's #93a89c, one rung above the faint below */
   --text-faint: #899a92; /* derived from 05's #6d8278, which read 3.3:1 on a card */
   /* The measured greys are not thrown away. A skeleton line, a preview rule and the inactive turn
      dash are not information, and at the readable grey they would outshine the text around them —
-     WCAG itself puts non-text decoration outside the contrast rule for exactly that reason. */
-  --ink-quiet: #6d8278; /* 05: the measurement, for marks and fills that carry no words */
-  --border: #1e3a30;
-  --border-strong: #2b4c40;
+     WCAG itself puts non-text decoration outside the contrast rule for exactly that reason. This one
+     is decoration, so it takes the style: a green rule in a parchment window is the same mistake as
+     a green sidebar. The untinted ground is 05's measurement. */
+  --ink-quiet: color-mix(in oklab, var(--accent-tint) 12%, #6c7972);
+  --border: color-mix(in oklab, var(--accent-tint) 16%, #12231d);
+  --border-strong: color-mix(in oklab, var(--accent-tint) 18%, #1f342c);
   --shadow: 0 12px 32px rgb(0 0 0 / 45%);
   /* The ground a floating panel dims the shell to. Only the palette uses it, and it has to be a token
-     because this is the one file allowed to state a colour. */
+     because this is the one file allowed to state a colour. It stays a dimmer rather than a tint:
+     at 62% it is the page with the lights turned down, and a style that warmed it would look like a
+     fifth mode rather than a repaint. */
   --scrim: rgb(4 10 8 / 62%);
-  --code-bg: #0a0f0d; /* 06: review panel code surface */
+  --code-bg: #0a0f0d; /* 06: review panel code surface — neutral on purpose, so a syntax theme's own
+     colours are the only ones competing with the accent */
   --code-theme: "github-dark";
   --success: #4caf7d;
   --warning: #d8a13f;
@@ -102,30 +129,44 @@
      on a Settings card — and on `--bg-elevated` it read 4.2:1. Lifted to 4.6:1 there. */
   --diff-added: #19321d; /* 06: added-line background */
   --diff-removed: #3a1a1a;
-  --checkpoint: #2c3632; /* 07: an inactive turn marker, one step off the column's own ground */
-  --checkpoint-active: #3c4c45; /* 07: the marker at the turn in view — same hue, one step up */
+  /* An inactive turn marker is one step off the column's own ground, and the active one is a step up
+     from that — both read off `--ink-quiet`, so the dashes in the gutter turn with the style too.
+     Shot 07 measures the inactive one. */
+  --checkpoint: color-mix(in oklab, var(--ink-quiet) 37%, var(--bg));
+  --checkpoint-active: color-mix(in oklab, var(--ink-quiet) 55%, var(--bg));
   color-scheme: dark;
 }
 
 /* ---- mode: light ----
  * Here the tint moves to the sidebar and the content goes near-white, so the same "panel is
- * tinted, content is neutral" rule holds in both modes. */
+ * tinted, content is neutral" rule holds in both modes. The tinting mechanism is the dark block's:
+ * a percentage of the style over a stated untinted ground, solved so Mint reproduces shot 04.
+ * `--bg` and `--bg-elevated` stay neutral on purpose. The transcript column and a card are where an
+ * answer is read for minutes at a time, and a page washed in Bee is a page that has opinions about
+ * the model's prose; the reference keeps the reading surface near-white in every style too. */
 [data-theme-mode="light"] {
-  --bg: #fafbf9; /* 04: transcript column and right panel */
-  --bg-panel: #e0f1ea; /* 04: left sidebar, the mint wash */
+  /* 04: the transcript column and the right panel stay near-white; the left sidebar is the style's
+     wash; a card is plain white; the user's own message bubble is a lighter version of the wash; a
+     row under the pointer is the wash again, one notch deeper. */
+  --bg: #fafbf9;
+  --bg-panel: color-mix(in oklab, var(--accent-tint) 12%, #f3fbf7);
   --bg-elevated: #ffffff;
-  --bg-sunken: #eef5f2; /* 04: the user's own message bubble */
-  --bg-hover: #d5e9e0;
+  --bg-sunken: color-mix(in oklab, var(--accent-tint) 9%, #fdfdfc);
+  --bg-hover: color-mix(in oklab, var(--accent-tint) 16%, #edf5f0);
   --text: #1b2420;
-  --text-strong: #284828; /* 04: headings and the active nav label are dark green, not black */
+  /* The reference's headings are dark green, not black — the style, read at heading weight. Mixed
+     from `--accent-ink` rather than `--accent` because a heading has to clear the same floor as body
+     text and the plain family colour is measured against white as a swatch, not as ink. */
+  --text-strong: color-mix(in oklab, var(--accent-ink) 50%, var(--text));
   /* Light mode has the worse problem: on a near-white ground there is no room under 4.5:1, and
      #98a098 measured 2.3:1 on the sidebar's own mint wash — the de-emphasis was really an erasure.
      Same re-spacing as dark mode, from the same measured hues. */
   --text-muted: #4b5650; /* derived from 04's #5c6862, one rung above the faint below */
   --text-faint: #666c66; /* derived from 04's #98a098, which read 2.3:1 on --bg-panel */
-  --ink-quiet: #98a098; /* 04: the measurement, for marks and fills that carry no words */
-  --border: #d5e0d9;
-  --border-strong: #c0cfc6;
+  /* 04's measurement, untinted, then the style on top of it — the same decoration rule as dark mode. */
+  --ink-quiet: color-mix(in oklab, var(--accent-tint) 10%, #9e9f99);
+  --border: color-mix(in oklab, var(--accent-tint) 12%, #e6e7e3);
+  --border-strong: color-mix(in oklab, var(--accent-tint) 16%, #d3d6d1);
   --shadow: 0 10px 28px rgb(20 40 30 / 12%);
   /* The shell under the search palette, pushed back so the panel reads as the thing being typed
      into. Lighter than the dark mode's, because a pale page dims less visibly and the panel already
@@ -135,8 +176,10 @@
   --code-theme: "github-light";
   --success: #2c794a; /* 04's #2c7a4b, one unit down: the gate below holds every ink to AA on every
      surface in its mode, and the mint sidebar wash was the one ground it missed by 0.01. */
-  --warning: #8f6311; /* derived from 04's #9a6b12: the caveats list and the numbers in a code fence
-     are both set at 12px, and on the mint sidebar wash and `--code-bg` that read 4.0:1 and 4.3:1. */
+  --warning: #8a5f10; /* derived from 04's #9a6b12: the caveats list and the numbers in a code fence
+     are both set at 12px, and on the mint sidebar wash and `--code-bg` that read 4.0:1 and 4.3:1.
+     Off the measured value twice over now, because the sidebar wash is whichever style is live, and
+     a parchment wash is the darkest ground a warning has to survive. */
   --danger: #b3403f;
   --diff-added: #d8f0dc;
   --diff-removed: #f6dedd;
@@ -164,36 +207,55 @@
      against white as a swatch and never have to be read as words; used as text they are far too
      light for the near-white ground — Mint, the default, puts a 12px link at 2.4:1 on its own soft
      fill and Bee at 1.8:1. Each `-ink` is the same hue taken down to 4.5:1 on every light surface
-     AND on `--accent-soft`, which is the ground a link chip paints for itself. */
+     AND on `--accent-soft`, which is the ground a link chip paints for itself. The hardest of those
+     grounds is now a chip standing on the sidebar, which is the style's wash with the style's fill on
+     top of it: the two tints stack, and a chip's ink has to be readable through both. So none of the
+     four is a measurement — each is its family's hue taken as far down as it can go and still read as
+     that style rather than as grey. */
   --style-forest-ink: #446952;
-  --style-mint-ink: #357060;
-  --style-bee-ink: #73683c;
-  --style-parchment-ink: #9a4d33;
+  --style-mint-ink: #316a5a;
+  --style-bee-ink: #6a6035;
+  --style-parchment-ink: #94472d;
+  /* The style read as a SURFACE rather than as a swatch or as ink. The four families above are four
+     different lightnesses — Bee is a pale gold and Forest a deep leaf — so mixing the family colour
+     itself into a ground would make the window brighter as well as warmer every time the style
+     changes, and every grey's contrast would move with it. Each `-tint` is the same hue and chroma
+     pulled to Mint's lightness, which is the default's and therefore the one the reference shots were
+     read at: switching style then repaints the chrome's colour and leaves its brightness alone. */
+  --style-forest-tint: #77a286;
+  --style-mint-tint: var(--style-mint);
+  --style-bee-tint: #a8964b;
+  --style-parchment-tint: #db7652;
 
   --accent: var(--style-mint);
   --accent-contrast: var(--style-mint-contrast);
   --accent-ink: var(--style-mint-ink);
+  --accent-tint: var(--style-mint-tint);
 }
 
 [data-accent="forest"] {
   --accent: var(--style-forest);
   --accent-contrast: var(--style-forest-contrast);
   --accent-ink: var(--style-forest-ink);
+  --accent-tint: var(--style-forest-tint);
 }
 [data-accent="mint"] {
   --accent: var(--style-mint);
   --accent-contrast: var(--style-mint-contrast);
   --accent-ink: var(--style-mint-ink);
+  --accent-tint: var(--style-mint-tint);
 }
 [data-accent="bee"] {
   --accent: var(--style-bee);
   --accent-contrast: var(--style-bee-contrast);
   --accent-ink: var(--style-bee-ink);
+  --accent-tint: var(--style-bee-tint);
 }
 [data-accent="parchment"] {
   --accent: var(--style-parchment);
   --accent-contrast: var(--style-parchment-contrast);
   --accent-ink: var(--style-parchment-ink);
+  --accent-tint: var(--style-parchment-tint);
 }
 
 /* On the near-black green a light-mode accent sinks in; the same hue lifted ~14% is what shots 05
@@ -210,17 +272,28 @@
   /* Dark mostly needs no ink step — the lifted accents are already the readable ones against every
      surface — but a link chip paints `--accent-soft` for itself, and that fill composited over a
      card is LIGHTER than the card, which costs a pale ink contrast rather than gaining it. Forest
-     and Parchment needed the lift; Mint and Bee clear 4.5:1 as measured. */
-  --style-forest-ink: #77ba92;
+     and Parchment needed a second step for exactly that reason: Mint and Bee are the two families
+     whose own colour is already the brightest, and they clear 4.5:1 on their own tint as measured. */
+  --style-forest-ink: #84c49c;
   --style-mint-ink: var(--style-mint);
   --style-bee-ink: var(--style-bee);
-  --style-parchment-ink: #e59374;
+  --style-parchment-ink: #ef9f80;
+  /* The same normalization against this mode's Mint, which is the lifted #62c9a8. Bee's swatch is
+     brighter than it and Parchment's is deeper; both give up that difference here, because the
+     surfaces they tint are the ones every grey in the window is read against. */
+  --style-forest-tint: #78c797;
+  --style-mint-tint: var(--style-mint);
+  --style-bee-tint: #c4b362;
+  --style-parchment-tint: #f79571;
 }
 
-/* Soft fills carry the accent without claiming its contrast budget: selected rows, the user's
- * bubble, and the tinted outline on an active pill. */
+/* Soft fills carry the style without claiming its contrast budget: selected rows, the user's
+ * bubble, the tinted chip a link is drawn in, and the tint behind an active pill. They take the
+ * surface tint for the same reason the grounds do — a selected row in Bee must not sit brighter than
+ * the same row in Forest, because the words on it are the same greys. `--accent-line` keeps the raw
+ * family colour: an outline carries no words, and its job is to say "this one is the style". */
 [data-accent] {
-  --accent-soft: color-mix(in oklab, var(--accent) 16%, transparent);
+  --accent-soft: color-mix(in oklab, var(--accent-tint) 16%, transparent);
   --accent-line: color-mix(in oklab, var(--accent) 55%, transparent);
 }
 

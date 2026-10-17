@@ -161,9 +161,10 @@ export function Palette({
               <span className="row-copy min-w-0">
                 <span className="row-title truncate">{result.title}</span>
                 <span className="row-desc line-clamp-2">
-                  {result.who && (
-                    <span className="text-micro text-faint">{`${result.who} · `}</span>
-                  )}
+                  {/* The size steps down, the ink does not: the keyboard's row paints the style's own
+                      tint, and a fill costs the word standing on it contrast. One rung down here is a
+                      word that goes unread on the one line the user is about to open. */}
+                  {result.who && <span className="text-micro">{`${result.who} · `}</span>}
                   {mark(result.detail, query)}
                 </span>
               </span>

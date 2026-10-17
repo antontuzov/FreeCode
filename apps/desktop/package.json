@@ -24,6 +24,7 @@
     "tauri:coding": "tauri dev --config src-tauri/tauri.dev-coding.conf.json",
     "tauri:picker": "tauri dev --config src-tauri/tauri.dev-picker.conf.json",
     "tauri:icon": "tauri dev --config src-tauri/tauri.dev-icon.conf.json",
+    "tauri:style": "tauri dev --config src-tauri/tauri.dev-style.conf.json",
     "tauri:extensions": "tauri dev --config src-tauri/tauri.dev-extensions.conf.json"
   },
   "dependencies": {
