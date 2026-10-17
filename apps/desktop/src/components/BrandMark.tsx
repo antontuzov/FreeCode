@@ -1,4 +1,5 @@
 import { hostMascot } from "../lib/ipc";
+import { useAppearance } from "../state/appearance";
 
 /**
  * The app's two faces, and the opposite trades they make.
@@ -55,9 +56,13 @@ const mascotTiles = import.meta.glob<string>("../assets/mascots/*.webp", {
   import: "default",
 });
 
-const mascots = Object.keys(mascotTiles)
+const mascots: string[] = Object.keys(mascotTiles)
   .sort()
-  .map((path) => mascotTiles[path]);
+  .flatMap((path) => mascotTiles[path] ?? []);
+
+/** The twelve, in the order both this page and `brand.rs` number them, for the picker that has to
+ * show every one of them rather than only the worn one. */
+export const MASCOT_TILES = mascots;
 
 /** One duck per run, and it is the host's duck: the same picture goes on the Dock the moment the app
  * opens (`brand.rs`), so the window that asks would otherwise be wearing a different face than the
@@ -65,25 +70,40 @@ const mascots = Object.keys(mascotTiles)
  *
  * `?mascot=<1..12>` names the tile instead, for the same reason the other deep links exist: a pick
  * nobody can re-ask for is a set of twelve that only one of ever got looked at. */
-function pickTile(count: number): number {
+const urlTile = (() => {
   const forced = Number(new URLSearchParams(window.location.search).get("mascot"));
-  if (Number.isInteger(forced) && forced >= 1 && forced <= count) return forced;
-  if (hostMascot !== null && hostMascot <= count) return hostMascot;
+  return Number.isInteger(forced) && forced >= 1 && forced <= mascots.length ? forced : null;
+})();
+
+function pickTile(): number {
+  if (urlTile !== null) return urlTile;
+  if (hostMascot !== null && hostMascot <= mascots.length) return hostMascot;
   // A page opened outside the app is handed no number by anybody, and a mascot that waits on a host
   // to appear is a mascot that never shows.
-  return 1 + Math.floor(Math.random() * count);
+  return 1 + Math.floor(Math.random() * mascots.length);
 }
 
-const mascot = mascots[pickTile(mascots.length) - 1];
+/** The tile this page wears right now, one-based. The picker needs the number because switching the
+ * app from rolling to pinned means naming the tile the roll just landed on — which only the worn face
+ * knows. */
+export const launchTile = pickTile();
+
+const mascot = mascots[launchTile - 1];
 
 export function MascotMark({ size = 96 }: { size?: number }) {
+  // The tile the user pinned, once the settings have been read: the host moves the Dock to the same
+  // number when the page saves, so a window still showing its launch's roll would disagree with the
+  // tile beside it. The URL lever outranks the pin, because it exists to paint a tile the stored
+  // document does not name.
+  const pinned = useAppearance((s) => s.appIcon);
+  const worn = pinned === null || urlTile !== null ? mascot : (MASCOT_TILES[pinned - 1] ?? mascot);
   return (
     <img
       // The app's name is printed under it, so the picture is that word a second time for a screen
       // reader, and `alt=""` is the answer rather than a new translation key.
       alt=""
       aria-hidden
-      src={mascot}
+      src={worn}
       width={size}
       height={size}
       className="rounded-full border border-line object-cover"

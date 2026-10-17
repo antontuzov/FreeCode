@@ -241,3 +241,33 @@ export function StyleCard({
     </button>
   );
 }
+
+/**
+ * One mascot tile the app can wear. The picture is the whole control — a tile has no name, so the
+ * accessible label gives its number, which is also how the settings document and `?mascot=` say it.
+ */
+export function IconCard({
+  source,
+  label,
+  selected,
+  onSelect,
+}: {
+  source: string;
+  label: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      aria-label={label}
+      data-selected={selected || undefined}
+      className="icon-card"
+      onClick={onSelect}
+    >
+      {/* The label is on the button, so the picture is decoration here rather than the word again. */}
+      <img alt="" aria-hidden src={source} width={44} height={44} className="rounded-full" />
+    </button>
+  );
+}

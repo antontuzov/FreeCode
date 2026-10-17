@@ -18,6 +18,8 @@ const FALLBACK: AppearanceState = {
   // Same as the Rust defaults, so a window that has no host yet draws the gutter the reference shows.
   showLineNumbers: true,
   wrapLongLines: false,
+  // No pin: a window with no host yet rolls its own face, as it did before there was a picker.
+  appIcon: null,
 };
 
 type AppearanceStore = AppearanceState & {

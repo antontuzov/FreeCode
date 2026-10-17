@@ -103,6 +103,7 @@ async fn save_appearance(
     let mut settings = crate::appearance::load_settings()?;
     crate::appearance::apply(&appearance, &mut settings.appearance);
     crate::appearance::save_settings(&settings)?;
+    wear_icon(&app, settings.appearance.app_icon);
     Ok(crate::appearance::view(
         &settings.appearance,
         os_prefers_light(&app),
@@ -119,10 +120,20 @@ async fn load_settings() -> Result<Settings, String> {
 /// The Settings surface edits the loaded document in place and hands it back, so a field it does
 /// not render still round-trips untouched. The host answers with what it stored.
 #[tauri::command]
-async fn save_settings(mut settings: Settings) -> Result<Settings, String> {
+async fn save_settings(app: AppHandle, mut settings: Settings) -> Result<Settings, String> {
     settings.schema_version = smollm_config::SETTINGS_SCHEMA_VERSION;
     appearance::save_settings(&settings)?;
+    wear_icon(&app, settings.appearance.app_icon);
     Ok(settings)
+}
+
+/// Move the app's face to the tile the document names. The pin is host state because the Dock is
+/// host-drawn, so a save from either settings surface has to hand it over and repaint: without the
+/// second half the window shows the duck the user picked while its own tile stays the one it launched
+/// with. Clearing the pin hands this launch's roll back rather than choosing a new one.
+fn wear_icon(app: &AppHandle, pinned: Option<u8>) {
+    brand::prefer(pinned.map(usize::from));
+    brand::set_dock_tile(app);
 }
 
 /// The supervised server is a child process, and nothing on macOS makes a child die with its parent,
@@ -181,6 +192,16 @@ fn watch_signals(_: AppHandle) {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Read before the builder below asks for the mascot's number: a user who pinned a tile should
+    // open the app wearing it, on the Dock and in the window both, from the first frame. Nothing
+    // here is fatal — a document that will not parse leaves the pin unset, which is the roll that
+    // shipped before there was a picker, and the same read reports the failure later.
+    let pinned = appearance::load_settings()
+        .ok()
+        .and_then(|settings| settings.appearance.app_icon)
+        .map(usize::from);
+    brand::prefer(pinned);
+
     let app = tauri::Builder::default()
         // The supervised server and the conversation it is answering from. One window, one engine:
         // the state is here so a second `start_engine` cannot begin a second 6 GB load.

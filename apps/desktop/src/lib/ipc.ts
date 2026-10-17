@@ -130,6 +130,9 @@ export type AppearanceState = {
    * rather than only to the document the Settings surface edits. */
   showLineNumbers: boolean;
   wrapLongLines: boolean;
+  /** Which of the twelve mascot tiles the app wears, one-based, or null to roll one each launch.
+   * The host owns the Dock tile, so the pin lives on the wire rather than only in the page. */
+  appIcon: number | null;
 };
 
 /** Host event carrying `EngineInstallProgress`; must match `engine::PROGRESS_EVENT` in Rust. */
@@ -305,6 +308,9 @@ export type AppearanceDoc = {
   fontStyle: FontStyle;
   contentWidth: ContentWidth;
   fileIcons: FileIconSet;
+  /** One-based index into the twelve mascot tiles; null lets each launch roll its own. Same value as
+   * `AppearanceState.appIcon`, which the shell reads for the window's own face. */
+  appIcon: number | null;
   uiFontSizePx: number;
   lightCodeTheme: string;
   darkCodeTheme: string;

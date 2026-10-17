@@ -32,6 +32,10 @@ pub struct AppearanceView {
     /// shell, so a gutter either appears on the first answer after the change or it does not.
     pub show_line_numbers: bool,
     pub wrap_long_lines: bool,
+    /// Which mascot tile the app wears, one-based, or `None` to roll one per launch. It is on the
+    /// wire for the same reason as the rest of this view: the Dock tile is host-side, so the pin has
+    /// to reach the process that draws it before the first frame, and again the moment it changes.
+    pub app_icon: Option<u8>,
 }
 
 /// `System` asks the host; anything else is already an answer.
@@ -56,6 +60,7 @@ pub fn view(appearance: &Appearance, os_prefers_light: bool) -> AppearanceView {
         content_width: appearance.content_width,
         show_line_numbers: appearance.show_line_numbers,
         wrap_long_lines: appearance.wrap_long_lines,
+        app_icon: appearance.app_icon,
     }
 }
 
@@ -73,6 +78,7 @@ pub fn apply(view: &AppearanceView, appearance: &mut Appearance) {
     appearance.content_width = view.content_width;
     appearance.show_line_numbers = view.show_line_numbers;
     appearance.wrap_long_lines = view.wrap_long_lines;
+    appearance.app_icon = view.app_icon;
 }
 
 /// Load the whole document, or default it when nothing is stored yet. A stored file that cannot be
@@ -136,6 +142,7 @@ mod tests {
         v.content_width = smollm_config::ContentWidth::Full;
         v.show_line_numbers = true;
         v.wrap_long_lines = false;
+        v.app_icon = Some(9);
         apply(&v, &mut current);
 
         assert_eq!(current.interface_style, InterfaceStyle::Forest);
@@ -145,6 +152,7 @@ mod tests {
         assert_eq!(current.content_width, smollm_config::ContentWidth::Full);
         assert!(current.show_line_numbers);
         assert!(!current.wrap_long_lines);
+        assert_eq!(current.app_icon, Some(9));
         // These two are still only rendered by the Settings surface, which writes them itself.
         assert_eq!(current.terminal_theme, settings.appearance.terminal_theme);
         assert_eq!(current.dark_code_theme, settings.appearance.dark_code_theme);
@@ -164,5 +172,13 @@ mod tests {
         // The reference ships a guttered code block, so the default is numbers on, wrapping off.
         assert_eq!(raw["showLineNumbers"], true);
         assert_eq!(raw["wrapLongLines"], false);
+        // Null rather than absent: the webview types this `number | null`, and a missing key would
+        // read as undefined to a page that has to decide whether to show a pinned tile.
+        assert_eq!(raw["appIcon"], serde_json::Value::Null);
+        let pinned = AppearanceView {
+            app_icon: Some(3),
+            ..view(&Appearance::default(), false)
+        };
+        assert_eq!(serde_json::to_value(&pinned).unwrap()["appIcon"], 3);
     }
 }

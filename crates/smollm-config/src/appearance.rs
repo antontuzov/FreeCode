@@ -100,6 +100,10 @@ pub struct Appearance {
     pub font_style: FontStyle,
     pub content_width: ContentWidth,
     pub file_icons: FileIconSet,
+    /// Which of the twelve mascot tiles the app wears, one-based. `None` lets each launch roll a new
+    /// one; `Some` pins it. Pinning belongs on disk rather than in the webview because the Dock tile
+    /// is drawn by the host, which never sees the page's own state.
+    pub app_icon: Option<u8>,
 
     // Developer/code facet of the same page.
     pub ui_font_size_px: u16,
@@ -122,6 +126,7 @@ impl Default for Appearance {
             font_style: FontStyle::Sans,
             content_width: ContentWidth::Standard,
             file_icons: FileIconSet::Qoder,
+            app_icon: None,
             ui_font_size_px: 14,
             light_code_theme: "github-light".into(),
             dark_code_theme: "github-dark".into(),
@@ -147,6 +152,17 @@ mod tests {
         assert_eq!(a.code_font_size_px, 12);
         assert!(a.show_line_numbers);
         assert!(!a.wrap_long_lines);
+    }
+
+    #[test]
+    fn the_icon_is_pinned_only_when_the_user_pins_it() {
+        // The default is the per-launch roll, so a document written before the picker existed parses
+        // and keeps rolling rather than freezing every install on one duck.
+        assert_eq!(Appearance::default().app_icon, None);
+        let a: Appearance = serde_json::from_value(json!({ "appIcon": 7 })).unwrap();
+        assert_eq!(a.app_icon, Some(7));
+        let a: Appearance = serde_json::from_value(json!({ "appIcon": null })).unwrap();
+        assert_eq!(a.app_icon, None);
     }
 
     #[test]

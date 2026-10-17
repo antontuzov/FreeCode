@@ -664,6 +664,40 @@ select.field-input {
   --preview: var(--style-parchment);
 }
 
+/* The twelve mascot tiles the app can wear. Each is shown against both ends of the live palette —
+ * raised surface down to gutter — because the tile goes over whatever the OS puts behind it, and a
+ * picker that only ever shows one ground cannot say whether the other reads. Selection follows the
+ * style cards above: the outline plus a filled dot, so it is never colour alone. */
+.icon-card {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: linear-gradient(155deg, var(--bg-elevated), var(--bg-sunken));
+  cursor: pointer;
+}
+.icon-card[data-selected="true"] {
+  border-color: var(--accent);
+}
+.icon-card::after {
+  content: "";
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  opacity: 0.35;
+}
+.icon-card[data-selected="true"]::after {
+  opacity: 1;
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--bg-elevated);
+}
+
 /* A run in flight says so with a breathing dot. Its 1.2s is an attention loop, not feedback under
  * the pointer, so it deliberately sits outside the interaction scale above. */
 /* A placeholder that holds the shape of the content that is coming. It breathes on the running

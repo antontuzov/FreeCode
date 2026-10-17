@@ -5,6 +5,9 @@
 //! tile showed a tree. The pick therefore moved here, and the window asks the host for the number
 //! rather than rolling its own.
 //!
+//! Settings › Appearance can pin one of the twelve instead of rolling, which is the same number
+//! stored in the settings document; the roll is what happens when nothing is pinned.
+//!
 //! Two things this cannot promise, said rather than quietly skipped:
 //!
 //! * Tauri 2.12 has no `set_dock_icon`; the only way to repaint the tile is AppKit's
@@ -19,6 +22,7 @@
 //! at runtime. Round costs alpha and alpha costs PNG: the twelve are 1.1 MB here where the same
 //! crops as opaque JPEG weighed 151 KB.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -41,9 +45,24 @@ const TILES: &[&[u8]] = &[
 
 /// The mascot for this process, one-based so the number the Dock was drawn from is the number the
 /// window asks for. Fixed on first use: a face that changes while you are looking at it is a glitch.
+///
+/// A tile the user pinned wins over the roll, which is why this reads live state rather than being a
+/// `OnceLock` itself: the pin is set from disk before the window is built, and can change mid-run
+/// when the Settings page saves.
 pub fn tile() -> usize {
-    static PICK: OnceLock<usize> = OnceLock::new();
-    *PICK.get_or_init(|| {
+    let pinned = PINNED.load(Ordering::Relaxed);
+    if pinned > 0 {
+        return pinned;
+    }
+    rolled()
+}
+
+/// The rolled face for this launch, drawn once and kept. Kept separately from the pin so that
+/// un-pinning partway through a run brings back the duck this launch rolled, rather than producing a
+/// new one the moment the checkbox is cleared.
+fn rolled() -> usize {
+    static ROLL: OnceLock<usize> = OnceLock::new();
+    *ROLL.get_or_init(|| {
         let since_epoch = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
@@ -59,6 +78,23 @@ pub fn tile() -> usize {
         x ^= x >> 31;
         (x % TILES.len() as u64) as usize + 1
     })
+}
+
+/// `0` means "no pin, roll one". See [`prefer`].
+static PINNED: AtomicUsize = AtomicUsize::new(0);
+
+/// Say what the stored settings pin, before [`init_script`] runs and again after every save. A
+/// number outside the twelve is discarded rather than trusted — a settings file edited by hand must
+/// not be able to name a tile that does not ship, and the same rule keeps a future document with
+/// more than twelve tiles from crashing a build that has fewer.
+pub fn prefer(pinned: Option<usize>) {
+    PINNED.store(
+        pinned
+            .filter(|index| *index > 0 && *index <= TILES.len())
+            .unwrap_or(0),
+        Ordering::Relaxed,
+    );
+    rolled();
 }
 
 /// Run before the page's own scripts, so the window's mascot and the Dock's tile are the same
@@ -105,8 +141,18 @@ pub fn set_dock_tile(_: &tauri::AppHandle) {}
 mod tests {
     use super::*;
 
+    /// The pin is process-global, so the cases that move it cannot run beside the ones that read it.
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        SERIAL
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn a_launch_wears_one_of_the_twelve_and_never_changes_its_mind() {
+        let _serial = lock();
+        prefer(None);
         let first = tile();
         assert!(
             (1..=TILES.len()).contains(&first),
@@ -117,6 +163,37 @@ mod tests {
 
     #[test]
     fn the_script_names_the_same_duck_the_dock_does() {
+        let _serial = lock();
+        prefer(None);
         assert_eq!(init_script(), format!("window.smollmMascot = {};", tile()));
+    }
+
+    #[test]
+    fn a_pinned_tile_wins_and_a_cleared_pin_goes_back_to_this_launchs_duck() {
+        let _serial = lock();
+        prefer(None);
+        let rolled = tile();
+        for index in [1, TILES.len()] {
+            prefer(Some(index));
+            assert_eq!(tile(), index, "{index} is the tile the user chose");
+            assert_eq!(
+                init_script(),
+                format!("window.smollmMascot = {index};"),
+                "the window and the Dock have to agree on the pinned tile"
+            );
+        }
+        prefer(None);
+        assert_eq!(tile(), rolled, "unpinning mid-run must not roll a new face");
+    }
+
+    #[test]
+    fn a_number_outside_the_twelve_is_not_a_tile() {
+        let _serial = lock();
+        prefer(None);
+        let rolled = tile();
+        for bogus in [0, 13, 4096] {
+            prefer(Some(bogus));
+            assert_eq!(tile(), rolled, "{bogus} names nothing that ships");
+        }
     }
 }

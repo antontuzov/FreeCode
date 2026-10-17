@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  IconCard,
   NumberField,
   Row,
   Section,
@@ -14,6 +15,7 @@ import {
   Toggle,
 } from "./controls";
 import { Icon, type IconName } from "./icons";
+import { MASCOT_TILES, launchTile } from "./BrandMark";
 import { translate, type Locale } from "../i18n";
 import type { Accent, SettingsDoc } from "../lib/ipc";
 import { shortcutLabel } from "../lib/shortcuts";
@@ -296,6 +298,34 @@ function Appearance({
             />
           ))}
         </div>
+        {/* The twelve tiles already ship and the app already wears one of them; this adds only the
+            choice, in the same group the reference puts its own icon control in. Pinning is host-side
+            on purpose — the Dock tile is drawn by the host, which cannot see what the page decides —
+            so the number travels through the settings document and the host repaints the tile the
+            moment it lands. */}
+        <div className="px-[var(--space-4)] pb-[var(--space-4)]">
+          <p className="mb-[var(--space-2)] text-quiet text-muted">{t("row.appIcon")}</p>
+          <div className="grid grid-cols-4 gap-[var(--space-3)] sm:grid-cols-6">
+            {MASCOT_TILES.map((source, i) => (
+              <IconCard
+                key={source}
+                source={source}
+                label={t("row.appIcon.option", { index: i + 1 })}
+                selected={a.appIcon === i + 1}
+                onSelect={() => set((d) => void (d.appearance.appIcon = i + 1))}
+              />
+            ))}
+          </div>
+        </div>
+        <Row title={t("row.appIconRoll")} description={t("row.appIconRoll.desc")}>
+          <Toggle
+            // Turning the roll off pins the tile the app is wearing at that moment rather than an
+            // arbitrary one: the user is looking at the duck they just decided to keep.
+            on={a.appIcon === null}
+            label={t("row.appIconRoll")}
+            onChange={(v) => set((d) => void (d.appearance.appIcon = v ? null : launchTile))}
+          />
+        </Row>
         <Row title={t("row.terminalTheme")} description={t("row.terminalTheme.desc")} inert={inert}>
           <Select
             label={t("row.terminalTheme")}
