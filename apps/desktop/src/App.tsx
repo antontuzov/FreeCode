@@ -199,6 +199,7 @@ export default function App() {
           <Transcript
             locale={locale}
             onPickModel={() => push({ kind: "settings", page: "model" })}
+            onOpenPalette={() => setPaletteOpen(true)}
           />
           <StatusBar locale={locale} />
         </div>

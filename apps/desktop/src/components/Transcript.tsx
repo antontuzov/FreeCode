@@ -17,6 +17,7 @@ import { BrandMark, MascotMark } from "./BrandMark";
 import { Composer } from "./Composer";
 import { ExternalLink } from "./ExternalLink";
 import { Icon } from "./icons";
+import { NavSteps } from "./Sidebar";
 
 function StatusMark({ step }: { step: Step }) {
   if (step.status === "running") return <span className="dot-running" aria-hidden />;
@@ -276,7 +277,15 @@ function useRunSeconds(startedAt: number | null): number | null {
   return Math.max(0, Math.round((Date.now() - startedAt) / 1000));
 }
 
-export function Transcript({ locale, onPickModel }: { locale: Locale; onPickModel: () => void }) {
+export function Transcript({
+  locale,
+  onPickModel,
+  onOpenPalette,
+}: {
+  locale: Locale;
+  onPickModel: () => void;
+  onOpenPalette: () => void;
+}) {
   const rows = useTranscript((s) => s.rows);
   const running = useTranscript((s) => s.running);
   const runStartedAt = useTranscript((s) => s.runStartedAt);
@@ -341,6 +350,9 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
           rail ? "clears-traffic-lights" : ""
         }`}
       >
+        {/* Folded, the sidebar's header row is gone with the column, so the steps it carried — back,
+            forward, search — stand here instead, clear of the traffic lights by the same padding. */}
+        {rail && <NavSteps locale={locale} onOpenPalette={onOpenPalette} />}
         <h1 className="min-w-0 flex-1 truncate text-ui font-medium text-fg">
           {translate(locale, "transcript.title")}
         </h1>

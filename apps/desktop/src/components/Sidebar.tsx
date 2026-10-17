@@ -148,6 +148,57 @@ export type SidebarActions = {
   openExtensions: () => void;
 };
 
+/** The steps the header row carries: two along the surface stack, and the search over everything.
+ *
+ * They live here rather than in the header they are drawn in because folding the sidebar takes the
+ * header away with the column, and a control you lose by clicking the fold button is a control you
+ * cannot reach. So the transcript header picks them up in that case, and the same three glyphs — the
+ * same disabled look, the same hover line — stand at the head of the column instead. */
+export function NavSteps({ locale, onOpenPalette }: { locale: Locale; onOpenPalette: () => void }) {
+  const back = useNav((s) => s.back);
+  const forward = useNav((s) => s.forward);
+  const canBack = useNav((s) => s.cursor > 0);
+  const canForward = useNav((s) => s.cursor < s.history.length - 1);
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        aria-label={translate(locale, "nav.back")}
+        aria-disabled={canBack ? undefined : true}
+        title={canBack ? translate(locale, "nav.back") : translate(locale, "nav.noHistoryBehind")}
+        className="icon-btn"
+        onClick={back}
+      >
+        <Icon name="back" />
+      </button>
+      <button
+        type="button"
+        aria-label={translate(locale, "nav.forward")}
+        aria-disabled={canForward ? undefined : true}
+        title={
+          canForward ? translate(locale, "nav.forward") : translate(locale, "nav.noHistoryAhead")
+        }
+        className="icon-btn"
+        onClick={forward}
+      >
+        <Icon name="forward" />
+      </button>
+      {/* The crop carries the magnifier a step apart from the arrows, and the palette it opens is
+          the same one the nav row and ⌘K reach. */}
+      <button
+        type="button"
+        aria-label={translate(locale, "sidebar.search")}
+        title={`${translate(locale, "sidebar.search")} · ${shortcutLabel("palette")}`}
+        className="icon-btn ml-[var(--space-2)]"
+        onClick={onOpenPalette}
+      >
+        <Icon name="search" />
+      </button>
+    </div>
+  );
+}
+
 export function Sidebar({
   locale,
   fixture,
@@ -164,10 +215,6 @@ export function Sidebar({
   const open = useSessions((s) => s.open);
   const collapsed = useNav((s) => s.collapsed);
   const toggleSidebar = useNav((s) => s.toggleSidebar);
-  const back = useNav((s) => s.back);
-  const forward = useNav((s) => s.forward);
-  const canBack = useNav((s) => s.cursor > 0);
-  const canForward = useNav((s) => s.cursor < s.history.length - 1);
   const notInBuild = translate(locale, "common.notInBuild");
   const workspaces = fixture
     ? FIXTURE_WORKSPACES
@@ -202,7 +249,9 @@ export function Sidebar({
           className="icon-btn"
           onClick={toggleSidebar}
         >
-          <Icon name="sidebar" />
+          {/* The chevron points the way the column is about to go, so the rail's control and the open
+              column's are the same window with the arrow turned round. */}
+          <Icon name="sidebarExpand" />
         </button>
         {RAIL_ROWS.map((r) => {
           const label = translate(locale, `sidebar.${r.key}`);
@@ -243,12 +292,12 @@ export function Sidebar({
     >
       {/* Traffic lights occupy the top-left of the window, so the row starts below them. */}
       <div
-        className="flex items-center gap-3 px-[var(--space-3)] pt-[var(--space-3)] pb-1"
+        className="flex items-center gap-1 px-[var(--space-3)] pt-[var(--space-3)] pb-1"
         style={{ paddingLeft: "max(var(--space-3), var(--traffic-light-inset))" }}
       >
-        {/* The three arrows are the reference chrome, and all three answer now: one folds the column
-            to its rail, the other two step along the surfaces this window has opened. Each says so
-            when the stack has nothing on that side of it rather than firing into a no-op. */}
+        {/* The reference's header row: a column that folds, the two steps along the surfaces this
+            window has opened, and the search over everything. Each of the arrows says so when the
+            stack has nothing on that side of it rather than firing into a no-op. */}
         <button
           type="button"
           aria-label={toggleLabel}
@@ -258,28 +307,7 @@ export function Sidebar({
         >
           <Icon name="sidebar" />
         </button>
-        <button
-          type="button"
-          aria-label={translate(locale, "nav.back")}
-          aria-disabled={canBack ? undefined : true}
-          title={canBack ? translate(locale, "nav.back") : translate(locale, "nav.noHistoryBehind")}
-          className="icon-btn"
-          onClick={back}
-        >
-          <Icon name="back" />
-        </button>
-        <button
-          type="button"
-          aria-label={translate(locale, "nav.forward")}
-          aria-disabled={canForward ? undefined : true}
-          title={
-            canForward ? translate(locale, "nav.forward") : translate(locale, "nav.noHistoryAhead")
-          }
-          className="icon-btn"
-          onClick={forward}
-        >
-          <Icon name="forward" />
-        </button>
+        <NavSteps locale={locale} onOpenPalette={actions.openPalette} />
       </div>
 
       <div className="flex flex-col gap-1 p-[var(--space-3)]">

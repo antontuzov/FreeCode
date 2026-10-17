@@ -7,7 +7,15 @@
 import type { SVGProps } from "react";
 
 const PATHS = {
-  sidebar: "M4 6h16M4 12h16M4 18h16",
+  /* The header's column control, drawn as the reference crop draws it: a window, the narrow cell at
+     its left being the sidebar itself, and a chevron pointing *at* that cell because pressing the
+     control folds the column into it. It used to be a hamburger, which names a menu rather than a
+     panel. `sidebarExpand` is the same window with the chevron turned round, for the rail — where the
+     arrow points the way the column is about to go. */
+  sidebar:
+    "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 3v18M16.5 9l-3 3 3 3",
+  sidebarExpand:
+    "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 3v18M13.5 9l3 3-3 3",
   panelRight:
     "M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z",
   back: "M15 5l-7 7 7 7",

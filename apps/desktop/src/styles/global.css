@@ -273,9 +273,14 @@ body {
 /* Folded, the sidebar's rail is narrower than the space the traffic lights take, so the third light
  * overhangs into whatever column comes next — which is the transcript's header, whose title is the
  * first thing they land on. The overhang comes back as padding, and `max` keeps it padding rather
- * than a negative on the platforms that reserve nothing. */
+ * than a negative on the platforms that reserve nothing. The extra step is measured, not guessed:
+ * the lights run to 81px from the window's left edge, the inset alone would start the title at 78,
+ * and the open column's own glyph clears them by the same handful of pixels. */
 .clears-traffic-lights {
-  padding-left: max(var(--space-4), calc(var(--traffic-light-inset) - var(--sidebar-rail-width)));
+  padding-left: max(
+    var(--space-4),
+    calc(var(--traffic-light-inset) - var(--sidebar-rail-width) + var(--space-2))
+  );
 }
 
 .transcript-row {
