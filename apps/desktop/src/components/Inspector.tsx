@@ -110,33 +110,40 @@ function elapsed(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+/** What the engine never reported, rendered the way the context meter renders it: a gap, not a
+ * number. `null` is a stream that ended before its closing frame, and a zero would claim the run
+ * generated nothing at all. */
+const UNMEASURED = "—";
+const count = (value: number | null) => (value === null ? UNMEASURED : String(value));
+const rate = (value: number | null) => (value === null ? UNMEASURED : `${value.toFixed(1)} tok/s`);
+
 /**
  * The run's own timings, at the head of a column named for the run.
  *
  * Every number here is one somebody measured: the rates and counts come from the `timings` object
  * the fork sends beside its usage frame, the wait from the host's wall clock — which is the longer
- * of the two, since it also covers the round trip and the deltas crossing IPC. A run whose stream
- * never answered the usage ask reports nothing, because a rate divided out of token counts nobody
- * timed is a number that gets believed.
+ * of the two, since it also covers the round trip and the deltas crossing IPC. A stream the user
+ * stopped ends before that object exists, and the rows it leaves keep their labels and hold an em
+ * dash: the run is still the one they waited through, and it is not nothing.
  */
 function RunSection({ locale, run }: { locale: Locale; run: RunReport }) {
   const [open, setOpen] = useState(true);
   const running = useTranscript((s) => s.running);
   const rows: [string, string][] = [
-    [translate(locale, "inspector.run.generation"), `${run.generatedPerSecond.toFixed(1)} tok/s`],
-    [translate(locale, "inspector.run.prompt"), `${run.promptPerSecond.toFixed(1)} tok/s`],
+    [translate(locale, "inspector.run.generation"), rate(run.generatedPerSecond)],
+    [translate(locale, "inspector.run.prompt"), rate(run.promptPerSecond)],
     [
       translate(locale, "inspector.run.tokens"),
       translate(locale, "inspector.run.tokensValue", {
-        generated: run.generatedTokens,
-        prompt: run.promptTokens,
+        generated: count(run.generatedTokens),
+        prompt: count(run.promptTokens),
       }),
     ],
     [
       translate(locale, "inspector.run.cache"),
       translate(locale, "inspector.run.cacheValue", {
-        cached: run.cachedTokens,
-        prompt: run.promptTokens,
+        cached: count(run.cachedTokens),
+        prompt: count(run.promptTokens),
       }),
     ],
     [translate(locale, "inspector.run.elapsed"), elapsed(run.elapsedMs)],
@@ -171,7 +178,9 @@ function RunSection({ locale, run }: { locale: Locale; run: RunReport }) {
   );
 }
 
-/** What the column says before any run has timed itself: one line, and the five groups below it. */
+/** What the column says while this window has had no run at all: one line, and the five groups below
+ * it. A run the user stopped is not this state — it has a wait to report, and rows that say the
+ * engine never got to time the rest. */
 function UnmeasuredSection({ locale }: { locale: Locale }) {
   const [open, setOpen] = useState(true);
   return (

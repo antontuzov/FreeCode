@@ -1034,21 +1034,25 @@ fn context_percent(total_tokens: Option<u64>, window: u32) -> Option<f32> {
     Some(((tokens as f64 * 100.0) / window as f64).clamp(0.0, 100.0) as f32)
 }
 
-/// What the run cost, from the two frames the stream answers with beside the usage one. `None`
-/// unless both landed: token counts without the server's own clock give rates nobody measured, and
-/// the inspector then has nothing to report rather than something invented.
-fn run_report(reply: &Reply, elapsed: Duration) -> Option<RunReport> {
-    let timings = reply.timings?;
-    Some(RunReport {
-        generated_tokens: timings.generated_tokens,
-        prompt_tokens: reply.prompt_tokens?,
-        cached_tokens: timings.cached_tokens,
-        generated_per_second: timings.generated_per_second,
-        prompt_per_second: timings.prompt_per_second,
+/// What the run cost. The wait is the host's own and always stands; the five numbers the engine
+/// measured are there only when its final frame arrived, which a stream the user stopped never does.
+/// Absent ones stay absent rather than being divided out of a clock the host did not have.
+///
+/// With Coding on, these are the *last* round's counts — the rounds that ran tools are separate
+/// streams, each with its own usage — while the wait is the whole run's. The rates stay the server's
+/// own, measured over their own tokens, so the two halves never disagree by arithmetic.
+fn run_report(reply: &Reply, elapsed: Duration) -> RunReport {
+    let timings = reply.timings;
+    RunReport {
+        generated_tokens: timings.map(|t| t.generated_tokens),
+        prompt_tokens: reply.prompt_tokens,
+        cached_tokens: timings.map(|t| t.cached_tokens),
+        generated_per_second: timings.map(|t| t.generated_per_second),
+        prompt_per_second: timings.map(|t| t.prompt_per_second),
         // The host's wall clock rather than the server's sum of its two phases: this is the wait the
         // user sat through, round trip, queue and every delta over the IPC boundary included.
         elapsed_ms: elapsed.as_millis() as u64,
-    })
+    }
 }
 
 /// The largest `data:` URL a picture crosses the boundary as.
@@ -1392,6 +1396,7 @@ fn history_of(session: &Session) -> Vec<Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smollm_llama::Timings;
 
     #[test]
     fn a_stop_names_the_reply_in_flight_and_nothing_else() {
@@ -1477,6 +1482,58 @@ mod tests {
         // Nothing counted, and nothing to count against: the meter stays unknown.
         assert_eq!(context_percent(None, 32_768), None);
         assert_eq!(context_percent(Some(31), 0), None);
+    }
+
+    /// The reply a Stop press leaves behind: `stream_chat` breaks out of the loop before the fork's
+    /// closing frame, so neither the usage nor the timings reaches the host. The run still cost a
+    /// wait, and the inspector names it instead of saying nothing was timed at all.
+    #[test]
+    fn a_run_cut_short_still_reports_the_wait_it_cost() {
+        let cut_short = Reply {
+            text: "hal".into(),
+            ..Default::default()
+        };
+        let report = run_report(&cut_short, Duration::from_millis(12_625));
+        assert_eq!(report.elapsed_ms, 12_625);
+        // None of these are a rate anybody measured, and none of them are a zero claiming to be one.
+        assert_eq!(
+            report,
+            RunReport {
+                generated_tokens: None,
+                prompt_tokens: None,
+                cached_tokens: None,
+                generated_per_second: None,
+                prompt_per_second: None,
+                elapsed_ms: 12_625,
+            }
+        );
+    }
+
+    /// The same shape on a run the engine did time: the counts and rates are the server's, the wait
+    /// is the host's, and the longer number is the one the user felt.
+    #[test]
+    fn a_timed_run_reports_the_servers_counts_and_ours_for_the_wait() {
+        let timed = Reply {
+            prompt_tokens: Some(3162),
+            timings: Some(Timings {
+                prompt_per_second: 285.17,
+                generated_per_second: 34.8,
+                generated_tokens: 38,
+                cached_tokens: 2900,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            run_report(&timed, Duration::from_millis(9_000)),
+            RunReport {
+                generated_tokens: Some(38),
+                prompt_tokens: Some(3162),
+                cached_tokens: Some(2900),
+                generated_per_second: Some(34.8),
+                prompt_per_second: Some(285.17),
+                elapsed_ms: 9_000,
+            }
+        );
     }
 
     #[test]

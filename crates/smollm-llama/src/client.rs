@@ -63,8 +63,9 @@ pub struct Reply {
     /// conversation to fit reports what it kept, not what it was handed.
     pub prompt_tokens: Option<u64>,
     /// What the server measured about the run, from the `timings` object that rides with the usage
-    /// frame. `None` when the stream never sent one — the inspector then reports nothing rather than
-    /// dividing a token count by a clock it did not have.
+    /// frame. `None` when the stream never sent one — which is what an interrupted stream does, since
+    /// the fork answers with its timings only as it finishes — and the inspector then reports the
+    /// host's wait alone rather than dividing a token count by a clock it did not have.
     pub timings: Option<Timings>,
 }
 

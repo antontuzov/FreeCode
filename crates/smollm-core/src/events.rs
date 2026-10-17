@@ -293,10 +293,9 @@ pub enum AgentEvent {
         /// a number nobody measured.
         context_used: Option<f32>,
         total_diff: Option<DiffStat>,
-        /// What the run cost. `None` when its stream never answered the usage ask, because a rate
-        /// divided out of token counts nobody timed is a number that gets believed, not a gap.
-        #[serde(default)]
-        run: Option<RunReport>,
+        /// What the run cost. Always there, because the host timed the run itself: a stream the user
+        /// stopped has no rates from the engine, and it still has the twelve seconds they waited.
+        run: RunReport,
     },
     Failed {
         message: String,
@@ -332,20 +331,25 @@ impl AgentEvent {
     }
 }
 
-/// What one finished run cost, every field of it read out of the stream's own usage and timing
-/// frames. The rates are the server's — measured on its clock, over the tokens it counted — and
-/// `elapsed_ms` is the host's wall clock, so it is the longer number and the one the user felt.
+/// What one finished run cost.
+///
+/// Only `elapsed_ms` is certain, because only the host's wall clock is always there: it is the wait
+/// the user sat through, round trip and every delta over IPC included, and it stands whether or not
+/// the engine ever answered. The other five are read out of the stream's own usage and timing frames,
+/// and a frame the fork never sends takes its number with it — an interrupted stream ends before the
+/// final one, so a run the user stopped has no rates to show. `None` is the honest place holder there:
+/// a rate divided out of token counts nobody timed is a number that gets believed.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunReport {
-    pub generated_tokens: u64,
-    pub prompt_tokens: u64,
+    pub generated_tokens: Option<u64>,
+    pub prompt_tokens: Option<u64>,
     /// Prompt tokens the server took from its prefix cache instead of re-evaluating. The replayed
     /// history across a conversation is what makes this number grow, and it is the only visible
     /// proof that the design works.
-    pub cached_tokens: u64,
-    pub generated_per_second: f64,
-    pub prompt_per_second: f64,
+    pub cached_tokens: Option<u64>,
+    pub generated_per_second: Option<f64>,
+    pub prompt_per_second: Option<f64>,
     pub elapsed_ms: u64,
 }
 

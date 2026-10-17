@@ -399,8 +399,9 @@ type TranscriptStore = {
    * an em dash rather than a made-up number, because a real run is now the thing being shown.
    */
   contextUsed: number | null;
-  /** What the last finished run cost, or null while none has reported. The inspector says "no run
-   * has been timed yet" rather than showing rates for a run that never sent its timings frame. */
+  /** What the last finished run cost, or null while this window has had none — which is what a new
+   * task or a thrown-away conversation leaves behind. A run that was cut short still reports its
+   * wait, with the engine's own numbers absent from its report rather than the whole report gone. */
   lastRun: RunReport | null;
   /**
    * When the wait for the current run opened, as `Date.now()`, or null while no run is open. The

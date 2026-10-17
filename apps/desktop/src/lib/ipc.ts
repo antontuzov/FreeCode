@@ -179,16 +179,17 @@ export type BlockedInfo = {
 };
 
 /**
- * What one finished run cost. Mirrors `smollm_core::events::RunReport`. The rates are the server's
- * own — its clock over the tokens it counted — while `elapsedMs` is the host's wall clock, so the
- * wait shown is always at least as long as the model time.
+ * What one finished run cost. Mirrors `smollm_core::events::RunReport`. The rates and counts are the
+ * server's own — its clock over the tokens it counted — and they are null for a stream that never got
+ * to send them, while `elapsedMs` is the host's wall clock and always stands: the wait shown is at
+ * least as long as the model time, and it is the half of the report a stopped run still has.
  */
 export type RunReport = {
-  generatedTokens: number;
-  promptTokens: number;
-  cachedTokens: number;
-  generatedPerSecond: number;
-  promptPerSecond: number;
+  generatedTokens: number | null;
+  promptTokens: number | null;
+  cachedTokens: number | null;
+  generatedPerSecond: number | null;
+  promptPerSecond: number | null;
   elapsedMs: number;
 };
 
@@ -274,15 +275,16 @@ export type AgentEvent =
   /** `totalDiff` is the "+N −M" pill's running total. The loop this build runs only reads a
    * workspace, so it has nothing to stage and this stays null.
    * `contextUsed` is the percent of the window the finished run left filled, counted by the server;
-   * null when the stream never reported its usage frame. `run` is what the run cost, and it is null
-   * unless the server timed it — a stopped stream never gets that far. */
+   * null when the stream never reported its usage frame. `run` is what the run cost: always there,
+   * since the host timed the wait itself, with the engine's numbers missing from a stream the user
+   * stopped before its closing frame. */
   | {
       type: "runFinished";
       runId: string;
       stopped: boolean;
       contextUsed: number | null;
       totalDiff: null;
-      run: RunReport | null;
+      run: RunReport;
     }
   | { type: "failed"; message: string };
 
