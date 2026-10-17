@@ -259,6 +259,24 @@ body {
   background: var(--bg-hover);
   color: var(--text);
 }
+/* Every `aria-disabled` glyph button is a control with nothing to do yet — an arrow at the front of
+ * the history, the composer's mic. It takes the quietest ink in the window and stops answering the
+ * pointer, so a pair of arrows reads as a position in a history rather than two identical buttons. */
+.icon-btn[aria-disabled="true"] {
+  color: var(--text-faint);
+}
+.icon-btn[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--text-faint);
+}
+
+/* Folded, the sidebar's rail is narrower than the space the traffic lights take, so the third light
+ * overhangs into whatever column comes next — which is the transcript's header, whose title is the
+ * first thing they land on. The overhang comes back as padding, and `max` keeps it padding rather
+ * than a negative on the platforms that reserve nothing. */
+.clears-traffic-lights {
+  padding-left: max(var(--space-4), calc(var(--traffic-light-inset) - var(--sidebar-rail-width)));
+}
 
 .transcript-row {
   display: flex;

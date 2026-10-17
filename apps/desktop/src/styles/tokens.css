@@ -48,6 +48,9 @@
   --radius-lg: 14px;
   --radius-pill: 9999px;
   --sidebar-width: 264px;
+  /* The column the sidebar folds to. Wide enough for the reference's 28px glyph buttons with their
+     hit padding, narrow enough to read as chrome rather than a second, emptier column. */
+  --sidebar-rail-width: 44px;
   --inspector-width: 320px;
   /* The reading column. Task content and the composer share one width so the answer and the prompt
      that produced it line up; the Appearance page's "Content width" moves them together. */
@@ -340,13 +343,17 @@
   --content-width: 100%;
 }
 
-/* macOS hides the traffic lights behind the sidebar; the shell reserves the space. */
+/* macOS hides the traffic lights behind the sidebar; the shell reserves the space. The open column
+ * dodges them sideways with the inset; the collapsed rail is narrower than they are, so it has no
+ * sideways room and its first control clears them downward instead. */
 [data-platform="darwin"] {
   --traffic-light-inset: 78px;
+  --traffic-light-clear: 34px;
 }
 [data-platform="win32"],
 [data-platform="linux"] {
   --traffic-light-inset: var(--space-4);
+  --traffic-light-clear: var(--space-2);
 }
 
 @media (prefers-reduced-motion: reduce) {

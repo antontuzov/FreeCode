@@ -29,6 +29,8 @@
   "palette.close": "to close",
   "nav.back": "Back",
   "nav.forward": "Forward",
+  "nav.noHistoryBehind": "Nothing opened before this view",
+  "nav.noHistoryAhead": "Nothing opened after this view",
   "inspector.title": "Run inspector",
   "inspector.subagents": "Subagents",
   "inspector.skills": "Skills & MCP",

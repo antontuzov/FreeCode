@@ -53,10 +53,15 @@ const STYLES: { id: Accent; label: string }[] = [
 export function Settings({
   locale,
   page,
+  onOpen,
   onBack,
 }: {
   locale: Locale;
+  /** Which page is open, held by the window's history rather than by this component: Back has to
+   * return to the page the user was actually reading, not to whichever page the surface was first
+   * reached through. */
   page: string;
+  onOpen: (page: Page) => void;
   onBack: () => void;
 }) {
   const doc = useSettings((s) => s.doc);
@@ -64,9 +69,7 @@ export function Settings({
   const load = useSettings((s) => s.load);
   const update = useSettings((s) => s.update);
   // An unknown deep-link page falls back to Appearance rather than rendering nothing.
-  const [active, setActive] = useState<Page>(
-    PAGE_IDS.includes(page as Page) ? (page as Page) : "appearance",
-  );
+  const active: Page = PAGE_IDS.includes(page as Page) ? (page as Page) : "appearance";
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -131,7 +134,7 @@ export function Settings({
                     type="button"
                     data-active={active === item.id || undefined}
                     className="nav-item"
-                    onClick={() => setActive(item.id)}
+                    onClick={() => onOpen(item.id)}
                   >
                     <Icon name={item.icon} />
                     <span className="truncate">{t(`nav.${item.id}`)}</span>

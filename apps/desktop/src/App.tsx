@@ -13,6 +13,7 @@ import type { Locale } from "./i18n";
 import { useShortcuts } from "./lib/shortcuts";
 import { useAppearance } from "./state/appearance";
 import { connectAgentEvents, useChat } from "./state/chat";
+import { currentView, useNav } from "./state/nav";
 import { useSessions } from "./state/sessions";
 import { FIXTURE_ROWS, useTranscript } from "./state/transcript";
 
@@ -25,16 +26,13 @@ export default function App() {
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
   const newTask = useChat((s) => s.newTask);
-  const [settingsPage, setSettingsPage] = useState<string | null>(query("settings"));
-  // `?knowledge=1` opens the Knowledge Center and `?knowledge=<model id>` opens one model's page, for
-  // the same reason as the other deep links: the rows that do that are clicks the native window
-  // cannot make. An id the catalog does not have falls back to the machine page.
-  const knowledgePage = query("knowledge");
-  const [knowledge, setKnowledge] = useState(knowledgePage !== null);
-  // `?extensions=1` opens the Extensions page, for the same reason as the other deep links: the row
-  // that opens it is a click the native window cannot be given, and a page nobody can reach is a page
-  // nobody can see.
-  const [extensions, setExtensions] = useState(query("extensions") !== null);
+  // Which surface the window shows is the top of the navigation stack rather than a set of booleans:
+  // the header's arrows move along it, a surface's own sub-page travels with its entry, and Esc leaves
+  // one step at a time. The deep links the captures go through (`?settings=model`, `?knowledge=<id>`,
+  // `?extensions=1`) seed the same stack in `state/nav.ts`, with the conversation underneath them.
+  const view = useNav(currentView);
+  const push = useNav((s) => s.push);
+  const back = useNav((s) => s.back);
   // `?search=<query>` opens the palette with that query already typed — the deep link the panel is
   // captured through, since the window takes no injected keystrokes and a search nobody can type
   // into is a search nobody can see.
@@ -138,49 +136,49 @@ export default function App() {
   const running = useTranscript((s) => s.running);
   useShortcuts({
     newTask: () => {
-      // The palette owns the keyboard the same way Settings does: a New task fired from under it
-      // would empty the transcript the rows in front of the user describe.
-      if (settingsPage !== null || paletteOpen || knowledge || extensions) return;
+      // The palette and the surfaces each own the keyboard the same way: a New task fired from under
+      // one would empty the transcript the thing in front of the user describes.
+      if (view.kind !== "chat" || paletteOpen) return;
       void newTask();
     },
-    // Knowledge Center is a surface rather than a page of the shell, so ⌘, leaves it: staying on two
-    // full-window pages at once would mean a back button that returns to a third.
+    // ⌘, opens Settings over whatever is under it, and a second press does not bury the page the user
+    // is reading under a fresh copy of Appearance.
     settings: () => {
-      setKnowledge(false);
-      setExtensions(false);
-      setSettingsPage((page) => page ?? "appearance");
+      if (view.kind !== "settings") push({ kind: "settings", page: "appearance" });
     },
     // Twice closes it, because the second press is the user changing their mind.
     palette: () => setPaletteOpen((open) => !open),
+    // Esc leaves a step of the history when there is one to leave and stops the run when the window is
+    // already back at the conversation. The stack knows both, so neither branch names a surface.
     escape: () => {
-      if (settingsPage !== null) {
-        setSettingsPage(null);
-      } else if (knowledge) {
-        setKnowledge(false);
-      } else if (extensions) {
-        setExtensions(false);
-      } else if (running) {
-        void stop();
-      }
+      if (!back() && running) void stop();
     },
   });
 
-  if (settingsPage !== null) {
-    return <Settings locale={locale} page={settingsPage} onBack={() => setSettingsPage(null)} />;
-  }
-
-  if (knowledge) {
+  if (view.kind === "settings") {
     return (
-      <Knowledge
+      <Settings
         locale={locale}
-        initial={knowledgePage === "1" ? "" : (knowledgePage ?? "")}
-        onBack={() => setKnowledge(false)}
+        page={view.page}
+        onOpen={(page) => push({ kind: "settings", page })}
+        onBack={back}
       />
     );
   }
 
-  if (extensions) {
-    return <Extensions locale={locale} onBack={() => setExtensions(false)} />;
+  if (view.kind === "knowledge") {
+    return (
+      <Knowledge
+        locale={locale}
+        page={view.model}
+        onOpen={(model) => push({ kind: "knowledge", model })}
+        onBack={back}
+      />
+    );
+  }
+
+  if (view.kind === "extensions") {
+    return <Extensions locale={locale} onBack={back} />;
   }
 
   return (
@@ -189,16 +187,19 @@ export default function App() {
         <Sidebar
           locale={locale}
           fixture={fixture}
-          onOpenSettings={() => setSettingsPage("appearance")}
+          onOpenSettings={() => push({ kind: "settings", page: "appearance" })}
           actions={{
             newTask: () => void newTask(),
             openPalette: () => setPaletteOpen(true),
-            openKnowledge: () => setKnowledge(true),
-            openExtensions: () => setExtensions(true),
+            openKnowledge: () => push({ kind: "knowledge", model: "" }),
+            openExtensions: () => push({ kind: "extensions" }),
           }}
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Transcript locale={locale} onPickModel={() => setSettingsPage("model")} />
+          <Transcript
+            locale={locale}
+            onPickModel={() => push({ kind: "settings", page: "model" })}
+          />
           <StatusBar locale={locale} />
         </div>
         <div className="flex flex-col">

@@ -2,6 +2,7 @@ import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
 import type { SessionSummary } from "../lib/ipc";
 import { shortcutLabel, type ShortcutId } from "../lib/shortcuts";
+import { useNav } from "../state/nav";
 import { useSessions } from "../state/sessions";
 
 type NavRow = {
@@ -50,6 +51,11 @@ const PLACES: NavRow[] = [
     onActivate: (a) => a.openExtensions(),
   },
 ];
+
+/** The rows the collapsed rail keeps. A placeholder has no click to give back, and a bare glyph that
+ * does nothing is the failure this build already fixed once when the rows had labels to apologise
+ * under — the rail only carries what this build answers. */
+const RAIL_ROWS = [...PRIMARY, ...PLACES].filter((r) => r.onActivate && !r.placeholder);
 
 type Conversation = {
   /** null for a row that only exists to show the layout: the fixture's tasks have no conversation to
@@ -156,6 +162,12 @@ export function Sidebar({
   const items = useSessions((s) => s.items);
   const activeId = useSessions((s) => s.activeId);
   const open = useSessions((s) => s.open);
+  const collapsed = useNav((s) => s.collapsed);
+  const toggleSidebar = useNav((s) => s.toggleSidebar);
+  const back = useNav((s) => s.back);
+  const forward = useNav((s) => s.forward);
+  const canBack = useNav((s) => s.cursor > 0);
+  const canForward = useNav((s) => s.cursor < s.history.length - 1);
   const notInBuild = translate(locale, "common.notInBuild");
   const workspaces = fixture
     ? FIXTURE_WORKSPACES
@@ -173,6 +185,57 @@ export function Sidebar({
     />
   );
 
+  const toggleLabel = translate(locale, "sidebar.toggle");
+
+  // Folded, the column is a rail of glyphs: the same controls this build answers, without the words
+  // they were labelled with, and the toggle that opens it again where the pointer left it.
+  if (collapsed) {
+    return (
+      <nav
+        aria-label={translate(locale, "sidebar.workspaces")}
+        className="flex h-full w-[var(--sidebar-rail-width)] shrink-0 flex-col items-center gap-1 border-r border-line bg-panel pt-[var(--traffic-light-clear)] pb-[var(--space-3)]"
+      >
+        <button
+          type="button"
+          aria-label={toggleLabel}
+          title={toggleLabel}
+          className="icon-btn"
+          onClick={toggleSidebar}
+        >
+          <Icon name="sidebar" />
+        </button>
+        {RAIL_ROWS.map((r) => {
+          const label = translate(locale, `sidebar.${r.key}`);
+          // The label moves into the hover line, since the row that normally carries it is folded away
+          // with the column.
+          const shortcut = r.shortcut ? shortcutLabel(r.shortcut) : null;
+          return (
+            <button
+              key={r.key}
+              type="button"
+              aria-label={label}
+              title={shortcut ? `${label} · ${shortcut}` : label}
+              className="icon-btn"
+              onClick={() => r.onActivate?.(actions)}
+            >
+              <Icon name={r.icon} />
+            </button>
+          );
+        })}
+        <span className="flex-1" />
+        <button
+          type="button"
+          aria-label={translate(locale, "sidebar.settings")}
+          title={shortcutLabel("settings")}
+          className="icon-btn"
+          onClick={onOpenSettings}
+        >
+          <Icon name="settings" />
+        </button>
+      </nav>
+    );
+  }
+
   return (
     <nav
       aria-label={translate(locale, "sidebar.workspaces")}
@@ -183,32 +246,37 @@ export function Sidebar({
         className="flex items-center gap-3 px-[var(--space-3)] pt-[var(--space-3)] pb-1"
         style={{ paddingLeft: "max(var(--space-3), var(--traffic-light-inset))" }}
       >
-        {/* The three arrows above are the reference chrome: one window, one conversation, so there
-            is nothing to collapse and nowhere to go back to. They are drawn and named as such. */}
+        {/* The three arrows are the reference chrome, and all three answer now: one folds the column
+            to its rail, the other two step along the surfaces this window has opened. Each says so
+            when the stack has nothing on that side of it rather than firing into a no-op. */}
         <button
           type="button"
-          aria-label={translate(locale, "sidebar.toggle")}
-          aria-disabled
-          title={notInBuild}
+          aria-label={toggleLabel}
+          title={toggleLabel}
           className="icon-btn"
+          onClick={toggleSidebar}
         >
           <Icon name="sidebar" />
         </button>
         <button
           type="button"
           aria-label={translate(locale, "nav.back")}
-          aria-disabled
-          title={notInBuild}
+          aria-disabled={canBack ? undefined : true}
+          title={canBack ? translate(locale, "nav.back") : translate(locale, "nav.noHistoryBehind")}
           className="icon-btn"
+          onClick={back}
         >
           <Icon name="back" />
         </button>
         <button
           type="button"
           aria-label={translate(locale, "nav.forward")}
-          aria-disabled
-          title={notInBuild}
+          aria-disabled={canForward ? undefined : true}
+          title={
+            canForward ? translate(locale, "nav.forward") : translate(locale, "nav.noHistoryAhead")
+          }
           className="icon-btn"
+          onClick={forward}
         >
           <Icon name="forward" />
         </button>

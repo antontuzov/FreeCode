@@ -29,6 +29,8 @@
   "palette.close": "关闭",
   "nav.back": "后退",
   "nav.forward": "前进",
+  "nav.noHistoryBehind": "此视图之前没有打开过内容",
+  "nav.noHistoryAhead": "此视图之后没有打开过内容",
   "inspector.title": "运行检查器",
   "inspector.subagents": "子代理",
   "inspector.skills": "技能与 MCP",

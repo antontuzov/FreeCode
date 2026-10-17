@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
+import { useNav } from "../state/nav";
 import {
   ctaLabel,
   isTurn,
@@ -280,6 +281,9 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
   const running = useTranscript((s) => s.running);
   const runStartedAt = useTranscript((s) => s.runStartedAt);
   const waited = useRunSeconds(running ? runStartedAt : null);
+  // The header is the column's first row, so it is the one the traffic lights reach once the sidebar
+  // folds to its rail.
+  const rail = useNav((s) => s.collapsed);
   const scroll = useRef<HTMLDivElement>(null);
   const anchors = useRef(new Map<string, HTMLLIElement>());
   const flashTimer = useRef<number | undefined>(undefined);
@@ -332,7 +336,11 @@ export function Transcript({ locale, onPickModel }: { locale: Locale; onPickMode
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
-      <header className="flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b border-line px-[var(--space-4)]">
+      <header
+        className={`flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b border-line px-[var(--space-4)] ${
+          rail ? "clears-traffic-lights" : ""
+        }`}
+      >
         <h1 className="min-w-0 flex-1 truncate text-ui font-medium text-fg">
           {translate(locale, "transcript.title")}
         </h1>

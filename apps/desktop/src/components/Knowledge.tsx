@@ -45,21 +45,22 @@ type T = (key: string, params?: Record<string, string | number>) => string;
 
 export function Knowledge({
   locale,
-  initial,
+  page,
+  onOpen,
   onBack,
 }: {
   locale: Locale;
-  /** The page to open, by model id; `""` is the machine page, and an id the catalog does not carry
-   * falls back to it. The deep link `?knowledge=<id>` is the only caller that passes anything else,
-   * because opening a page by clicking its row is a click the native window cannot make. */
-  initial: string;
+  /** The page to show, by model id; `""` is the machine page, and an id the catalog does not carry
+   * falls back to it. The window's history holds which page is open rather than this component, so
+   * Back returns to the model that was on screen instead of to the conversation behind the surface —
+   * and clicking a row is now a page change the app remembers, which is the thing `initial` used to
+   * only be able to arrive at through `?knowledge=<id>`. */
+  page: string;
+  onOpen: (page: string) => void;
   onBack: () => void;
 }) {
   const [center, setCenter] = useState<KnowledgeCenter | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // The machine page opens by default: on a launch that has fetched nothing it is the only one with
-  // anything this-machine to say, and a model page reads the same whatever has been downloaded.
-  const [active, setActive] = useState<string>(initial);
   const t = (key: string, params?: Record<string, string | number>) =>
     translate(locale, `knowledge.${key}`, params);
 
@@ -78,7 +79,7 @@ export function Knowledge({
     };
   }, []);
 
-  const model: CatalogModel | undefined = center?.models.find((m) => m.id === active);
+  const model: CatalogModel | undefined = center?.models.find((m) => m.id === page);
   const heldOf = (m: CatalogModel) =>
     t("heldCount", { held: m.packs.filter((p) => p.onDisk).length, total: m.packs.length });
 
@@ -106,9 +107,9 @@ export function Knowledge({
         <div className="min-h-0 flex-1 overflow-y-auto px-[var(--space-3)] pb-[var(--space-3)]">
           <button
             type="button"
-            data-active={active === MACHINE || undefined}
+            data-active={page === MACHINE || undefined}
             className="nav-item"
-            onClick={() => setActive(MACHINE)}
+            onClick={() => onOpen(MACHINE)}
           >
             <Icon name="monitor" />
             <span className="truncate">{t("machine")}</span>
@@ -119,10 +120,10 @@ export function Knowledge({
             <button
               key={m.id}
               type="button"
-              data-active={active === m.id || undefined}
+              data-active={page === m.id || undefined}
               title={`${heldOf(m)} · ${m.repoId}`}
               className="nav-item"
-              onClick={() => setActive(m.id)}
+              onClick={() => onOpen(m.id)}
             >
               <Icon name="cube" />
               <span className="truncate">{m.name}</span>
