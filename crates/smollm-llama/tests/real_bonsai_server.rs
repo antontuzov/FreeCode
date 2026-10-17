@@ -531,3 +531,65 @@ async fn a_stock_binary_is_refused_before_the_server_starts() {
     );
     println!("refused {}", stray.display());
 }
+
+/// A port that is already somebody else's has to fail in words the launcher can act on.
+///
+/// The retry in `start` keys off the server's own output, so the wording is not a detail I may
+/// remember: it is whatever `libllama-server-impl.dylib` from the pinned release actually writes on
+/// this machine. This holds a loopback port and asks the real server for it by number, which is the
+/// only way to see the message as it is rather than as the llama.cpp docs say it was.
+///
+/// The assertion is in two parts: the child must die with its own exit rather than time out on
+/// `/health`, and the tail it leaves must carry the fragment `bind_collision` matches on. A pin change
+/// that rewords the message therefore fails here — which is the point, since the retry would otherwise
+/// degrade back into "launch failed" with nothing in CI to say why.
+///
+/// This holds the port and names it, because a lost handover of a *selected* port cannot be provoked
+/// through the public API — the kernel picks the number, and racing it is exactly the thing that is
+/// not deterministic. The recovery itself was therefore proved once by hand on 2026-10-17, with a
+/// temporary seam that forced `start`'s first attempt onto a held port: the pinned server refused
+/// 56725, `start` asked for another number, and the same launch came up healthy on 56729 in 4.3s. What
+/// is fixed here is the wording that recovery keys on.
+#[tokio::test]
+#[ignore = "needs the pinned engine unpacked and real weights on disk"]
+async fn a_held_port_fails_in_words_that_name_the_bind() {
+    let r = real();
+    need!(
+        r.engine.installed,
+        "no fork engine at {}",
+        r.engine.server_path.display()
+    );
+    need!(r.weights.is_file(), "no weights at {}", r.weights.display());
+
+    let held = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .expect("a loopback port to hold");
+    let port = held.local_addr().expect("the held port").port();
+
+    let mut req = r.request(&r.engine);
+    // An explicit port: `start` must use this number and report on it, not quietly move elsewhere.
+    req.tuning.port = port;
+    let err = smollm_llama::server::start(req, &r.lock, READY)
+        .await
+        .expect_err("a server cannot bind a port that is already held");
+    println!("FAILED AS: {err}");
+
+    let log = match &err {
+        smollm_llama::LlamaError::ServerExited { status, log } => {
+            println!("EXIT STATUS: {status}");
+            log.clone()
+        }
+        other => {
+            panic!("a busy port must reach the caller as the child's own exit, not as {other:?}")
+        }
+    };
+    assert!(
+        !log.trim().is_empty(),
+        "the exit was reported with an empty log, so nothing could name the reason"
+    );
+    let lowered = log.to_lowercase();
+    assert!(
+        lowered.contains("couldn't bind"),
+        "the tail does not carry the line `bind_collision` keys on:\n{log}"
+    );
+    drop(held);
+}

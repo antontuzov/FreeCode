@@ -43,6 +43,41 @@ const LOG_TAIL_LINES: usize = 120;
 const HEALTH_POLL: Duration = Duration::from_millis(250);
 /// A `--version` probe that has not answered in this long is a broken binary, not a slow one.
 const VERSION_PROBE: Duration = Duration::from_secs(10);
+/// How long the pipe readers get to finish once the child is gone before its log is quoted.
+const LOG_DRAIN: Duration = Duration::from_millis(250);
+
+/// What the server writes when the port it was handed is already somebody else's.
+///
+/// The first marker is the pinned binary's own wording, observed on this machine rather than
+/// remembered — `real_bonsai_server.rs::a_held_port_fails_in_words_that_name_the_bind` runs a real
+/// server against a held port and fails if a future pin rewords the line. The second is `strerror` for
+/// `EADDRINUSE`, kept in case a build reports the socket rather than the server. Both are prefixes or
+/// fragments of one line, so the host and port in it cannot break the match.
+///
+/// Deliberately narrow. A false negative costs a retry that did not happen, leaving the launch to fail
+/// exactly as it does today; a false positive costs one extra attempt before the same error is
+/// reported. Neither is worth swallowing a load failure.
+const BIND_MARKERS: &[&str] = &["couldn't bind", "address already in use"];
+
+/// Whether the child's own output says it died over the port rather than over the model.
+fn bind_collision(log: &str) -> bool {
+    let lowered = log.to_lowercase();
+    BIND_MARKERS.iter().any(|marker| lowered.contains(marker))
+}
+
+/// Whether a failed launch deserves a second attempt on a different number.
+///
+/// Both halves matter. A caller that named a port asked for *that* port, and answering "it is busy" by
+/// quietly using another would disobey the request instead of reporting it — so only a port this
+/// process picked itself is ever re-picked. And only a refusal the server attributed to the bind is
+/// retried: a load failure, a stalled `/health` or a `--version` that does not match the pin fails the
+/// same way on every port, so a second attempt would only delay the error the user is waiting for.
+fn should_reselect_port(picked: bool, error: &LlamaError) -> bool {
+    match error {
+        LlamaError::ServerExited { log, .. } => picked && bind_collision(log),
+        _ => false,
+    }
+}
 
 /// The pids of the servers this process has spawned and not yet killed.
 static SPAWNED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
@@ -233,6 +268,9 @@ pub struct ServerHandle {
     pub plan: LaunchPlan,
     child: Child,
     logs: Arc<Mutex<LogTail>>,
+    /// The tasks draining the child's pipes, so a log can be waited on before it is quoted.
+    /// See [`ServerHandle::drain_logs`].
+    readers: Vec<tokio::task::JoinHandle<()>>,
     /// Set once the child is observed to have exited, with its status line.
     exited: Option<String>,
 }
@@ -250,6 +288,18 @@ impl ServerHandle {
     /// of a launch error or a restart notice, and both excerpt it rather than printing it whole.
     pub fn log_tail(&self) -> String {
         self.logs.lock().map(|l| l.text()).unwrap_or_default()
+    }
+
+    /// Let the readers finish what an exited child already wrote, then it is safe to quote the tail.
+    ///
+    /// The pipes are at EOF once the child is gone, so this is a scheduling wait rather than an I/O
+    /// one — but a launch that died over its port would otherwise be reported with the line naming the
+    /// reason still in flight, and an empty log does not distinguish that from a server that printed
+    /// nothing. Bounded because a reader that outlives its child must not hold up a launch any further.
+    async fn drain_logs(&mut self) {
+        for reader in &mut self.readers {
+            let _ = tokio::time::timeout(LOG_DRAIN, reader).await;
+        }
     }
 
     /// Whether the child is still there to answer a request.
@@ -283,6 +333,7 @@ impl ServerHandle {
             .map_err(LlamaError::Http)?;
         loop {
             if let Some(status) = self.observe_exit() {
+                self.drain_logs().await;
                 return Err(LlamaError::ServerExited {
                     status,
                     log: self.log_tail(),
@@ -371,13 +422,13 @@ pub async fn verify_version(
 ///
 /// This is the standard ephemeral-port handover: between the drop and the child's `bind()` another
 /// process could claim the number. For a single-user desktop app that window is microseconds, and a
-/// collision surfaces as `ServerExited` carrying the server's own "bind: Address already in use".
+/// collision surfaces as `ServerExited` carrying the server's own `couldn't bind HTTP server socket`.
 ///
 /// That window is the only way this handover loses, and it was measured rather than assumed: a number
 /// whose listener has just closed a connection — so a socket on it is in TIME_WAIT — still binds by
 /// name, because `TcpListener::bind` asks for `SO_REUSEADDR`. Re-binding the number here before handing
-/// it over would prove nothing about the one failure that is real, so the race stays where it belongs:
-/// with the caller, who finds out from the child's own exit and not from a port still held open.
+/// it over would prove nothing about the one failure that is real, so the race is answered where it can
+/// be seen instead: [`start`] reads the child's own refusal and asks for another number.
 pub fn pick_free_port() -> Result<u16, LlamaError> {
     std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .map(|l| l.local_addr().map(|a| a.port()).unwrap_or(0))
@@ -389,16 +440,41 @@ pub fn pick_free_port() -> Result<u16, LlamaError> {
 
 /// Assemble the plan, prove the binary, spawn it, and return only once `/health` is green.
 ///
-/// `req.tuning.port == 0` selects a free loopback port; an explicit port is used as given.
+/// `req.tuning.port == 0` selects a free loopback port; an explicit port is used as given and is never
+/// swapped for another. A selected port that the child could not bind is the one launch failure worth
+/// repeating, so it gets one more number and one more attempt — see [`should_reselect_port`].
 pub async fn start(
     mut req: LaunchRequest<'_>,
     lock: &EngineLock,
     ready_timeout: Duration,
 ) -> Result<ServerHandle, LlamaError> {
-    if req.tuning.port == 0 {
+    let picked = req.tuning.port == 0;
+    if picked {
         req.tuning.port = pick_free_port()?;
     }
-    let plan = LaunchPlan::assemble(&req)?;
+    match attempt(&req, lock, ready_timeout).await {
+        Err(e) if should_reselect_port(picked, &e) => {
+            // The handover lost: something took the number between the drop and the child's bind. The
+            // second attempt either starts or fails for a reason that has nothing to do with ports,
+            // and that is the error the user gets — a third try would only be a longer wait.
+            tracing::warn!(
+                lost_port = req.tuning.port,
+                "the port handed to llama-server was already taken; launching on another"
+            );
+            req.tuning.port = pick_free_port()?;
+            attempt(&req, lock, ready_timeout).await
+        }
+        result => result,
+    }
+}
+
+/// One launch: everything [`start`] does after the port is settled.
+async fn attempt(
+    req: &LaunchRequest<'_>,
+    lock: &EngineLock,
+    ready_timeout: Duration,
+) -> Result<ServerHandle, LlamaError> {
+    let plan = LaunchPlan::assemble(req)?;
     let version = tokio::time::timeout(VERSION_PROBE, verify_version(&plan.program, lock))
         .await
         .map_err(|_| LlamaError::VersionProbeStalled {
@@ -446,17 +522,19 @@ pub async fn start(
     }
 
     let logs = Arc::new(Mutex::new(LogTail::default()));
+    let mut readers = Vec::new();
     if let Some(stdout) = child.stdout.take() {
-        pump(stdout, Arc::clone(&logs));
+        readers.push(pump(stdout, Arc::clone(&logs)));
     }
     if let Some(stderr) = child.stderr.take() {
-        pump(stderr, Arc::clone(&logs));
+        readers.push(pump(stderr, Arc::clone(&logs)));
     }
 
     let mut handle = ServerHandle {
         plan,
         child,
         logs,
+        readers,
         exited: None,
     };
     if let Err(e) = handle.wait_until_ready(ready_timeout).await {
@@ -466,11 +544,12 @@ pub async fn start(
     Ok(handle)
 }
 
-/// Drain one of the child's pipes into the shared tail.
+/// Drain one of the child's pipes into the shared tail, and hand back the task doing it.
 ///
-/// Detached on purpose: the reader finishes by itself when the killed child's pipe closes, so nothing
-/// is left behind and there is nothing to await on the way out.
-fn pump<R>(pipe: R, logs: Arc<Mutex<LogTail>>)
+/// The reader finishes by itself when the killed child's pipe closes, so nothing is left behind and
+/// there is nothing to await on the way out — the handle keeps the join only so an error can wait for
+/// the lines the child wrote before dying, which is what [`ServerHandle::drain_logs`] is for.
+fn pump<R>(pipe: R, logs: Arc<Mutex<LogTail>>) -> tokio::task::JoinHandle<()>
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -483,7 +562,7 @@ where
                 tail.push(line);
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]
@@ -553,6 +632,138 @@ mod tests {
             if let Some(e) = refused {
                 panic!("handover {handover}: three ports came back unbindable: {e}");
             }
+        }
+    }
+
+    /// Only a refusal to bind may read as one.
+    ///
+    /// The line the first marker matches is what the pinned binary actually printed on this machine
+    /// when its port was held: `couldn't bind HTTP server socket` arrived with the hostname and the
+    /// number in it, so the match is the fragment before both. The rest are the ways a launch really
+    /// dies — a packing the loader rejects, an allocation the machine cannot give — none of which a
+    /// different port changes.
+    #[test]
+    fn only_a_refusal_to_bind_reads_as_a_bind_collision() {
+        let observed = "0.00.073.883 E srv         start: couldn't bind HTTP server socket, hostname: 127.0.0.1, port: 56649\n\
+                        0.00.074.405 E srv  llama_server: exiting due to HTTP server error";
+        assert!(
+            bind_collision(observed),
+            "the server's own words must match"
+        );
+        assert!(
+            bind_collision("bind socket to 127.0.0.1:8080 failed: Address already in use"),
+            "the socket layer's wording must match too"
+        );
+
+        for not_a_bind in [
+            "llama_init_from_gguf: unable to load model: unknown quantization type PTQ1_0",
+            "ggml_metal_buffer_init: error: failed to allocate buffer of size 2147483648",
+            "srv    operator(): operator(): cleaning up before exit...",
+            "(the server produced no output)",
+        ] {
+            assert!(!bind_collision(not_a_bind), "{not_a_bind} is not a bind");
+        }
+    }
+
+    /// The retry's two halves, each of which is a mistake without the other: retrying a port the
+    /// caller named would disobey the request, and retrying anything but a bind would postpone an
+    /// error that has nothing to do with ports.
+    #[test]
+    fn only_a_selected_port_that_could_not_bind_is_asked_for_again() {
+        let busy = LlamaError::ServerExited {
+            status: "exit status: 1".to_string(),
+            log: "couldn't bind HTTP server socket, hostname: 127.0.0.1, port: 8080".to_string(),
+        };
+        assert!(
+            should_reselect_port(true, &busy),
+            "a lost handover deserves another number"
+        );
+        assert!(
+            !should_reselect_port(false, &busy),
+            "an explicit port is obeyed, not swapped out from under the caller"
+        );
+
+        let load_failed = LlamaError::ServerExited {
+            status: "exit status: 1".to_string(),
+            log: "llama_init_from_gguf: unable to load model".to_string(),
+        };
+        assert!(
+            !should_reselect_port(true, &load_failed),
+            "a model the loader refused is not a port's problem"
+        );
+        assert!(
+            !should_reselect_port(
+                true,
+                &LlamaError::ServerUnhealthy {
+                    url: "http://127.0.0.1:8080".to_string(),
+                    after_secs: 30,
+                    status: "503 Service Unavailable".to_string(),
+                    log: String::new(),
+                }
+            ),
+            "a server that never answered /health is not a bind collision"
+        );
+    }
+
+    /// A child that died quickly still gets quoted in full.
+    ///
+    /// This is the reason `wait_until_ready` waits for the readers: the exit can be observed while the
+    /// line explaining it is still inside the task draining the pipe, and the retry above keys off that
+    /// line. Repeated because the point is a race — one pass can land on the slow branch by luck.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_child_that_died_at_once_still_has_its_last_words_in_the_error() {
+        use smollm_models::hardware::Backend;
+
+        for attempt in 0..8 {
+            let mut child = Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    r#"echo "couldn't bind HTTP server socket" >&2; exit 1"#,
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .expect("a child that dies on its own");
+            let logs = Arc::new(Mutex::new(LogTail::default()));
+            let mut readers = Vec::new();
+            if let Some(stdout) = child.stdout.take() {
+                readers.push(pump(stdout, Arc::clone(&logs)));
+            }
+            if let Some(stderr) = child.stderr.take() {
+                readers.push(pump(stderr, Arc::clone(&logs)));
+            }
+            let mut handle = ServerHandle {
+                plan: LaunchPlan {
+                    program: "/bin/sh".into(),
+                    args: Vec::new(),
+                    backend: Backend::Cpu,
+                    layers_offloaded: 0,
+                    context_tokens: 512,
+                    // Nothing listens here, so the health probe fails at once and the exit is what
+                    // ends the wait — which is the case the drain exists for.
+                    base_url: "http://127.0.0.1:1".into(),
+                    display: "a child that refuses its port".into(),
+                },
+                child,
+                logs,
+                readers,
+                exited: None,
+            };
+            let err = handle
+                .wait_until_ready(Duration::from_secs(10))
+                .await
+                .expect_err("a child that exits cannot become healthy");
+            let LlamaError::ServerExited { log, .. } = &err else {
+                panic!("attempt {attempt}: expected the child's exit, got {err:?}");
+            };
+            assert!(
+                log.contains("couldn't bind HTTP server socket"),
+                "attempt {attempt}: the exit was reported without the line the child wrote: {log:?}"
+            );
+            handle.kill();
         }
     }
 
@@ -691,11 +902,12 @@ mod tests {
             .expect("a placeholder for a running server");
         let pid = child.id().expect("a child that has not been reaped");
         let logs = Arc::new(Mutex::new(LogTail::default()));
+        let mut readers = Vec::new();
         if let Some(stdout) = child.stdout.take() {
-            pump(stdout, Arc::clone(&logs));
+            readers.push(pump(stdout, Arc::clone(&logs)));
         }
         if let Some(stderr) = child.stderr.take() {
-            pump(stderr, Arc::clone(&logs));
+            readers.push(pump(stderr, Arc::clone(&logs)));
         }
         let mut handle = ServerHandle {
             plan: LaunchPlan {
@@ -709,6 +921,7 @@ mod tests {
             },
             child,
             logs,
+            readers,
             exited: None,
         };
         assert!(handle.is_running(), "a live child is running");
