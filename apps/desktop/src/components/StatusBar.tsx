@@ -14,6 +14,21 @@ function percentLabel(used: number): string {
 }
 
 /**
+ * The reference's meter is not a bar but a ruler of slanted ticks: the used fraction drawn in the
+ * text's own colour, the rest in the hairline's. A bar carries the accent and says "how full", which
+ * is a verdict; the ticks are neutral and say "how far along the window this run has got", which is a
+ * measurement. The count is the reference's own, read off its footer.
+ */
+const TICKS = 26;
+
+/** Same rule as `percentLabel` keeps for the figure: a window with anything in it must not read empty,
+ * so the first tick is spent as soon as the server reports a token. */
+function ticksUsed(used: number | null): number {
+  if (!used) return 0;
+  return Math.min(TICKS, Math.max(1, Math.round((TICKS * used) / 100)));
+}
+
+/**
  * The strip the reference puts under the composer. Its badge is the same guard verdict the status
  * card uses, so the bottom of the window cannot claim "Local" while the top refuses to run.
  */
@@ -55,9 +70,16 @@ export function StatusBar({ locale }: { locale: Locale }) {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-label={translate(locale, "statusbar.context")}
-        className="h-1.5 w-24 overflow-hidden rounded-[var(--radius-pill)] bg-sunken"
+        className="flex shrink-0 items-center gap-[1.5px] text-fg"
+        style={{ transform: "skewX(-18deg)" }}
       >
-        <span className="block h-full bg-accent" style={{ width: `${used ?? 0}%` }} aria-hidden />
+        {Array.from({ length: TICKS }, (_, i) => (
+          <span
+            key={i}
+            aria-hidden
+            className={`h-[9px] w-[1.5px] rounded-[1px] ${i < ticksUsed(used) ? "bg-current" : "bg-line-strong"}`}
+          />
+        ))}
       </span>
       <span className="w-8 text-right font-mono tabular-nums">
         {used === null ? "—" : percentLabel(used)}
