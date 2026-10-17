@@ -1170,6 +1170,10 @@ pub async fn chat_send(
             // The answer is coming from the supervised loopback server, so the only thing that can
             // make this run not-local is a configured remote provider.
             local: status::local_badge(true, settings.privacy.allow_remote_providers),
+            // Zero says this run has no rounds to spend, which is what the step pill reads as "do not
+            // draw me" — a plain chat does not have a budget, and a pill saying `Step 0 / 0` over it
+            // would be a counter of something that cannot happen.
+            max_rounds: if tools { MAX_TOOL_ROUNDS } else { 0 },
         },
     );
     lock(&state.history).push(prompt(&text, image.clone()));

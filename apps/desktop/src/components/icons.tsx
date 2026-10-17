@@ -44,6 +44,10 @@ const PATHS = {
   // by nudging individual points — the outline is one curve, and a lone vertex breaks it.
   settings:
     "M12 3.4L13.1 3.5L13.7 5.6L14.5 5.9L15.3 6.3L17.2 5.2L18.1 5.9L18.8 6.8L17.7 8.7L18.1 9.5L18.4 10.3L20.5 10.9L20.6 12L20.5 13.1L18.4 13.7L18.1 14.5L17.7 15.3L18.8 17.2L18.1 18.1L17.2 18.8L15.3 17.7L14.5 18.1L13.7 18.4L13.1 20.5L12 20.6L10.9 20.5L10.3 18.4L9.5 18.1L8.7 17.7L6.8 18.8L5.9 18.1L5.2 17.2L6.3 15.3L5.9 14.5L5.6 13.7L3.5 13.1L3.4 12L3.5 10.9L5.6 10.3L5.9 9.5L6.3 8.7L5.2 6.8L5.9 5.9L6.8 5.2L8.7 6.3L9.5 5.9L10.3 5.6L10.9 3.5zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
+  // Three quarters of a circle, open at the top-right: the reference's step pill carries a loader
+  // rather than a number-in-a-box, and this is the one glyph that reads as "the loop is turning"
+  // whether or not the caller spins it. `Composer` adds the spin while the round runs.
+  step: "M12 4a8 8 0 1 0 8 8",
   // A prompt with no box around it, unlike `coding`'s: this glyph is only ever drawn inside an
   // inspector chip, which is already a square. Two squares nested at 14px read as one smudge.
   skills: "M5 8l4 4-4 4M12 16h7",

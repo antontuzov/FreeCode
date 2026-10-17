@@ -15,7 +15,7 @@ import { useAppearance } from "./state/appearance";
 import { connectAgentEvents, useChat } from "./state/chat";
 import { currentView, useNav } from "./state/nav";
 import { useSessions } from "./state/sessions";
-import { FIXTURE_DIFF, FIXTURE_ROWS, useTranscript } from "./state/transcript";
+import { FIXTURE_DIFF, FIXTURE_ROUNDS, FIXTURE_ROWS, useTranscript } from "./state/transcript";
 
 export default function App() {
   const load = useAppearance((s) => s.load);
@@ -23,6 +23,7 @@ export default function App() {
   const setRows = useTranscript((s) => s.setRows);
   const setContextUsed = useTranscript((s) => s.setContextUsed);
   const setRunDiff = useTranscript((s) => s.setRunDiff);
+  const setRunRounds = useTranscript((s) => s.setRunRounds);
   const refreshEngine = useChat((s) => s.refresh);
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
@@ -92,7 +93,9 @@ export default function App() {
     setContextUsed(40);
     // …and a "+N −M files changed" pill, which is the row a run leaves when it edits a file.
     setRunDiff(FIXTURE_DIFF);
-  }, [fixture, setRows, setContextUsed, setRunDiff]);
+    // …and the step pill beside it, which the scripted "Ran 3 tools" header earned.
+    setRunRounds(FIXTURE_ROUNDS);
+  }, [fixture, setRows, setContextUsed, setRunDiff, setRunRounds]);
 
   // `?ask=<prompt>` sends that prompt on mount; `?ask_repeat=<n>` sends it n times in a row. The
   // native window takes no injected clicks, so this is how a real answer from the local engine gets

@@ -101,6 +101,7 @@
   "composer.send": "Send",
   "composer.stop": "Stop",
   "composer.mic": "Voice input",
+  "composer.step": "Step {{done}} / {{max}}",
   "modelPicker.title": "Answer with",
   "modelPicker.loading": "Reading the catalog…",
   "modelPicker.packs": "{{held}} of {{total}} packs here",

@@ -220,6 +220,11 @@ pub enum AgentEvent {
         run_id: String,
         model_label: String,
         local: bool,
+        /// How many tool rounds this run may spend before the host stops asking — the denominator of
+        /// the composer's step pill, and `0` for a run that was never offered a tool. It rides the
+        /// announcement rather than a constant the interface copies, because the cap belongs to the
+        /// loop: a window that guessed it would keep guessing after the host changed its budget.
+        max_rounds: usize,
     },
     /// Collapsed reasoning text, streamed.
     ThoughtDelta {
@@ -371,11 +376,13 @@ mod tests {
             run_id: "r1".into(),
             model_label: "Ternary Bonsai 2 27B (PQ2_0)".into(),
             local: true,
+            max_rounds: 4,
         };
         let raw = serde_json::to_value(&e).unwrap();
         assert_eq!(raw["type"], json!("runStarted"), "camelCase discriminator");
         assert_eq!(raw["modelLabel"], json!("Ternary Bonsai 2 27B (PQ2_0)"));
         assert_eq!(raw["local"], json!(true));
+        assert_eq!(raw["maxRounds"], json!(4));
     }
 
     #[test]

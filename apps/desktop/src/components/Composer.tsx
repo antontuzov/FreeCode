@@ -25,6 +25,7 @@ const CODING_SEEDED = new URLSearchParams(window.location.search).get("coding") 
 export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel: () => void }) {
   const running = useTranscript((s) => s.running);
   const runDiff = useTranscript((s) => s.runDiff);
+  const runRounds = useTranscript((s) => s.runRounds);
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
   const error = useChat((s) => s.error);
@@ -72,24 +73,45 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
 
   return (
     <div className="shrink-0 px-[var(--space-6)] pb-[var(--space-3)]">
-      {runDiff && (
-        // What the run changed, where the composer already is. The count is the host's ledger of
-        // distinct files, not the number of edit rows, and it moves while the run goes rather than
-        // arriving once it ends — an agent that has changed six files is a different thing to watch
-        // than one that has changed none.
-        <div className="mx-auto mb-[var(--space-2)] w-full max-w-[var(--content-width)]">
-          <span className="inline-flex items-center gap-[var(--space-2)] rounded-[var(--radius-pill)] border border-line bg-elevated px-[var(--space-3)] py-1 text-fine text-muted">
-            <Icon name="review" size={13} />
-            {translate(
-              locale,
-              runDiff.files === 1 ? "transcript.diff.fileChanged" : "transcript.diff.filesChanged",
-              { count: runDiff.files },
-            )}
-            <span className="font-mono tabular-nums">
-              <span className="text-success">+{runDiff.added}</span>{" "}
-              <span className="text-danger">−{runDiff.removed}</span>
+      {(runRounds || runDiff) && (
+        // What the run has spent and what it cost, on the line above the box it spent them in. The
+        // step pill counts the loop's rounds against the budget the host announced, so a long agent
+        // run says where it is as well as where it is going; the diff pill counts the writes.
+        <div className="mx-auto mb-[var(--space-2)] flex w-full max-w-[var(--content-width)] flex-wrap items-center gap-[var(--space-2)]">
+          {runRounds && (
+            <span className="inline-flex items-center gap-[var(--space-2)] rounded-[var(--radius-pill)] border border-line bg-elevated px-[var(--space-3)] py-1 text-fine text-muted">
+              <Icon
+                name="step"
+                size={13}
+                className={running ? "animate-spin" : undefined}
+                aria-hidden
+              />
+              {translate(locale, "composer.step", {
+                done: runRounds.done,
+                max: runRounds.max,
+              })}
             </span>
-          </span>
+          )}
+          {runDiff && (
+            // What the run changed, where the composer already is. The count is the host's ledger of
+            // distinct files, not the number of edit rows, and it moves while the run goes rather than
+            // arriving once it ends — an agent that has changed six files is a different thing to
+            // watch than one that has changed none.
+            <span className="inline-flex items-center gap-[var(--space-2)] rounded-[var(--radius-pill)] border border-line bg-elevated px-[var(--space-3)] py-1 text-fine text-muted">
+              <Icon name="review" size={13} />
+              {translate(
+                locale,
+                runDiff.files === 1
+                  ? "transcript.diff.fileChanged"
+                  : "transcript.diff.filesChanged",
+                { count: runDiff.files },
+              )}
+              <span className="font-mono tabular-nums">
+                <span className="text-success">+{runDiff.added}</span>{" "}
+                <span className="text-danger">−{runDiff.removed}</span>
+              </span>
+            </span>
+          )}
         </div>
       )}
       <div className="mx-auto w-full max-w-[var(--content-width)] rounded-[var(--radius-lg)] border border-line bg-elevated shadow-raised transition-colors focus-within:border-accent-line">

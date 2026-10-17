@@ -73,6 +73,14 @@ export type DiffStat = { added: number; removed: number };
  */
 export type RunDiff = { files: number; added: number; removed: number };
 
+/**
+ * How far into its budget a run has got. The code calls the unit a round — one ask, the tools it
+ * called, one replay — because `Step` already names a tool row here and two different "steps" in one
+ * file is a confusion nobody catches. The pill says "Step", which is the word the reference uses and
+ * the word a user reaches for.
+ */
+export type RunRounds = { done: number; max: number };
+
 export type Step = {
   id: string;
   kind: StepKind;
@@ -454,6 +462,14 @@ type TranscriptStore = {
    * while the run goes and on `runFinished` when it ends.
    */
   runDiff: RunDiff | null;
+  /**
+   * How far into its budget the run in flight — or the one that just closed — has got, or null when
+   * there is no budget to be partway into. `max` is the host's own round cap, carried on the
+   * announcement rather than copied here, and `done` counts the batches the host has closed, so the
+   * figure moves at the end of a round rather than at the start of one. This is the composer's step
+   * pill; the transcript's numbered steps are a different thing and are not counted by it.
+   */
+  runRounds: RunRounds | null;
   setRows: (rows: Row[]) => void;
   setRunning: (running: boolean) => void;
   /** Presets the meter for the fixture, and clears it when the conversation is thrown away. */
@@ -462,6 +478,8 @@ type TranscriptStore = {
   setLastRun: (run: RunReport | null) => void;
   /** Presets the pill for the fixture; a real run fills it from its own writes. */
   setRunDiff: (diff: RunDiff | null) => void;
+  /** Presets the step pill for the fixture; a real run fills it from its own closed rounds. */
+  setRunRounds: (rounds: RunRounds | null) => void;
   /** The prompt's own row, added on send so the bubble appears before the engine answers. */
   pushPrompt: (text: string, image?: string) => void;
   apply: (event: AgentEvent) => void;
@@ -473,12 +491,14 @@ export const useTranscript = create<TranscriptStore>((set) => ({
   contextUsed: null,
   lastRun: null,
   runDiff: null,
+  runRounds: null,
   runStartedAt: null,
   setRows: (rows) => set({ rows }),
   setRunning: (running) => set({ running, runStartedAt: running ? Date.now() : null }),
   setContextUsed: (contextUsed) => set({ contextUsed }),
   setLastRun: (lastRun) => set({ lastRun }),
   setRunDiff: (runDiff) => set({ runDiff }),
+  setRunRounds: (runRounds) => set({ runRounds }),
   pushPrompt: (text, image) =>
     set((s) => ({
       rows: [...s.rows, { id: nextId("turn"), kind: "turn", role: "user", text, image }],
@@ -527,6 +547,18 @@ export const useTranscript = create<TranscriptStore>((set) => ({
                     }
                   : s.runDiff
                 : s.runDiff,
+        // The step figure counts closed rounds, so it moves when the host says a round is over rather
+        // than when the next one starts: a pill that read `Step 1 / 4` while the first round's tools
+        // were still running would claim a round had finished that had not. A run with no budget has
+        // nothing to count, and the pill stays out of the way.
+        runRounds:
+          event.type === "runStarted"
+            ? event.maxRounds > 0
+              ? { done: 0, max: event.maxRounds }
+              : null
+            : event.type === "toolBatchClosed" && s.runRounds
+              ? { ...s.runRounds, done: s.runRounds.done + 1 }
+              : s.runRounds,
       };
     }),
 }));
@@ -630,3 +662,8 @@ export const FIXTURE_ROWS: Row[] = [
  * a second source of truth computed from the rows.
  */
 export const FIXTURE_DIFF: RunDiff = { files: 2, added: 36, removed: 14 };
+
+/** The step pill `?fixture=1` shows beside it: one round closed of the four the host budgets. The
+ * scripted rows carry one "Ran 3 tools" header, and this is the figure that header would have left
+ * standing — the pill and the transcript agree rather than each inventing its own. */
+export const FIXTURE_ROUNDS: RunRounds = { done: 1, max: 4 };

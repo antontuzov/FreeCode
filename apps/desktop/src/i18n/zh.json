@@ -101,6 +101,7 @@
   "composer.send": "发送",
   "composer.stop": "停止",
   "composer.mic": "语音输入",
+  "composer.step": "已用 {{done}} / {{max}} 步",
   "modelPicker.title": "改用模型",
   "modelPicker.loading": "正在读取模型目录…",
   "modelPicker.packs": "本机有 {{held}}/{{total}} 个量化包",

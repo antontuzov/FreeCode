@@ -282,7 +282,9 @@ export type HostToolOutcome = {
  * is the catalog's, which is why the transcript maps one onto the other instead of trusting the wire.
  */
 export type AgentEvent =
-  | { type: "runStarted"; runId: string; modelLabel: string; local: boolean }
+  /** `maxRounds` is the loop's own budget, and 0 for a run that was never offered a tool — the step
+   * pill's denominator, and the reason it can say "do not draw me" without copying a constant. */
+  | { type: "runStarted"; runId: string; modelLabel: string; local: boolean; maxRounds: number }
   | { type: "thoughtDelta"; text: string }
   | { type: "answerDelta"; text: string }
   /** A tool row opens while the call runs, and closes with the outcome under it. The batch header

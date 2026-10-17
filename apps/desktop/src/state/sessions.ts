@@ -71,5 +71,7 @@ export const useSessions = create<SessionStore>((set) => ({
     // changed. A reopened conversation shows what it wrote at the time, not a count for an answer that
     // has since been read elsewhere.
     transcript.setRunDiff(null);
+    // The rounds a run spent are the same kind of claim: true of that run, not of this window.
+    transcript.setRunRounds(null);
   },
 }));
