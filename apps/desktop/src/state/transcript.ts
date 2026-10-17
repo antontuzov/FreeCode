@@ -137,7 +137,12 @@ export function isTurn(row: Row): row is Turn {
 
 export function stepLabel(locale: Locale, step: Step): string {
   if (step.kind === "toolBatch") {
-    return translate(locale, I18N_KEYS.toolBatch, { count: step.children?.length ?? 0 });
+    // A batch of one would read "Ran 1 tools". The count only earns its place above one, and the
+    // singular the catalogs already own for a lone tool row is the one this header borrows.
+    const count = step.children?.length ?? 0;
+    return count === 1
+      ? translate(locale, I18N_KEYS.tool)
+      : translate(locale, I18N_KEYS.toolBatch, { count });
   }
   if (step.kind === "running") {
     return translate(locale, I18N_KEYS.running, { seconds: step.seconds ?? 0 });

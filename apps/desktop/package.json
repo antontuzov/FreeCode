@@ -20,7 +20,8 @@
     "tauri:restart": "tauri dev --config src-tauri/tauri.dev-restart.conf.json",
     "tauri:forget": "tauri dev --config src-tauri/tauri.dev-forget.conf.json",
     "tauri:stop": "tauri dev --config src-tauri/tauri.dev-stop.conf.json",
-    "tauri:start": "tauri dev --config src-tauri/tauri.dev-start.conf.json"
+    "tauri:start": "tauri dev --config src-tauri/tauri.dev-start.conf.json",
+    "tauri:coding": "tauri dev --config src-tauri/tauri.dev-coding.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",
