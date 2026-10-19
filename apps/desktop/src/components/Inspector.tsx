@@ -6,8 +6,11 @@ import {
   changedFiles,
   readSubjects,
   reviewRows,
+  stepLabel,
+  usedCapabilities,
   useTranscript,
   type DiffStat,
+  type StepKind,
 } from "../state/transcript";
 import { Icon, type IconName } from "./icons";
 
@@ -20,6 +23,11 @@ type Group = {
   /** A subagent is a who rather than a what, so its chip closes into a disc the way the footer's
    * avatar does. Everything else is a file, a tool or a page, and those are square. */
   round?: boolean;
+  /** Whether the header counts its rows in a chip, which only the capability group does: the reference
+   * draws the chip there and nowhere else, and the number it holds is the length of the list under it,
+   * so the folded heading and the open rows are one answer. The other groups name paths and addresses,
+   * where reading the rows *is* counting them. */
+  counted?: boolean;
 };
 
 // The groups the reference inspector shows, in order: first what the run changed, then the five it
@@ -27,7 +35,7 @@ type Group = {
 const GROUPS: Group[] = [
   { key: "files", icon: "editFile" },
   { key: "subagents", icon: "user", round: true },
-  { key: "skills", icon: "skills" },
+  { key: "skills", icon: "skills", counted: true },
   { key: "artifact", icon: "artifact" },
   { key: "webReading", icon: "webReading" },
   // The document glyph rather than a stack of them, because every row in this group is one file the
@@ -58,6 +66,22 @@ function hostMark(host: string): IconName | undefined {
 }
 
 /**
+ * The capability rows wear the glyph of the call they name, which is the shape the panel already uses
+ * to tell a read from an edit from a page: six identical chips under six different labels would say the
+ * group holds one kind of thing, when the point of listing them is that the run had several. A kind
+ * with no mark of its own — `tool`, the call the host names without giving it a row shape — keeps the
+ * group's prompt glyph, which is the mark that means "a capability" on its own.
+ */
+const CAPABILITY_ICONS: Partial<Record<StepKind, IconName>> = {
+  readFile: "readFile",
+  editFile: "editFile",
+  searchContent: "searchContent",
+  terminal: "terminal",
+  webSearch: "search",
+  webReading: "webReading",
+};
+
+/**
  * `?collapsed=<keys>` starts named sections folded — the five groups by key, and the run's own numbers
  * as `run`. Dev-only, like every other deep link here: the fold is a control the reader has on screen,
  * and this is the same press arriving from the URL, which is what lets a capture reach the sections a
@@ -68,17 +92,13 @@ const SEEDED_FOLDED = new Set(
 );
 
 /**
- * `?fixture=1` only, for the three groups no loop in this build writes rows for yet — see the note in
- * state/transcript.ts about invented run output. The three a run *can* produce — `files`, `source` and
- * `webReading` — are read off the transcript in every mode, so what the panel lists and what the rows
- * above it report stay one answer rather than two.
+ * `?fixture=1` only, for the two groups no loop in this build writes rows for yet — see the note in
+ * state/transcript.ts about invented run output. The four a run *can* produce — `files`, `source`,
+ * `webReading` and `skills` — are read off the transcript in every mode, so what the panel lists and
+ * what the rows above it report stay one answer rather than two.
  */
 const FIXTURE_ITEMS: Record<string, Item[]> = {
   subagents: [{ label: "Explore · llama.cpp", meta: "stopped" }, { label: "Audit engine claims" }],
-  skills: [
-    { label: "verify-smollm-studio-natively" },
-    { label: "tauri-desktop-native-verification" },
-  ],
   artifact: [{ label: "README.md" }],
 };
 
@@ -86,10 +106,14 @@ function SectionHeader({
   open,
   onToggle,
   label,
+  count,
 }: {
   open: boolean;
   onToggle: () => void;
   label: string;
+  /** The reference's header chip, drawn at the row's right edge: a count that holds while the group
+   * is folded, in the same accent pill the composer's mode switch wears. */
+  count?: string;
 }) {
   return (
     <button
@@ -107,6 +131,7 @@ function SectionHeader({
         size={13}
         className={`disclosure-icon shrink-0 ${open ? "" : "-rotate-90"}`}
       />
+      {count && <span className="pill ml-auto shrink-0 px-2 py-0 text-micro">{count}</span>}
     </button>
   );
 }
@@ -151,7 +176,16 @@ function Section({ group, items, locale }: { group: Group; items: Item[]; locale
 
   return (
     <section className="border-b border-line/60">
-      <SectionHeader open={open} onToggle={() => setOpen((v) => !v)} label={label} />
+      <SectionHeader
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        label={label}
+        count={
+          group.counted && has
+            ? translate(locale, "inspector.skills.count", { count: items.length })
+            : undefined
+        }
+      />
       {open && (
         <ul className="disclosure-panel px-[var(--space-4)] pb-[var(--space-3)]">
           {items.length === 0 ? (
@@ -331,11 +365,28 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
       })),
     [rows],
   );
+  // The capabilities are the same derivation over the same span, named by the row's own label: what
+  // "Skills & MCP" holds here is what this build's agent can be handed, which is the tool registry's
+  // vocabulary the transcript already speaks — see `Extensions.tsx`.
+  const capabilities = useMemo<Item[]>(
+    () =>
+      usedCapabilities(reviewRows(rows, "lastTurn")).map((step) => ({
+        label: stepLabel(locale, step),
+        icon: CAPABILITY_ICONS[step.kind],
+      })),
+    [rows, locale],
+  );
   // The scripted groups fill in under the row-derived ones, which a fixture window therefore still
   // sees — and a real run does not, because it has no scripted rows to fill them from.
   const groups = useMemo<Record<string, Item[]>>(
-    () => ({ ...(fixture ? FIXTURE_ITEMS : {}), files, source: sources, webReading: pages }),
-    [fixture, files, sources, pages],
+    () => ({
+      ...(fixture ? FIXTURE_ITEMS : {}),
+      files,
+      skills: capabilities,
+      source: sources,
+      webReading: pages,
+    }),
+    [fixture, files, capabilities, sources, pages],
   );
 
   return (

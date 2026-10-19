@@ -38,6 +38,7 @@
   "inspector.files": "已更改文件",
   "inspector.subagents": "子代理",
   "inspector.skills": "技能与 MCP",
+  "inspector.skills.count": "已使用 {{count}} 项",
   "inspector.artifact": "产物",
   "inspector.webReading": "网页阅读",
   "inspector.source": "来源",

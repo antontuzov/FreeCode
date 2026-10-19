@@ -450,6 +450,43 @@ export function readSubjects(rows: Row[], kind: "webReading" | "readFile"): stri
   return [...seen];
 }
 
+/**
+ * The kinds that name a capability the loop can be handed, as opposed to a row the run leaves behind.
+ * The rest of the model is narration (`thought`, `processed`, a batch's own header) or a seam
+ * (`contextCompressed`), and a list of what a run *used* that counted its own commentary would be
+ * padding the number out.
+ */
+const CAPABILITIES = new Set<StepKind>([
+  "readFile",
+  "searchContent",
+  "terminal",
+  "editFile",
+  "webSearch",
+  "webReading",
+  "tool",
+]);
+
+/**
+ * One step per capability this span's rows say the run called on, in the order it first reached for
+ * one — the representative step rather than the kind, so the panel can name it with [`stepLabel`] and
+ * word the row exactly as the transcript row above words itself.
+ *
+ * The same derivation as the other three groups, for the same reason: the host writes a row per call,
+ * so a panel that listed capabilities from anywhere else would advertise one the run never used. A
+ * call that was refused or is still in flight is excluded on the same reading as `readSubjects` — the
+ * run asked, and asking is not using. Repeats fold to one entry because a model that read nine files
+ * had one capability, which is the question this group answers: what was at its hands, not how busy
+ * it was.
+ */
+export function usedCapabilities(rows: Row[]): Step[] {
+  const first = new Map<StepKind, Step>();
+  for (const row of everyStep(rows)) {
+    if (!CAPABILITIES.has(row.kind) || row.status !== "ok") continue;
+    if (!first.has(row.kind)) first.set(row.kind, row);
+  }
+  return [...first.values()];
+}
+
 function reduce(rows: Row[], event: AgentEvent): Row[] {
   switch (event.type) {
     case "runStarted":
@@ -696,6 +733,7 @@ export const FIXTURE_ROWS: Row[] = [
         id: "f2c",
         kind: "editFile",
         subject: "apps/desktop/src-tauri/src/agent.rs",
+        status: "ok",
         // The row's `diff` and its `hunk` are the same change counted and written, so the pill above
         // the composer and the review panel it opens cannot disagree. `?fixture=1` shows a shortened
         // edit rather than a 29-line one for the same reason the host shortens one: a hunk is cut to
@@ -745,7 +783,7 @@ export const FIXTURE_ROWS: Row[] = [
     seconds: 10,
     children: [
       { id: "f4a", kind: "terminal", detail: "cargo test -p smollm-core", status: "ok" },
-      { id: "f4b", kind: "searchContent", detail: "\\.run\\(" },
+      { id: "f4b", kind: "searchContent", detail: "\\.run\\(", status: "ok" },
       // The read that found the line this batch then rewrote, naming a file the round also edits:
       // opening a file is a source and changing it is a change, so the same path belongs in both of
       // the inspector's lists, and this is the pair that shows the panel keeping them apart.

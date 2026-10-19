@@ -38,6 +38,7 @@
   "inspector.files": "Files changed",
   "inspector.subagents": "Subagents",
   "inspector.skills": "Skills & MCP",
+  "inspector.skills.count": "{{count}} used",
   "inspector.artifact": "Artifact",
   "inspector.webReading": "Web reading",
   "inspector.source": "Source",
