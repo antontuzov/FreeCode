@@ -16,6 +16,7 @@ mod knowledge;
 mod paths;
 mod sessions;
 mod status;
+mod storage;
 pub mod verify_native;
 mod weights;
 
@@ -67,6 +68,17 @@ async fn extensions_inventory(app: AppHandle) -> Result<extensions::Inventory, S
     tauri::async_runtime::spawn_blocking(move || extensions::Inventory::build(&root, &settings))
         .await
         .map_err(|e| format!("tool inventory failed: {e}"))
+}
+
+/// The Storage page: the three directories this host writes into, measured from the files on disk,
+/// and the room the volume behind them has left. The walk reads gigabytes of weights directory, so it
+/// is off the event loop for the same reason the hardware probe is.
+#[tauri::command]
+async fn storage_report(app: AppHandle) -> Result<storage::Report, String> {
+    let (root, settings) = root_and_settings(&app)?;
+    tauri::async_runtime::spawn_blocking(move || storage::Report::build(&root, &settings))
+        .await
+        .map_err(|e| format!("storage report failed: {e}"))?
 }
 
 #[tauri::command]
@@ -220,6 +232,8 @@ pub fn run() {
             knowledge_center,
             // What the agent can reach and what this build runs, for the Extensions page.
             extensions_inventory,
+            // What this app has put on the machine, and what the machine has left.
+            storage_report,
             install_engine,
             download_weights,
             load_appearance,

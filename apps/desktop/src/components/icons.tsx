@@ -80,6 +80,11 @@ const PATHS = {
   wand: "M15 4V2M15 10V8M12.5 6h-2M18.5 6h-2M5 20l9-9M13.5 7.5 16.5 10.5",
   shield: "M12 3 4 6v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V6z",
   cube: "M12 2 3 7v10l9 5 9-5V7zM3 7l9 5 9-5M12 12v10",
+  // Three stacked sheets with the top one closed: the disk the page counts the app's own directories
+  // on. Kept off `cube`, which is the model this app loads, because the two are one row apart in the
+  // nav and a glyph that repeats another's meaning is how a 13px rail turns into a puzzle.
+  storage:
+    "M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3zM5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3",
   sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
   moon: "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z",
   close: "M18 6 6 18M6 6l12 12",

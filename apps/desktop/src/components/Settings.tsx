@@ -17,12 +17,19 @@ import {
 import { Icon, type IconName } from "./icons";
 import { MASCOT_TILES, launchTile } from "./BrandMark";
 import { has, translate, type Locale } from "../i18n";
-import type { Accent, SettingsDoc } from "../lib/ipc";
+import { formatBytes } from "../lib/bytes";
+import {
+  ipc,
+  type Accent,
+  type SettingsDoc,
+  type StorageArea,
+  type StorageReport,
+} from "../lib/ipc";
 import { shortcutLabel } from "../lib/shortcuts";
 import { useModel } from "../state/model";
 import { useSettings } from "../state/settings";
 
-const PAGE_IDS = ["appearance", "voice", "agent", "model", "reasoning"] as const;
+const PAGE_IDS = ["appearance", "voice", "agent", "model", "reasoning", "storage"] as const;
 type Page = (typeof PAGE_IDS)[number];
 
 const GROUPS: { key: string; items: { id: Page; icon: IconName }[] }[] = [
@@ -43,6 +50,9 @@ const GROUPS: { key: string; items: { id: Page; icon: IconName }[] }[] = [
       { id: "reasoning", icon: "thought" },
     ],
   },
+  // Its own group because it sets nothing: this page answers a question about the machine, which is
+  // not a preference, and filing it under Model would imply a control that is not there.
+  { key: "machine", items: [{ id: "storage", icon: "storage" }] },
 ];
 
 /**
@@ -112,6 +122,7 @@ const CONTROLS: Record<Page, string[]> = {
     "repetitionPenalty",
     "systemPrompt",
   ],
+  storage: ["storageWeights", "storageEngine", "storageSessions", "storageFree"],
 };
 
 const STYLES: { id: Accent; label: string }[] = [
@@ -329,6 +340,8 @@ function Page({
       return <Model doc={doc} set={set} t={t} />;
     case "reasoning":
       return <Reasoning doc={doc} set={set} t={t} />;
+    case "storage":
+      return <Storage t={t} />;
   }
 }
 
@@ -934,6 +947,86 @@ function Reasoning({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
             value={s.systemPrompt}
             onChange={(v) => set((d) => void (d.sampling.systemPrompt = v))}
           />
+        </Row>
+      </Section>
+    </>
+  );
+}
+
+/**
+ * What this app has put on the machine, and what the volume behind it has left.
+ *
+ * The one Settings page that reads nothing from the settings document, because none of these figures
+ * are preferences: they are the filesystem, measured by the host as the page opens. And the one page
+ * with no control on it. A "Clear weights" button would act on a directory the app does not own — the
+ * Model page lets a path be typed into `modelDir`, and whatever sits there may be the user's own
+ * files — so the page states what is there rather than offering to change it. The free-space figure is
+ * the same probe a download is refused by, which makes it the one number here a user would act on.
+ */
+function Storage({ t }: { t: T }) {
+  const [report, setReport] = useState<StorageReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void ipc
+      .storageReport()
+      .then((found) => {
+        if (live) setReport(found);
+      })
+      .catch((e: unknown) => {
+        if (live) setError(String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (error) {
+    return (
+      <p
+        role="alert"
+        className="rounded-[var(--radius-md)] border border-danger px-[var(--space-3)] py-[var(--space-2)] text-quiet text-danger"
+      >
+        {t("storage.failed", { error })}
+      </p>
+    );
+  }
+  // The walk is over gigabytes of weights directory, so it arrives a moment after the rest of the
+  // page. A placeholder that said nothing at all would read as an empty machine.
+  if (!report) return <p className="text-muted">{t("storage.measuring")}</p>;
+
+  const figure = (text: string) => (
+    <span className="font-mono tabular-nums text-quiet text-fg">{text}</span>
+  );
+  // A directory that was never created is not a directory of zero bytes: the first is this app not
+  // having needed that file yet, the second is it having lost what it downloaded.
+  const held = (area: StorageArea) =>
+    area.present ? formatBytes(area.bytes) : t("row.storage.none");
+
+  return (
+    <>
+      <Section
+        label={t("section.storageFiles")}
+        description={t("section.storageFiles.desc", { size: formatBytes(report.totalBytes) })}
+      >
+        <Row title={t("row.storageWeights")} description={report.weights.dir}>
+          {figure(held(report.weights))}
+        </Row>
+        <Row title={t("row.storageEngine")} description={report.engine.dir}>
+          {figure(held(report.engine))}
+        </Row>
+        <Row
+          title={t("row.storageSessions")}
+          description={report.sessions.dir || t("row.storageSessions.noDir")}
+        >
+          {figure(held(report.sessions))}
+        </Row>
+      </Section>
+
+      <Section label={t("section.storageFree")}>
+        <Row title={t("row.storageFree")} description={t("row.storageFree.desc")}>
+          {figure(formatBytes(report.freeBytes))}
         </Row>
       </Section>
     </>

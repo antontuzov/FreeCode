@@ -577,12 +577,38 @@ export type ExtensionInventory = {
   networkAllowed: boolean;
 };
 
+/* ---- the Storage page: what this host has written on the machine ---- */
+
+/**
+ * One directory the page reports, mirroring `storage::Area`. `present` is whether the directory is
+ * there at all: a pack that was never downloaded and one that was deleted are different facts, and
+ * "0 MB" alone would not tell them apart.
+ */
+export type StorageArea = {
+  dir: string;
+  bytes: number;
+  present: boolean;
+};
+
+/** Mirrors `storage::Report`. `root` is the directory the free figure was read on — where the next pack would be written. */
+export type StorageReport = {
+  weights: StorageArea;
+  engine: StorageArea;
+  sessions: StorageArea;
+  totalBytes: number;
+  freeBytes: number;
+  root: string;
+};
+
 export const ipc = {
   modelStatus: () => invoke<ModelStatus>("model_status"),
   /** Every model and packing the catalog pins, with the ones on this machine marked. */
   knowledgeCenter: () => invoke<KnowledgeCenter>("knowledge_center"),
   /** Every tool the agent is offered, with the current approvals and sandbox applied to each row. */
   extensionsInventory: () => invoke<ExtensionInventory>("extensions_inventory"),
+  /** The three directories this app writes into, measured from the files on disk, plus the room the
+   * volume has left. The walk is over gigabytes, so the page asks once and shows what comes back. */
+  storageReport: () => invoke<StorageReport>("storage_report"),
   /** Fetch and unpack the pinned fork engine. Progress arrives on `onEngineInstall`. */
   installEngine: () => invoke<InstallOutcome>("install_engine"),
   onEngineInstall: (onProgress: (progress: EngineInstallProgress) => void): Promise<() => void> =>
