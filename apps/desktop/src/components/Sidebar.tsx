@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { MascotMark } from "./BrandMark";
 import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
 import type { SessionSummary } from "../lib/ipc";
@@ -285,6 +286,17 @@ export function Sidebar({
           );
         })}
         <span className="flex-1" />
+        {/* Folded, the row loses its words but not its face: the mascot is the one glyph in the rail
+            that says which app this window belongs to. */}
+        <button
+          type="button"
+          aria-label={translate(locale, "sidebar.localUser")}
+          title={translate(locale, "sidebar.knowledgeAbout")}
+          className="icon-btn"
+          onClick={() => actions.openKnowledge()}
+        >
+          <MascotMark size={20} />
+        </button>
         <button
           type="button"
           aria-label={translate(locale, "sidebar.settings")}
@@ -430,21 +442,30 @@ export function Sidebar({
         {PLACES.map((r) => row(r))}
       </div>
 
-      <div className="flex items-center gap-2 border-t border-line p-[var(--space-3)]">
-        <span
-          aria-hidden
-          className="grid size-7 shrink-0 place-items-center rounded-full bg-accent-soft text-fg-strong"
+      <div className="flex items-center gap-1 border-t border-line p-[var(--space-2)]">
+        {/* The reference's footer is an identity row, and the two things it states are the two this
+            app can state truly: the face it wears — the mascot the window and the Dock carry, which
+            Appearance can pin — and the machine the run is on. It is drawn with the same class every
+            other row in this column uses, because a caption that looks like a button is the failure
+            this build already fixed once, and pressing it opens the page that names what is on this
+            machine. */}
+        <button
+          type="button"
+          className="nav-item min-w-0 flex-1"
+          aria-label={translate(locale, "sidebar.localUser")}
+          title={translate(locale, "sidebar.knowledgeAbout")}
+          onClick={() => actions.openKnowledge()}
         >
-          <Icon name="user" size={14} />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-quiet text-fg">
-          {translate(locale, "sidebar.localUser")}
-        </span>
+          <span aria-hidden className="grid size-7 shrink-0 place-items-center">
+            <MascotMark size={26} />
+          </span>
+          <span className="truncate">{translate(locale, "sidebar.localUser")}</span>
+        </button>
         <button
           type="button"
           aria-label={translate(locale, "sidebar.settings")}
           title={shortcutLabel("settings")}
-          className="icon-btn"
+          className="icon-btn shrink-0"
           onClick={onOpenSettings}
         >
           <Icon name="settings" />
