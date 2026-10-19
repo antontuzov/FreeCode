@@ -187,6 +187,26 @@ details[open] > summary .disclosure-icon {
   padding-right: calc(var(--space-3) + 20px);
 }
 
+/* A control the settings search matched, listed under the page that holds it. It is a nav row with no
+ * icon, so it takes the indent a conversation takes under its workspace, and it stays quieter than the
+ * page above it: several of these under one heading is a result list, not a second navigation. */
+.nav-sub-item {
+  display: block;
+  width: 100%;
+  padding: 5px var(--space-3) 5px calc(var(--space-3) * 4);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: var(--size-quiet);
+  text-align: left;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+.nav-sub-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 /* "Personal", "Integrations", "Coding" — the group label above a run of nav items. */
 .section-label {
   padding: var(--space-4) var(--space-3) var(--space-1);
@@ -336,6 +356,12 @@ details[open] > summary .disclosure-icon {
  * 1.4s is the same window Transcript.tsx holds the flash flag for; the two move together. */
 .turn-anchor[data-flash="true"] {
   border-radius: var(--radius-md);
+  animation: checkpoint-flash 1.4s var(--ease-standard);
+}
+
+/* The row a settings search jumped to, held for the same beat: the page it landed on can hold forty
+ * controls, and the one the query asked for is the one worth pointing at. */
+.card-row[data-flash="true"] {
   animation: checkpoint-flash 1.4s var(--ease-standard);
 }
 
@@ -776,7 +802,8 @@ select.field-input {
   .caret-streaming > :last-child::after,
   .row-enter,
   .disclosure-panel,
-  .turn-anchor[data-flash="true"] {
+  .turn-anchor[data-flash="true"],
+  .card-row[data-flash="true"] {
     animation: none;
   }
 }

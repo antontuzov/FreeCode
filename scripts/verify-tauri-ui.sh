@@ -35,6 +35,9 @@ cargo run --locked -q -p smollm-core --bin verify-transcript-i18n -- apps/deskto
 step "locale catalogs agree, and every lookup is defined"
 node scripts/check-i18n.mjs
 
+step "settings search can find every row the pages render"
+node scripts/check-settings-index.mjs
+
 step "no hardcoded colours"
 pnpm_cmd lint
 

@@ -28,3 +28,16 @@ export function translate(
   const template = table[key] ?? catalogs.en[key] ?? key;
   return interpolate(template, params);
 }
+
+/**
+ * Whether the catalog holds this key at all.
+ *
+ * [`translate`] makes a missing key visible by printing it, which is right for a row the user is
+ * reading and wrong for a string being *tested*: settings search matches a control's description when
+ * it has one, and comparing against the fallback would let a query for `settings.row` find every row
+ * that has no description. English is the authority because `check-i18n` fails the build when the two
+ * catalogs hold different keys.
+ */
+export function has(key: string): boolean {
+  return key in catalogs.en;
+}

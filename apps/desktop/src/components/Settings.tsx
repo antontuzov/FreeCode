@@ -1,7 +1,7 @@
 // Settings, laid out control-for-control against docs/reference-ui/01-03: a searchable grouped nav
 // on the left, and one page of labelled cards on the right. Every row here binds to a field the
 // host actually persists — a setting with no storage is not rendered.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   IconCard,
@@ -16,7 +16,7 @@ import {
 } from "./controls";
 import { Icon, type IconName } from "./icons";
 import { MASCOT_TILES, launchTile } from "./BrandMark";
-import { translate, type Locale } from "../i18n";
+import { has, translate, type Locale } from "../i18n";
 import type { Accent, SettingsDoc } from "../lib/ipc";
 import { shortcutLabel } from "../lib/shortcuts";
 import { useModel } from "../state/model";
@@ -42,6 +42,75 @@ const GROUPS: { key: string; items: { id: Page; icon: IconName }[] }[] = [
     ],
   },
 ];
+
+/**
+ * Which controls each page holds, by the stem of their `settings.row.*` label.
+ *
+ * Search has to answer "where do I set the context window?", and a page name is no help with that: the
+ * row is on the Model page, which says nothing about windows. So each page declares the rows it renders
+ * and the query is tested against those labels and their descriptions. `check-settings-index.mjs` fails
+ * the build when a catalog row is missing from this list or a stem here names no row, which is what
+ * makes it a copy of the page rather than a note about it.
+ */
+const CONTROLS: Record<Page, string[]> = {
+  appearance: [
+    "themeMode",
+    "appIcon",
+    "appIconRoll",
+    "terminalTheme",
+    "builtInBrowser",
+    "language",
+    "fontStyle",
+    "contentWidth",
+    "fileIcons",
+    "glass",
+    "lightCodeTheme",
+    "darkCodeTheme",
+    "showLineNumbers",
+    "wrapLongLines",
+    "uiFontSize",
+    "codeFontSize",
+  ],
+  voice: [
+    "inputDevice",
+    "voiceInput",
+    "recognitionPolish",
+    "voiceprint",
+    "sendAutomatically",
+    "corrections",
+    "liveVoiceShortcut",
+  ],
+  agent: [
+    "approvalMode",
+    "shellTimeout",
+    "compressAt",
+    "keepRecentTurns",
+    "allowRemote",
+    "telemetry",
+  ],
+  model: [
+    "packing",
+    "modelDir",
+    "hfTokenEnv",
+    "offloadAllLayers",
+    "flashAttention",
+    "visionLazyLoad",
+    "dedicatedServerSlots",
+  ],
+  reasoning: [
+    "effort",
+    "nonThinking",
+    "maxTokens",
+    "contextTokens",
+    "temperature",
+    "topP",
+    "topK",
+    "minP",
+    "presencePenalty",
+    "repetitionPenalty",
+    "systemPrompt",
+  ],
+};
 
 const STYLES: { id: Accent; label: string }[] = [
   { id: "forest", label: "Forest" },
@@ -71,20 +140,58 @@ export function Settings({
   const update = useSettings((s) => s.update);
   // An unknown deep-link page falls back to Appearance rather than rendering nothing.
   const active: Page = PAGE_IDS.includes(page as Page) ? (page as Page) : "appearance";
-  const [query, setQuery] = useState("");
+  // `?q=` seeds the field the way `?help=open` seeds the card below it: a result list is a state no
+  // capture can reach by typing, and it is the state that has to look right on the real surface.
+  const [query, setQuery] = useState(new URLSearchParams(window.location.search).get("q") ?? "");
+  // The row a search hit names, once its page has opened. The nav can say "Context window", but the
+  // answer to the query is the control itself, and a page that opens at its top sends the user back to
+  // reading five sections to find it.
+  const [jump, setJump] = useState<{ page: Page; title: string } | null>(null);
+  const body = useRef<HTMLElement>(null);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!jump || jump.page !== active) return;
+    // Read off the rendered title rather than from an id every row would have to carry: the row the
+    // query matched is already on screen under this page, labelled in this language by the same catalog
+    // key the nav item shows.
+    const rows = body.current ? [...body.current.querySelectorAll<HTMLElement>(".card-row")] : [];
+    const hit = rows.find((row) =>
+      row.querySelector(".row-title")?.textContent?.trim().startsWith(jump.title),
+    );
+    if (!hit) return;
+    hit.scrollIntoView({ block: "center" });
+    hit.dataset.flash = "true";
+    const id = window.setTimeout(() => delete hit.dataset.flash, 1400);
+    return () => window.clearTimeout(id);
+    // `doc` is a dependency because the page renders its rows only once the settings document has
+    // arrived; a jump that ran against the loading placeholder would find nothing and say nothing.
+  }, [jump, active, doc]);
 
   const t = (key: string, params?: Record<string, string | number>) =>
     translate(locale, `settings.${key}`, params);
   const set = (mutate: (doc: SettingsDoc) => void) => void update(mutate);
 
   const q = query.trim().toLowerCase();
+  const finds = (key: string) => t(key).toLowerCase().includes(q);
+  // A page matches by its own name or by any control it holds, and the controls that matched ride
+  // along: typing "telemetry" should say *which* row on the Agent page it is on, not just that the
+  // Agent page is somehow involved.
   const groups = GROUPS.map((g) => ({
     ...g,
-    items: g.items.filter((i) => !q || t(`nav.${i.id}`).toLowerCase().includes(q)),
+    items: g.items
+      .map((i) => ({
+        ...i,
+        hits: q
+          ? CONTROLS[i.id].filter(
+              (k) => finds(`row.${k}`) || (has(`settings.row.${k}.desc`) && finds(`row.${k}.desc`)),
+            )
+          : [],
+      }))
+      .filter((i) => !q || finds(`nav.${i.id}`) || finds(`about.${i.id}`) || i.hits.length > 0),
   })).filter((g) => g.items.length > 0);
 
   return (
@@ -130,16 +237,33 @@ export function Settings({
               <div key={group.key}>
                 <p className="section-label">{t(`group.${group.key}`)}</p>
                 {group.items.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    data-active={active === item.id || undefined}
-                    className="nav-item"
-                    onClick={() => onOpen(item.id)}
-                  >
-                    <Icon name={item.icon} />
-                    <span className="truncate">{t(`nav.${item.id}`)}</span>
-                  </button>
+                  <div key={item.id}>
+                    <button
+                      type="button"
+                      data-active={active === item.id || undefined}
+                      className="nav-item"
+                      onClick={() => onOpen(item.id)}
+                    >
+                      <Icon name={item.icon} />
+                      <span className="truncate">{t(`nav.${item.id}`)}</span>
+                    </button>
+                    {item.hits.map((k) => {
+                      const label = t(`row.${k}`);
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          className="nav-sub-item"
+                          onClick={() => {
+                            onOpen(item.id);
+                            setJump({ page: item.id, title: label });
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 ))}
               </div>
             ))
@@ -147,7 +271,7 @@ export function Settings({
         </div>
       </nav>
 
-      <main className="min-w-0 flex-1 overflow-y-auto">
+      <main ref={body} className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[980px] px-[var(--space-6)] py-[var(--space-6)]">
           <h1 className="text-page font-semibold text-fg-strong">{t(`nav.${active}`)}</h1>
           <p className="mt-1 text-muted">{t(`about.${active}`)}</p>
