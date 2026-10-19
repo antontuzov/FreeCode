@@ -813,6 +813,16 @@ export const FIXTURE_ROWS: Row[] = [
         },
         status: "ok",
       },
+      // The two calls that leave the machine. A real one of these needs the privacy switch on and a
+      // model that decides to ask, so this is how the row's label and its subject chip get looked at
+      // in either language — the chip carries what was searched for, and the address that was read.
+      { id: "f4g", kind: "webSearch", subject: "ternary quantization", status: "ok" },
+      {
+        id: "f4h",
+        kind: "webReading",
+        subject: "en.wikipedia.org/wiki/Quantization_(signal_processing)",
+        status: "ok",
+      },
     ],
   },
   // A refusal, as the load guard reports it, so the card can be looked at without uninstalling the

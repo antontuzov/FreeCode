@@ -376,7 +376,7 @@
   "transcript.step.subagent": "Subagent",
   "transcript.step.artifact": "Artifact",
   "transcript.step.webSearch": "Searched the web",
-  "transcript.step.webReading": "Web reading",
+  "transcript.step.webReading": "Read a web page",
   "transcript.step.source": "Source",
   "transcript.step.blocked": "Blocked",
   "transcript.diff.fileChanged": "{{count}} file changed",

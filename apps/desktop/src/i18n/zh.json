@@ -376,7 +376,7 @@
   "transcript.step.subagent": "子代理",
   "transcript.step.artifact": "产物",
   "transcript.step.webSearch": "已搜索网页",
-  "transcript.step.webReading": "网页阅读",
+  "transcript.step.webReading": "已读取网页",
   "transcript.step.source": "来源",
   "transcript.step.blocked": "已阻止",
   "transcript.diff.fileChanged": "已更改 {{count}} 个文件",
