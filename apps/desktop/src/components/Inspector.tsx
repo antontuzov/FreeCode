@@ -13,8 +13,9 @@ import { Icon, type IconName } from "./icons";
 
 type Group = {
   key: string;
-  /** The glyph every row in the group gets. The reference puts a chip behind each row, so a group
-   * with items always draws one; a group that had no glyph of its own would draw a bare word. */
+  /** The glyph a row in this group gets when it has no mark of its own. The reference puts a chip
+   * behind each row, so a group with items always draws one; a group that had no glyph of its own
+   * would draw a bare word. */
   icon: IconName;
   /** A subagent is a who rather than a what, so its chip closes into a disc the way the footer's
    * avatar does. Everything else is a file, a tool or a page, and those are square. */
@@ -32,7 +33,35 @@ const GROUPS: Group[] = [
   { key: "source", icon: "source" },
 ];
 
-type Item = { label: string; meta?: string; diff?: DiffStat };
+type Item = { label: string; meta?: string; diff?: DiffStat; icon?: IconName };
+
+/**
+ * The sites this build can name, and the sign each one gets on a row that says it was read. Only the
+ * hosts the app itself points at have a mark — the hub its catalog downloads from, the repository its
+ * status card links to, and the encyclopedia its one web tool searches. A page from anywhere else keeps
+ * the group's glyph, because a made-up look-alike of a site the app cannot reach is worse than a
+ * generic one.
+ */
+const HOST_MARKS: [string, IconName][] = [
+  ["huggingface.co", "huggingFace"],
+  ["github.com", "github"],
+  ["wikipedia.org", "wikipedia"],
+];
+
+/** The mark for a host, which may be bare (`huggingface.co`) or carry a subdomain (`en.wikipedia.org`). */
+function hostMark(host: string): IconName | undefined {
+  const bare = host.toLowerCase();
+  return HOST_MARKS.find(([name]) => bare === name || bare.endsWith(`.${name}`))?.[1];
+}
+
+/**
+ * `?collapsed=<group keys>` starts named groups folded. Dev-only, like every other deep link here:
+ * the fold is a control the reader has on screen, and this is the same press arriving from the URL,
+ * which is what lets a capture reach the groups a full column pushes below the window.
+ */
+const SEEDED_FOLDED = new Set(
+  (new URLSearchParams(window.location.search).get("collapsed") ?? "").split(","),
+);
 
 /**
  * `?fixture=1` only, for the four groups no loop in this build writes rows for yet — see the note in
@@ -102,18 +131,20 @@ function page(url: string): string {
 
 function Section({ group, items, locale }: { group: Group; items: Item[]; locale: Locale }) {
   const label = translate(locale, `inspector.${group.key}`);
+  const folded = SEEDED_FOLDED.has(group.key);
   // A group starts open when it has rows and closed when it does not. Most of this build's run reports
   // no skills, pages or subagents — the loops that would produce them are not wired, so under a real
   // answer those groups are empty at once — and a column of open headings each followed by their own
   // apology is a panel that advertises what is missing. The sentence is one press away either way, so
   // closing says nothing that opening hides.
-  const [open, setOpen] = useState(items.length > 0);
+  const [open, setOpen] = useState(items.length > 0 && !folded);
   const has = items.length > 0;
   // A run that starts editing mid-answer fills this group from nothing, and a count the user has to
-  // press open is a count they will not know to look for.
+  // press open is a count they will not know to look for. A group the URL folded stays folded: the
+  // rows arriving is the thing the capture came to see *past*, not a reason to undo the press.
   useEffect(() => {
-    if (has) setOpen(true);
-  }, [has]);
+    if (has && !folded) setOpen(true);
+  }, [has, folded]);
 
   return (
     <section className="border-b border-line/60">
@@ -131,7 +162,7 @@ function Section({ group, items, locale }: { group: Group; items: Item[]; locale
                 className="flex items-center gap-[var(--space-3)] border-b border-dashed border-line/60 py-[var(--space-2)] text-quiet text-fg last:border-0"
               >
                 <span className={`insp-chip ${group.round ? "round" : ""}`}>
-                  <Icon name={group.icon} size={14} />
+                  <Icon name={item.icon ?? group.icon} size={14} />
                 </span>
                 {item.diff ? (
                   <FileLabel path={item.label} />
@@ -279,7 +310,11 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
   // address it opened into the row it leaves, so a group that listed anything else would tell the
   // reader about a run the transcript above does not describe.
   const pages = useMemo<Item[]>(
-    () => pagesRead(reviewRows(rows, "lastTurn")).map((url) => ({ label: page(url) })),
+    () =>
+      pagesRead(reviewRows(rows, "lastTurn")).map((url) => {
+        const label = page(url);
+        return { label, icon: hostMark(label.split("/")[0] ?? "") };
+      }),
     [rows],
   );
   // The scripted groups fill in under the row-derived ones, which a fixture window therefore still
