@@ -395,6 +395,15 @@ export function reviewRows(rows: Row[], scope: ReviewScope): Row[] {
 }
 
 /**
+ * Every step in the span, one level under a closed round. A run's calls live under their "Ran N
+ * tools" header once the batch folds, and a page the run read while folded is still a page it read —
+ * so anything that asks what a run *did* walks this rather than the list it was given.
+ */
+function everyStep(rows: Row[]): Step[] {
+  return rows.flatMap((row) => (isTurn(row) ? [] : row.children ? [row, ...row.children] : [row]));
+}
+
+/**
  * The files this conversation's rows say were edited, newest edit folded into the file it touched.
  *
  * Read off the rows rather than off the run's total because the inspector names *which* files, and a
@@ -406,12 +415,7 @@ export function reviewRows(rows: Row[], scope: ReviewScope): Row[] {
  */
 export function changedFiles(rows: Row[]): (DiffStat & { path: string; hunks: Hunk[] })[] {
   const byPath = new Map<string, { diff: DiffStat; hunks: Hunk[] }>();
-  // A round's rows live under their "Ran N tools" header once the batch closes, so the walk goes one
-  // level in: an edit that folded away is still a file the workspace lost.
-  const every: Step[] = rows.flatMap((row) =>
-    isTurn(row) ? [] : row.children ? [row, ...row.children] : [row],
-  );
-  for (const row of every) {
+  for (const row of everyStep(rows)) {
     if (row.kind !== "editFile" || !row.diff || !row.subject) continue;
     const path = row.subject;
     const seen = byPath.get(path);
@@ -424,6 +428,24 @@ export function changedFiles(rows: Row[]): (DiffStat & { path: string; hunks: Hu
     });
   }
   return [...byPath].map(([path, entry]) => ({ path, ...entry.diff, hunks: entry.hunks }));
+}
+
+/**
+ * The pages this span's rows say the run opened, in the order it opened them.
+ *
+ * The group has to be read off the rows for the same reason `changedFiles` is: `fetch_url` writes the
+ * address into the row's subject, so a panel that listed anything else would disagree with the
+ * transcript above it — including by advertising a page nobody fetched. Hence the status test: a call
+ * the network policy refused, or one still in flight, is a row that says the run *asked*, not one that
+ * says it read. Repeats fold to one entry, because a model that re-reads a page read one page.
+ */
+export function pagesRead(rows: Row[]): string[] {
+  const seen = new Set<string>();
+  for (const row of everyStep(rows)) {
+    if (row.kind !== "webReading" || row.status !== "ok" || !row.subject) continue;
+    seen.add(row.subject);
+  }
+  return [...seen];
 }
 
 function reduce(rows: Row[], event: AgentEvent): Row[] {
@@ -813,14 +835,30 @@ export const FIXTURE_ROWS: Row[] = [
         },
         status: "ok",
       },
-      // The two calls that leave the machine. A real one of these needs the privacy switch on and a
-      // model that decides to ask, so this is how the row's label and its subject chip get looked at
+      // The calls that leave the machine. A real one of these needs the privacy switch on and a
+      // model that decides to ask, so this is how a row's label and its subject chip get looked at
       // in either language — the chip carries what was searched for, and the address that was read.
+      // The addresses keep the scheme the host writes them with, since that is what `fetch_url` was
+      // handed; the inspector is the surface that cuts it back off, so the two are shown disagreeing
+      // on purpose. The re-read is the same reason: three rows here are the two pages the run looked
+      // at, which is the count the panel has to arrive at.
       { id: "f4g", kind: "webSearch", subject: "ternary quantization", status: "ok" },
       {
         id: "f4h",
         kind: "webReading",
-        subject: "en.wikipedia.org/wiki/Quantization_(signal_processing)",
+        subject: "https://en.wikipedia.org/wiki/Quantization_(signal_processing)",
+        status: "ok",
+      },
+      {
+        id: "f4i",
+        kind: "webReading",
+        subject: "https://huggingface.co/prism-ml/Ternary-Bonsai-1.7B-gguf",
+        status: "ok",
+      },
+      {
+        id: "f4j",
+        kind: "webReading",
+        subject: "https://en.wikipedia.org/wiki/Quantization_(signal_processing)",
         status: "ok",
       },
     ],

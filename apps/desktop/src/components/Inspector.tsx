@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
 import type { RunReport } from "../lib/ipc";
-import { changedFiles, reviewRows, useTranscript, type DiffStat } from "../state/transcript";
+import {
+  changedFiles,
+  pagesRead,
+  reviewRows,
+  useTranscript,
+  type DiffStat,
+} from "../state/transcript";
 import { Icon, type IconName } from "./icons";
 
 type Group = {
@@ -28,7 +34,12 @@ const GROUPS: Group[] = [
 
 type Item = { label: string; meta?: string; diff?: DiffStat };
 
-/** `?fixture=1` only — see the note in state/transcript.ts about invented run output. */
+/**
+ * `?fixture=1` only, for the four groups no loop in this build writes rows for yet — see the note in
+ * state/transcript.ts about invented run output. The two groups a run *can* produce, `files` and
+ * `webReading`, are read off the transcript in every mode, so what the panel lists and what the rows
+ * above it report stay one answer rather than two.
+ */
 const FIXTURE_ITEMS: Record<string, Item[]> = {
   subagents: [{ label: "Explore · llama.cpp", meta: "stopped" }, { label: "Audit engine claims" }],
   skills: [
@@ -36,7 +47,6 @@ const FIXTURE_ITEMS: Record<string, Item[]> = {
     { label: "tauri-desktop-native-verification" },
   ],
   artifact: [{ label: "README.md" }],
-  webReading: [{ label: "huggingface.co/PrismML-Eng" }],
   source: [{ label: "catalog/models.toml" }],
 };
 
@@ -79,6 +89,15 @@ function FileLabel({ path }: { path: string }) {
       <span className="shrink-0">{path.slice(dir.length)}</span>
     </span>
   );
+}
+
+/**
+ * The address with its scheme cut off. This column truncates from the right, so `https://` on the front
+ * is what costs the reader the part that names the page — and the page an agent read is chosen by its
+ * host and its path, which is what remains.
+ */
+function page(url: string): string {
+  return url.replace(/^https?:\/\//, "");
 }
 
 function Section({ group, items, locale }: { group: Group; items: Item[]; locale: Locale }) {
@@ -256,7 +275,19 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
       })),
     [rows],
   );
-  const items = fixture ? FIXTURE_ITEMS : {};
+  // The pages come off the same span of rows as the files, for the same reason: `fetch_url` writes the
+  // address it opened into the row it leaves, so a group that listed anything else would tell the
+  // reader about a run the transcript above does not describe.
+  const pages = useMemo<Item[]>(
+    () => pagesRead(reviewRows(rows, "lastTurn")).map((url) => ({ label: page(url) })),
+    [rows],
+  );
+  // The scripted groups fill in under the row-derived ones, which a fixture window therefore still
+  // sees — and a real run does not, because it has no scripted rows to fill them from.
+  const groups = useMemo<Record<string, Item[]>>(
+    () => ({ ...(fixture ? FIXTURE_ITEMS : {}), files, webReading: pages }),
+    [fixture, files, pages],
+  );
 
   return (
     <aside
@@ -265,12 +296,7 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
     >
       {run ? <RunSection locale={locale} run={run} /> : <UnmeasuredSection locale={locale} />}
       {GROUPS.map((group) => (
-        <Section
-          key={group.key}
-          group={group}
-          items={group.key === "files" ? files : (items[group.key] ?? [])}
-          locale={locale}
-        />
+        <Section key={group.key} group={group} items={groups[group.key] ?? []} locale={locale} />
       ))}
     </aside>
   );
