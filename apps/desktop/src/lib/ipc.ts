@@ -637,6 +637,13 @@ export const ipc = {
    */
   openSession: (id: string) => invoke<Session>("open_session", { id }),
   /**
+   * Delete one for good. When the row is the conversation on screen, the host forgets the history with
+   * the file, so the next prompt is not answered out of a conversation the sidebar no longer lists.
+   * Refused while a reply streams into that conversation, because the run would file its answer back
+   * into the row that has just gone.
+   */
+  deleteSession: (id: string) => invoke<void>("delete_session", { id }),
+  /**
    * Stop the reply that is streaming. The engine keeps its weights loaded, so the next message costs
    * nothing — `stopEngine` is the one that releases them, and the composer's Stop is not that.
    */

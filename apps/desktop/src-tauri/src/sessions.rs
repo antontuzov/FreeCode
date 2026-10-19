@@ -269,6 +269,25 @@ pub fn read(id: &str) -> Result<Session, String> {
     read_in(&dir, id)
 }
 
+/// Remove one conversation's file.
+///
+/// A file that is not there answers `Ok` rather than an error: another window can have deleted the
+/// same row a moment before, and the state the user asked for — that conversation is gone — holds
+/// either way. An error there would be a message about a bookkeeping race the row cannot show.
+///
+/// The id is checked by the same rule a read is, so this deletes inside the session directory and
+/// nowhere else, whatever the window sends. A file this build cannot parse is still deleted: the
+/// conversation it holds is unreadable here, and "throw this away" is the one instruction that needs
+/// no reading.
+pub fn delete_in(dir: &Path, id: &str) -> Result<(), String> {
+    let id = safe_id(id)?;
+    match std::fs::remove_file(dir.join(format!("{id}.json"))) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("deleting {id} failed: {e}")),
+    }
+}
+
 fn parse(bytes: &[u8]) -> Result<Session, String> {
     let session: Session = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
     if session.schema_version > SESSION_SCHEMA_VERSION {
@@ -515,12 +534,51 @@ mod tests {
     }
 
     #[test]
+    fn a_deleted_conversation_leaves_no_row_and_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let kept = session("kept");
+        let gone = session("deleted");
+        write_in(dir.path(), &kept).unwrap();
+        write_in(dir.path(), &gone).unwrap();
+
+        delete_in(dir.path(), &gone.id).unwrap();
+
+        assert_eq!(list_in(dir.path()).len(), 1);
+        assert_eq!(list_in(dir.path())[0].id, kept.id);
+        assert!(!dir.path().join(format!("{}.json", gone.id)).exists());
+        assert!(read_in(dir.path(), &gone.id).is_err());
+        // The one that stays is not merely listed; its turns are still the ones that were filed.
+        assert_eq!(read_in(dir.path(), &kept.id).unwrap().turns, kept.turns);
+    }
+
+    #[test]
+    fn a_row_that_another_window_already_deleted_is_the_state_this_one_asked_for() {
+        let dir = tempfile::tempdir().unwrap();
+        // Nothing was ever filed under this id, and the sidebar's row is gone all the same once the
+        // window drops it locally — an error here would be a message about a race nobody can see.
+        delete_in(dir.path(), "1700000000000-1-1").unwrap();
+        assert!(list_in(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn an_id_carrying_a_path_deletes_nothing_outside_the_session_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().parent().unwrap().join("settings.json");
+        std::fs::write(&outside, b"secret").unwrap();
+
+        for id in ["../../settings", "/etc/passwd", "..", "a/b", ""] {
+            let err = delete_in(dir.path(), id).unwrap_err();
+            assert!(err.contains("not a conversation"), "{id}: {err}");
+        }
+        assert!(outside.exists());
+    }
+
+    #[test]
     fn two_conversations_opened_in_the_same_millisecond_get_different_files() {
         let first = Session::new("w", "m", "one");
         let second = Session::new("w", "m", "two");
         assert_ne!(first.id, second.id);
     }
-
     #[test]
     fn a_search_finds_the_conversation_whose_question_said_it() {
         let dir = tempfile::tempdir().unwrap();

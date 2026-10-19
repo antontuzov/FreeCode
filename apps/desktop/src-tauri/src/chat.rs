@@ -1423,6 +1423,44 @@ pub async fn open_session(app: AppHandle, id: String) -> Result<Session, String>
     Ok(session)
 }
 
+/// Throw one filed conversation away, and take it off the screen too when the row deleted is the one
+/// already open there.
+///
+/// The file is the only copy of the exchange — the transcript on screen is a rendering of it, and the
+/// engine's history holds it until the next prompt replaces it — so when the row deleted is the one on
+/// screen the history goes with the file. A window that kept answering out of a conversation the
+/// sidebar no longer lists would be continuing an exchange it just claimed never happened.
+fn delete_filed(dir: &Path, state: &ChatState, id: &str) -> Result<(), String> {
+    let on_screen = lock(&state.session).as_ref().is_some_and(|s| s.id == id);
+    if on_screen {
+        {
+            let slot = lock(&state.slot);
+            // `chat_send` files the answer into this conversation when the stream closes, so deleting it
+            // mid-reply would leave a row that came back the moment the reply landed. New task refuses
+            // for the same reason; this row has less to show for getting it wrong.
+            if slot.streaming {
+                return Err(
+                    "a reply is still streaming; stop it before deleting this conversation".into(),
+                );
+            }
+        }
+    }
+    sessions::delete_in(dir, id)?;
+    if on_screen {
+        lock(&state.history).clear();
+        *lock(&state.last_fill) = None;
+        *lock(&state.session) = None;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_session(app: AppHandle, id: String) -> Result<(), String> {
+    let state = app.state::<ChatState>();
+    let dir = sessions::dir().ok_or("this platform gives the app no conversation directory")?;
+    delete_filed(&dir, &state, &id)
+}
+
 /// The history a filed conversation would be answered from, in the order it was said.
 ///
 /// Reopening has to rebuild what the run built the first time. The transcript on screen and the
@@ -1507,6 +1545,66 @@ mod tests {
         // And the next prompt opens its own file rather than appending to the one just left, or the
         // two conversations would be written over each other.
         assert!(lock(&state.session).is_none());
+    }
+
+    /// A conversation filed in a scratch directory, so the host's own copy of it can be deleted here
+    /// without reaching for the one this machine keeps.
+    fn filed(dir: &Path, prompt: &str) -> Session {
+        let mut session = Session::new("smollm-studio", "model", prompt);
+        session.push(Role::User, prompt, None);
+        session.push(Role::Assistant, "an answer", None);
+        sessions::write_in(dir, &session).unwrap();
+        session
+    }
+
+    #[test]
+    fn deleting_the_conversation_on_screen_takes_its_file_and_the_history_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = ChatState::default();
+        let open = filed(dir.path(), "first question");
+        *lock(&state.session) = Some(open.clone());
+        *lock(&state.history) = history_of(&open);
+        assert!(!lock(&state.history).is_empty());
+
+        delete_filed(dir.path(), &state, &open.id).unwrap();
+
+        assert!(!dir.path().join(format!("{}.json", open.id)).exists());
+        // Both copies go, not just the one the sidebar shows: a transcript that still held the exchange
+        // would let the next prompt continue a conversation the row says never happened.
+        assert!(lock(&state.history).is_empty());
+        assert!(lock(&state.session).is_none());
+    }
+
+    #[test]
+    fn deleting_a_row_that_is_not_the_one_on_screen_leaves_the_answer_in_flight_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = ChatState::default();
+        let open = filed(dir.path(), "the one being answered");
+        let other = filed(dir.path(), "an old conversation");
+        *lock(&state.session) = Some(open.clone());
+        *lock(&state.history) = history_of(&open);
+
+        delete_filed(dir.path(), &state, &other.id).unwrap();
+
+        assert!(!dir.path().join(format!("{}.json", other.id)).exists());
+        assert!(dir.path().join(format!("{}.json", open.id)).exists());
+        assert_eq!(lock(&state.history).len(), 2);
+        assert_eq!(lock(&state.session).as_ref().unwrap().id, open.id);
+    }
+
+    #[test]
+    fn a_reply_streaming_into_a_conversation_refuses_to_have_it_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = ChatState::default();
+        let open = filed(dir.path(), "first question");
+        *lock(&state.session) = Some(open.clone());
+        lock(&state.slot).streaming = true;
+
+        assert!(delete_filed(dir.path(), &state, &open.id).is_err());
+        // Refused means untouched: the reply that is arriving files itself into this very conversation,
+        // so a delete that had gone through would have been undone by the answer.
+        assert!(dir.path().join(format!("{}.json", open.id)).exists());
+        assert!(lock(&state.session).is_some());
     }
 
     #[test]

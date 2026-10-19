@@ -1,9 +1,12 @@
+import { useState } from "react";
+
 import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
 import type { SessionSummary } from "../lib/ipc";
 import { shortcutLabel, type ShortcutId } from "../lib/shortcuts";
 import { useNav } from "../state/nav";
 import { useSessions } from "../state/sessions";
+import { useTranscript } from "../state/transcript";
 
 type NavRow = {
   key: string;
@@ -108,6 +111,7 @@ function Row({
   hint,
   shortcut,
   tip,
+  className,
 }: {
   icon?: IconName;
   label: string;
@@ -119,6 +123,8 @@ function Row({
   /** A hover line that says what the row holds rather than what it cannot do, so it needs a row that
    * is not `hint`-disabled to show it. */
   tip?: string;
+  /** A `.nav-item` modifier — `trailing`, which clears room for a control at the row's right end. */
+  className?: string;
 }) {
   return (
     <button
@@ -128,7 +134,7 @@ function Row({
       // why it does nothing, which is the one thing the row still has to say.
       aria-disabled={hint ? true : undefined}
       title={hint ?? shortcut ?? tip}
-      className={`nav-item ${indent ? "indent" : ""}`}
+      className={`nav-item ${indent ? "indent" : ""} ${className ?? ""}`}
       onClick={onClick}
     >
       {icon && <Icon name={icon} />}
@@ -213,6 +219,13 @@ export function Sidebar({
   const items = useSessions((s) => s.items);
   const activeId = useSessions((s) => s.activeId);
   const open = useSessions((s) => s.open);
+  const remove = useSessions((s) => s.remove);
+  const running = useTranscript((s) => s.running);
+  // Which row's trash has been pressed once. Deleting a conversation has no undo and no second copy —
+  // the file *is* the record — so the control asks for the press twice. One row at a time can be
+  // armed, because an arm that follows the pointer to its neighbour would have the second press
+  // delete a conversation nobody promised to delete.
+  const [armed, setArmed] = useState<string | null>(null);
   const collapsed = useNav((s) => s.collapsed);
   const toggleSidebar = useNav((s) => s.toggleSidebar);
   const notInBuild = translate(locale, "common.notInBuild");
@@ -345,19 +358,68 @@ export function Sidebar({
                 // A local, because the handler below runs after the check and a property's narrowing
                 // does not carry into a closure the way a local's does.
                 const id = c.id;
+                const isArmed = id !== null && armed === id;
+                // The host refuses to delete the conversation a reply is streaming into, because the
+                // run would file its answer back into the row that has just gone. So the control that
+                // would be refused stays on the row that is running and says why, rather than looking
+                // like a trash can that does not work.
+                const busy = id !== null && id === activeId && running;
+                const label = translate(
+                  locale,
+                  busy ? "sidebar.delete.busy" : isArmed ? "sidebar.deleteAgain" : "sidebar.delete",
+                );
                 return (
-                  <Row
+                  <div
                     key={id ?? c.title}
-                    label={c.title}
-                    indent
-                    active={id !== null && id === activeId}
-                    tip={
-                      c.meta
-                        ? `${translate(locale, "sidebar.openConversation")} · ${c.meta}`
-                        : undefined
-                    }
-                    onClick={id ? () => void open(id) : undefined}
-                  />
+                    className="group relative"
+                    // Sliding off the row disarms it. That is the whole of the timeout this control
+                    // would otherwise need, and it has no timer to leak when the column folds.
+                    onMouseLeave={() => setArmed((a) => (a === id ? null : a))}
+                  >
+                    <Row
+                      label={c.title}
+                      indent
+                      className={id ? "trailing" : undefined}
+                      active={id !== null && id === activeId}
+                      tip={
+                        c.meta
+                          ? `${translate(locale, "sidebar.openConversation")} · ${c.meta}`
+                          : undefined
+                      }
+                      onClick={id ? () => void open(id) : undefined}
+                    />
+                    {id && (
+                      // Only on hover, because a trash glyph standing on every row of the list makes
+                      // the sidebar look like a bin rather than a history. The one that has been
+                      // pressed once stays lit — that state has to be visible to mean anything.
+                      <button
+                        type="button"
+                        aria-label={label}
+                        aria-disabled={busy ? true : undefined}
+                        title={label}
+                        className={`absolute right-[3px] top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-[var(--radius-sm)] transition-opacity hover:bg-[var(--bg-hover)] focus-visible:opacity-100 ${
+                          busy
+                            ? "text-faint opacity-100"
+                            : isArmed
+                              ? "text-danger opacity-100"
+                              : "text-muted opacity-0 group-hover:opacity-100"
+                        }`}
+                        onClick={(event) => {
+                          // The row underneath opens the conversation; this press is not that.
+                          event.stopPropagation();
+                          if (busy) return;
+                          if (isArmed) {
+                            setArmed(null);
+                            void remove(id);
+                          } else {
+                            setArmed(id);
+                          }
+                        }}
+                      >
+                        <Icon name="trash" size={13} />
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>

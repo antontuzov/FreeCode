@@ -9,6 +9,20 @@ import { create } from "zustand";
 import { ipc, type Session, type SessionSummary } from "../lib/ipc";
 import { useTranscript, type Row } from "./transcript";
 
+/**
+ * Drop every claim the window is making about a run it has stopped watching. The meter measured a
+ * context window this conversation does not fill, and the two pills counted the writes and the rounds
+ * of an answer this transcript no longer holds. Both are true of the run that happened, not of the
+ * conversation now on screen, so neither survives the switch.
+ */
+function forgetRun() {
+  const transcript = useTranscript.getState();
+  transcript.setContextUsed(null);
+  transcript.setLastRun(null);
+  transcript.setRunDiff(null);
+  transcript.setRunRounds(null);
+}
+
 /** A conversation's turns as the transcript draws them.
  *
  * Only the exchange comes back, in the ids the store hands out: a reopened conversation shows what
@@ -33,9 +47,11 @@ type SessionStore = {
   error: string | null;
   refresh: () => Promise<void>;
   open: (id: string) => Promise<void>;
+  /** Delete one's file, and the row with it. */
+  remove: (id: string) => Promise<void>;
 };
 
-export const useSessions = create<SessionStore>((set) => ({
+export const useSessions = create<SessionStore>((set, get) => ({
   items: [],
   activeId: null,
   error: null,
@@ -65,13 +81,31 @@ export const useSessions = create<SessionStore>((set) => ({
     // Both of these measured the conversation that was on screen a moment ago. The window this one
     // fills is unknown until its next run reports, and the last run's rates are not this
     // conversation's rates.
-    transcript.setContextUsed(null);
-    transcript.setLastRun(null);
-    // And the pill is about a run this window watched rather than about the files on disk, which stay
-    // changed. A reopened conversation shows what it wrote at the time, not a count for an answer that
-    // has since been read elsewhere.
-    transcript.setRunDiff(null);
-    // The rounds a run spent are the same kind of claim: true of that run, not of this window.
-    transcript.setRunRounds(null);
+    forgetRun();
+  },
+  /**
+   * Throw a filed conversation away for good. There is no undo and no second copy: the file was the
+   * record, which is why the row asks for the press twice before it comes here.
+   */
+  remove: async (id) => {
+    set({ error: null });
+    try {
+      await ipc.deleteSession(id);
+    } catch (error) {
+      // Refused mid-reply, or the file would not go. The row stays, because it still describes a
+      // conversation that is on disk — deleting it locally would hide a conversation the host kept.
+      set({ error: String(error) });
+      return;
+    }
+    // The row goes now rather than at the next list: the file is gone, and a row left standing until
+    // something else refreshed would offer to reopen a conversation that cannot be read.
+    set((s) => ({ items: s.items.filter((item) => item.id !== id) }));
+    if (get().activeId !== id) return;
+    // The host forgot the history along with the file, so the rows built from it have to go with it: a
+    // transcript still showing that answer would claim a memory the engine no longer has. Unlike New
+    // task, nothing is filed to fall back to — this is the row being thrown away.
+    useTranscript.getState().setRows([]);
+    forgetRun();
+    set({ activeId: null });
   },
 }));

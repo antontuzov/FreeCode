@@ -235,12 +235,13 @@ pub fn run() {
             chat::chat_send,
             chat::chat_stop,
             chat::new_task,
-            // The conversations the app has filed, and the one control that reopens one. The sidebar
-            // lists the first and its rows are the second; the palette searches all of them by what
-            // was said in them, which is why the search reads the files rather than the list.
+            // The conversations the app has filed, and the two controls the sidebar's rows have: reopen
+            // one, or throw one away. The palette searches all of them by what was said in them, which
+            // is why the search reads the files rather than the list.
             chat::list_sessions,
             chat::search_sessions,
-            chat::open_session
+            chat::open_session,
+            chat::delete_session
         ])
         .setup(|app| {
             // Before this process spawns a server of its own, so a leftover's port is free to be
