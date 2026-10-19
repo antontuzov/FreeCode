@@ -24,7 +24,8 @@ pub enum PermissionClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalMode {
-    /// Default: auto for reads and workspace edits, ask for destructive and network calls.
+    /// Default: auto for reads, workspace edits and whatever the Privacy switch has already agreed
+    /// to; ask for destructive calls.
     #[default]
     AutoApprove,
     AskAlways,
@@ -64,6 +65,13 @@ impl Approvals {
     }
 
     /// Decide one call without asking the user. Returns `None` when a prompt is required.
+    ///
+    /// A network call is the one class the dial does not speak for: the Privacy switch already asked
+    /// the user whether anything may leave the machine, and the approval engine in `smollm-core`
+    /// refuses the call before it ever reaches this function unless that switch is on. Asking a
+    /// second time would be a prompt this build has nothing to answer it with, so the switch's
+    /// answer is used: off means the call was never offered to the model, on means it runs, and
+    /// every lookup that runs stands in the transcript.
     pub fn decide(&self, tool_id: &str, class: PermissionClass) -> Option<bool> {
         if let Some(explicit) = self.tool_overrides.get(tool_id) {
             return Some(*explicit);
@@ -72,8 +80,10 @@ impl Approvals {
             ApprovalMode::AskAlways => None,
             ApprovalMode::PlanOnly => Some(matches!(class, PermissionClass::ReadOnly)),
             ApprovalMode::AutoApprove | ApprovalMode::Custom => match class {
-                PermissionClass::ReadOnly | PermissionClass::WorkspaceWrite => Some(true),
-                PermissionClass::SideEffect | PermissionClass::Network => None,
+                PermissionClass::ReadOnly
+                | PermissionClass::WorkspaceWrite
+                | PermissionClass::Network => Some(true),
+                PermissionClass::SideEffect => None,
             },
         }
     }
@@ -151,7 +161,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auto_approve_allows_reads_and_edits_asks_for_side_effects() {
+    fn auto_approve_allows_reads_edits_and_a_switched_on_network_but_asks_for_side_effects() {
         let a = Approvals::default();
         assert_eq!(a.decide("fs.read", PermissionClass::ReadOnly), Some(true));
         assert_eq!(
@@ -159,6 +169,18 @@ mod tests {
             Some(true)
         );
         assert_eq!(a.decide("shell.run", PermissionClass::SideEffect), None);
+        // The Privacy switch is this class's consent, and the approval engine will not reach this
+        // function for a network tool with the switch off. A prompt here would be one nothing answers.
+        assert_eq!(a.decide("web_search", PermissionClass::Network), Some(true));
+        assert_eq!(
+            Approvals {
+                mode: ApprovalMode::AskAlways,
+                ..Default::default()
+            }
+            .decide("web_search", PermissionClass::Network),
+            None,
+            "Ask still means ask, even for a class the switch allowed"
+        );
     }
 
     #[test]

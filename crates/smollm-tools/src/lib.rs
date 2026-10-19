@@ -1,21 +1,23 @@
 //! Agent tools: their declarations, their permission classes, the sandbox every path goes through,
 //! and the executors that answer from it.
 //!
-//! Three pieces:
+//! Four pieces:
 //!   * [`registry`] — the tool list the model is handed, with a JSON schema and a
 //!     [`PermissionClass`] per entry, plus the OpenAI-shaped `tools` payload;
 //!   * [`sandbox`] — lexical + canonicalized containment, protected paths, and the network gate;
-//!   * [`exec`] — the workspace executors, and [`exec::execute`] as the one entry point that runs a
-//!     call after [`authorize`] has cleared it.
+//!   * [`exec`] — the workspace executors and the two network ones, and [`exec::execute`] as the one
+//!     entry point that runs a call after [`authorize`] has cleared it;
+//!   * [`web`] — the search and the guarded page read those network calls run.
 //!
-//! Shells and network calls still have no executor here: a loop that offers a tool has to be able to
-//! say *why* it refused one, which is what [`ToolsError::NoExecutor`] is for. The engine's
-//! tool-call quirk is already accounted for here: an empty `arguments` object must be sent as `"{}"`,
-//! because the fork answers HTTP 500 otherwise (llama.cpp#112).
+//! A shell still has no executor here: a loop that offers a tool has to be able to say *why* it refused
+//! one, which is what [`ToolsError::NoExecutor`] is for. The engine's tool-call quirk is already
+//! accounted for here: an empty `arguments` object must be sent as `"{}"`, because the fork answers
+//! HTTP 500 otherwise (llama.cpp#112).
 
 pub mod exec;
 pub mod registry;
 pub mod sandbox;
+pub mod web;
 
 use std::path::Path;
 
@@ -25,6 +27,9 @@ pub use registry::{
     EXECUTABLE,
 };
 pub use sandbox::{Access, SandboxPolicy, SandboxViolation};
+pub use web::{
+    read_page, search, Hit, Page, WebError, DEFAULT_PAGE_CHARS, MAX_PAGE_CHARS, MAX_RESULTS,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ToolsError {
@@ -32,7 +37,9 @@ pub enum ToolsError {
     UnknownTool(String),
     #[error("{0} is in the {1} approval class, which is not granted for this run")]
     PermissionDenied(String, &'static str),
-    #[error("tool {0} needs a configured remote provider before it can run")]
+    #[error(
+        "{0} reaches the internet, and nothing leaves this machine while the Privacy switch is off"
+    )]
     NetworkNotConfigured(String),
     #[error("this build has no executor for {0}: it is declared but not implemented")]
     NoExecutor(String),
@@ -44,6 +51,8 @@ pub enum ToolsError {
     },
     #[error(transparent)]
     Sandbox(#[from] SandboxViolation),
+    #[error(transparent)]
+    Web(#[from] WebError),
     #[error("invalid arguments for {tool}: {reason}")]
     InvalidArguments { tool: String, reason: String },
 }

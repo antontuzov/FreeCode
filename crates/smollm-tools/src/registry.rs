@@ -327,7 +327,9 @@ pub fn registry() -> Vec<ToolDescriptor> {
         ToolDescriptor {
             id: "fetch_url",
             title: "Read web page",
-            description: "Fetch a URL and return readable text for the model.",
+            description: "Read one web page by its full http(s) address and return its text, with the \
+                markup taken out. Public pages only: an address on this machine, a file path, or a \
+                non-text file is refused. The result is cut to max_chars, which says so when it is.",
             permission: Network,
             requires_network: true,
             input_schema: s(
@@ -338,11 +340,14 @@ pub fn registry() -> Vec<ToolDescriptor> {
         ToolDescriptor {
             id: "web_search",
             title: "Search the web",
-            description: "Run a web search through the configured provider.",
+            description: "Search Wikipedia and return each hit's title, one line about it, and the \
+                address of its page. It answers what a thing is or who someone was; it does not answer \
+                what happened today, a price, or anything in a niche field. Use fewer, plainer words \
+                rather than a whole question, and read a hit in full with fetch_url.",
             permission: Network,
             requires_network: true,
             input_schema: s(
-                json!({ "query": { "type": "string" }, "recency": { "type": "string" } }),
+                json!({ "query": { "type": "string" }, "limit": { "type": "integer", "minimum": 1, "maximum": 8 } }),
                 &["query"],
             ),
         },
@@ -458,25 +463,38 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
         .collect()
 }
 
-/// The tools this build can actually run: the four workspace reads and the one write whose executors
-/// live in [`crate::exec`].
+/// The tools this build can actually run: the four workspace reads, the one write, and the two calls
+/// that reach the internet, whose executors live in [`crate::exec`] and [`crate::web`].
 ///
 /// The rest of the registry is a declaration with no verb behind it — a schema, a permission class,
 /// and nothing that touches the disk. Offering one of those would invite the model to ask for a shell
 /// command or a delete that can only come back refused, so a run that carries tools hands over this
 /// list and nothing else. The write is on it because the sandbox bounds it to the workspace root;
 /// the shell is not, because nothing bounds it.
-pub const EXECUTABLE: &[&str] = &["read_file", "list_dir", "glob", "grep_search", "edit_file"];
+pub const EXECUTABLE: &[&str] = &[
+    "read_file",
+    "list_dir",
+    "glob",
+    "grep_search",
+    "edit_file",
+    "web_search",
+    "fetch_url",
+];
 
 pub fn is_executable(tool_id: &str) -> bool {
     EXECUTABLE.contains(&tool_id)
 }
 
-/// The declaration side for [`EXECUTABLE`] only.
-pub fn executable_specs() -> Vec<Value> {
+/// The declaration side for [`EXECUTABLE`], minus the two web calls while `network` is off.
+///
+/// The gate itself is [`crate::authorize`], which refuses a network tool either way — but a tool that
+/// is offered and then refused is a promise the interface made and broke, and it costs the model a
+/// round to learn so. When the Privacy switch is off, the offer itself has to say that nothing leaves
+/// the machine.
+pub fn executable_specs(network: bool) -> Vec<Value> {
     registry()
         .into_iter()
-        .filter(|t| is_executable(t.id))
+        .filter(|t| is_executable(t.id) && (network || !t.requires_network))
         .map(spec)
         .collect()
 }
@@ -517,8 +535,15 @@ pub fn summary(tool_id: &str, arguments: &Value) -> String {
                 .unwrap_or("")
         ),
         "fetch_url" | "http_request" => format!(
-            "{tool_id} {}",
+            "Read {}",
             arguments.get("url").and_then(Value::as_str).unwrap_or("")
+        ),
+        "web_search" => format!(
+            "Search for {}",
+            arguments
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or("<no words>")
         ),
         other => format!("{other} {arguments}"),
     }
@@ -622,26 +647,39 @@ mod tests {
     /// A tool with no executor must not be offered: the model would ask for a command and every round
     /// of that is a refusal the run has to explain.
     ///
-    /// The other half of the rule is the one that keeps the loop's promise: what is offered may read
-    /// the workspace and change one file of it, and nothing that reaches past the workspace is on the
-    /// list at all. A side-effect or network class appearing here means the sandbox is the only thing
-    /// between a run and a machine.
+    /// The other half of the rule is what the loop promises a run: everything offered either is a
+    /// workspace read the sandbox bounds, or is the one write, or is a call that leaves the machine and
+    /// therefore only stands on the list while the Privacy switch is on. A shell or a delete appearing
+    /// here would mean nothing at all stands between a run and the machine.
     #[test]
-    fn only_workspace_reads_and_the_one_write_are_offered_to_a_run() {
+    fn only_bounded_reads_the_one_write_and_the_web_calls_are_offered_to_a_run() {
         for id in EXECUTABLE {
-            let class = find(id).map(|t| t.permission);
+            let tool = find(id).unwrap_or_else(|| panic!("{id} is offered but not declared"));
             assert!(
                 matches!(
-                    class,
-                    Some(PermissionClass::ReadOnly) | Some(PermissionClass::WorkspaceWrite)
+                    tool.permission,
+                    PermissionClass::ReadOnly
+                        | PermissionClass::WorkspaceWrite
+                        | PermissionClass::Network
                 ),
-                "{id} is offered with {class:?}, which the sandbox does not bound"
+                "{id} is offered with {:?}, which the sandbox does not bound",
+                tool.permission
             );
+            // And a network-class offer is only ever a web call: nothing that reaches the machine's own
+            // addresses belongs on a list gated by one switch.
+            if tool.permission == PermissionClass::Network {
+                assert!(
+                    matches!(*id, "web_search" | "fetch_url"),
+                    "{id} is a network tool someone else declared"
+                );
+            }
         }
         assert_eq!(
             EXECUTABLE
                 .iter()
-                .filter(|id| find(id).is_some_and(|t| !t.is_read_only()))
+                .filter(
+                    |id| find(id).is_some_and(|t| t.permission == PermissionClass::WorkspaceWrite)
+                )
                 .count(),
             1,
             "exactly one offered tool changes a file"
@@ -650,8 +688,19 @@ mod tests {
         assert!(!is_executable("terminal"));
         // `codebase_search` is a declared read with no index behind it, so it stays out too.
         assert!(!is_executable("codebase_search"));
-        let specs = executable_specs();
-        assert_eq!(specs.len(), EXECUTABLE.len());
-        assert!(specs.iter().all(|s| s["type"] == json!("function")));
+        assert_eq!(executable_specs(true).len(), EXECUTABLE.len());
+        assert!(executable_specs(true)
+            .iter()
+            .all(|s| s["type"] == json!("function")));
+        // With the switch off, the two web calls are not offered at all — refused-and-explained would
+        // spend a round of the run to arrive at the same answer.
+        let offline = executable_specs(false);
+        let names: Vec<&str> = offline
+            .iter()
+            .map(|s| s["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names.len(), EXECUTABLE.len() - 2, "{names:?}");
+        assert!(!names.contains(&"web_search"), "{names:?}");
+        assert!(!names.contains(&"fetch_url"), "{names:?}");
     }
 }

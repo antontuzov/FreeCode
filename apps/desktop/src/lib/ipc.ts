@@ -223,6 +223,7 @@ export type HostStepKind =
   | "contextCompressed"
   | "subagent"
   | "artifact"
+  | "webSearch"
   | "webReading"
   | "source"
   | "blocked";

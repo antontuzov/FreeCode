@@ -1,11 +1,12 @@
-//! The workspace executors: four calls that read it and one that changes a file in it.
+//! The executors: four calls that read the workspace, one that changes a file in it, and two that
+//! reach the internet.
 //!
 //! Every one of them takes `(arguments, policy)` and goes through [`authorize`] first, so a call
 //! cannot reach the disk without the sandbox having resolved its path, and the loop has no way to skip
-//! that check. Shells and network calls are deliberately absent — they have no executor in this build,
-//! which is why a run that carries tools offers
+//! that check. A shell still has none — which is why a run that carries tools offers
 //! [`EXECUTABLE`](crate::registry::EXECUTABLE) and refuses anything else out loud instead of
-//! pretending to try it.
+//! pretending to try it. The two network calls stand behind the same switch that admits a remote
+//! provider, and [`crate::web`] is where their own rules live.
 //!
 //! The one write here is `edit_file`, and it is the reason the sandbox's `Access::Write` exists: a
 //! path outside the workspace root, or onto a protected name, is refused by [`authorize`] before this
@@ -30,7 +31,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use walkdir::WalkDir;
 
-use crate::{authorize, registry::is_executable, Access, SandboxPolicy, ToolsError};
+use crate::{authorize, registry::is_executable, web, Access, SandboxPolicy, ToolsError};
 
 /// Most result text one call may hand back, in bytes — about 3k tokens, against the smallest context
 /// window this app starts a server with.
@@ -128,6 +129,10 @@ pub fn execute(
         "glob" => find_files(tool.id, arguments, policy),
         "grep_search" => search_content(tool.id, arguments, policy),
         "edit_file" => edit_file(tool.id, arguments, policy),
+        // The two that leave the machine. Neither takes the policy: `authorize` has already refused
+        // them without the Privacy switch, and a URL is not a path the sandbox can resolve.
+        "web_search" => web_search(tool.id, arguments),
+        "fetch_url" => fetch_url(tool.id, arguments),
         // Unreachable while [`registry::EXECUTABLE`](crate::registry::EXECUTABLE) and this match move
         // together, and a refusal rather than a panic if they ever do not.
         other => Err(ToolsError::NoExecutor(other.to_string())),
@@ -520,6 +525,84 @@ fn edit_file(
         ),
         summary,
         edit: Some(edit),
+    })
+}
+
+/// How much of one search hit's sentence survives. Eight hits at the provider's full length would
+/// spend the result budget on prose the model is about to re-read from the page it opens.
+const MAX_SNIPPET_CHARS: usize = 300;
+
+/// Ask the provider what it knows about the words, and answer with a list that carries an address per
+/// entry.
+///
+/// The addresses are the point of the call: an answer the model writes after this has to cite pages it
+/// could name, and a hit without one is a title nobody can check.
+fn web_search(tool: &str, arguments: &Value) -> Result<Executed, ToolsError> {
+    let query = required(tool, arguments, "query")?.to_string();
+    let limit = number_arg(arguments, "limit").unwrap_or(web::MAX_RESULTS);
+    let hits = web::search(&query, limit)?;
+    if hits.is_empty() {
+        return Ok(Executed {
+            summary: format!("nothing for {query}"),
+            content: format!(
+                "Nothing was found for “{query}”. Fewer, plainer words find more: an article is titled \
+                 for one thing, not for a whole question."
+            ),
+            edit: None,
+        });
+    }
+    let list = hits
+        .iter()
+        .enumerate()
+        .map(|(i, hit)| {
+            let snippet: String = hit.snippet.chars().take(MAX_SNIPPET_CHARS).collect();
+            format!("{}. {} — {snippet}\n   {}", i + 1, hit.title, hit.url)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let n = hits.len();
+    let plural = if n == 1 { "" } else { "s" };
+    Ok(Executed {
+        summary: format!("{n} result{plural}"),
+        content: format!(
+            "{n} result{plural} for “{query}”:\n\n{list}\n\nRead one in full with fetch_url and the \
+             address under it, and name that address in the answer.",
+        ),
+        edit: None,
+    })
+}
+
+/// Read one page: [`crate::web`]'s guards, then the text with the markup taken out.
+///
+/// A cut page says it was cut. A model that is handed the head of an article and no reason for the
+/// sentence ending mid-word will finish the thought out of its own weights, which is the one way this
+/// build can produce an answer that looks sourced and is not.
+fn fetch_url(tool: &str, arguments: &Value) -> Result<Executed, ToolsError> {
+    let raw = required(tool, arguments, "url")?.to_string();
+    let max_chars = number_arg(arguments, "max_chars").unwrap_or(web::DEFAULT_PAGE_CHARS);
+    let page = web::read_page(&raw, max_chars)?;
+    let web::Page {
+        url,
+        title,
+        mut text,
+        truncated,
+    } = page;
+    if truncated {
+        text.push_str(&format!(
+            "\n\n…{title} is longer than the {} characters one read sends back, so this is its opening. \
+             Ask again with a larger max_chars (up to {}) for more.",
+            max_chars.clamp(1, web::MAX_PAGE_CHARS),
+            web::MAX_PAGE_CHARS
+        ));
+    }
+    Ok(Executed {
+        summary: if truncated {
+            format!("{title}, cut short")
+        } else {
+            title.clone()
+        },
+        content: format!("{title} — {url}\n\n{text}"),
+        edit: None,
     })
 }
 
@@ -1424,5 +1507,43 @@ mod tests {
         )
         .expect_err("an empty match is not an edit");
         assert!(why.to_string().contains("empty"), "{why}");
+    }
+
+    /// The switch is the whole gate: with it off, `authorize` refuses the call before [`crate::web`]
+    /// is reached, so no packet leaves and no round is spent finding that out.
+    #[test]
+    fn a_web_call_is_refused_while_the_network_gate_is_closed() {
+        let (_d, p) = fixture();
+        for (id, args) in [
+            ("web_search", json!({ "query": "Grace Hopper" })),
+            ("fetch_url", json!({ "url": "https://example.com" })),
+        ] {
+            let err = ran(id, &args, &p).expect_err("{id} cannot run with the gate closed");
+            assert!(
+                matches!(err, ToolsError::NetworkNotConfigured(_)),
+                "{err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_address_the_web_tools_may_not_reach_is_refused_rather_than_tried() {
+        let (_d, p) = fixture();
+        let p = SandboxPolicy {
+            network_allowed: true,
+            ..p
+        };
+        // Nothing here resolves a name or opens a connection: the guard runs first, and these are the
+        // two shapes it exists to stop — a path on this machine, and one of its own addresses.
+        for url in ["file:///etc/passwd", "http://127.0.0.1:8080/health"] {
+            let err = ran("fetch_url", &json!({ "url": url }), &p)
+                .expect_err("{url} is not a public page");
+            assert!(matches!(err, ToolsError::Web(_)), "{url}: {err:?}");
+        }
+        let err = ran("web_search", &json!({}), &p).expect_err("a search needs words");
+        assert!(
+            matches!(err, ToolsError::InvalidArguments { .. }),
+            "{err:?}"
+        );
     }
 }

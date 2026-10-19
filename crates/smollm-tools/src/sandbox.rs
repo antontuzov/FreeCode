@@ -72,7 +72,7 @@ pub enum SandboxViolation {
     DeniedDirectory { path: String, hit: String },
     #[error("{path} could not be resolved: {reason}")]
     Unresolvable { path: String, reason: String },
-    #[error("network access is disabled: no remote provider has been configured")]
+    #[error("network access is switched off, so nothing may leave this machine")]
     NetworkDisabled,
 }
 

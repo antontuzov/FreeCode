@@ -230,6 +230,48 @@ mod tests {
         assert_eq!(got, Pending::Decided(ApprovalDecision::BlockedByPolicy));
     }
 
+    /// The other half of that gate, and the reason it is the whole consent: with the switch on, a
+    /// web call runs on the dial's own authority rather than waiting for a prompt this build cannot
+    /// show. A run that stopped to ask would read as a stalled server.
+    #[test]
+    fn a_network_call_runs_once_the_privacy_switch_has_agreed_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = SandboxPolicy {
+            workspace_root: dir.path().to_path_buf(),
+            network_allowed: true,
+            ..Default::default()
+        };
+        let approvals = Approvals::default();
+        for id in ["web_search", "fetch_url"] {
+            let tool = find(id).unwrap();
+            let args = if id == "web_search" {
+                json!({ "query": "ternary bonsai" })
+            } else {
+                json!({ "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)" })
+            };
+            assert_eq!(
+                evaluate(&tool, &args, &approvals, &s, "c"),
+                Pending::Decided(ApprovalDecision::AutoAllowed),
+                "{id} with the switch on"
+            );
+        }
+        // Plan-only still refuses it: there the mode speaks before the switch gets to.
+        let planner = Approvals {
+            mode: ApprovalMode::PlanOnly,
+            ..Default::default()
+        };
+        assert_eq!(
+            evaluate(
+                &find("web_search").unwrap(),
+                &json!({ "query": "rust" }),
+                &planner,
+                &s,
+                "c"
+            ),
+            Pending::Decided(ApprovalDecision::BlockedByPolicy)
+        );
+    }
+
     #[test]
     fn the_users_own_allow_and_deny_lists_outrank_the_mode() {
         let dir = tempfile::tempdir().unwrap();

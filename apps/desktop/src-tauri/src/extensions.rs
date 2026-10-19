@@ -113,13 +113,13 @@ mod tests {
         inv.tools.iter().find(|r| r.id == id).expect("tool")
     }
 
-    /// The four reads and the one workspace write are what the Coding control actually offers today, and
-    /// the page has to say so: a list that showed all eighteen as live would describe an agent this
-    /// build does not have.
+    /// The four reads, the one workspace write and the two web calls are what the Coding control
+    /// actually offers today, and the page has to say so: a list that showed all eighteen as live
+    /// would describe an agent this build does not have.
     #[test]
-    fn the_reads_and_the_workspace_write_are_the_tools_a_call_can_run_through() {
+    fn the_bounded_reads_the_write_and_the_web_calls_are_what_a_call_can_run_through() {
         let inv = inventory(&Settings::default());
-        assert_eq!(inv.runnable, 5, "{:?}", inv.tools);
+        assert_eq!(inv.runnable, 7, "{:?}", inv.tools);
         for id in ["read_file", "list_dir", "glob", "grep_search"] {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "auto", "{id}");
@@ -129,6 +129,27 @@ mod tests {
         assert!(row(&inv, "edit_file").runnable);
         assert_eq!(row(&inv, "edit_file").decision, "auto");
         assert!(!row(&inv, "write_file").runnable);
+        // The web tools have executors, so they are runnable in this build — but a local machine is
+        // the default, and the page shows the gate closed rather than the plumbing.
+        for id in ["web_search", "fetch_url"] {
+            assert!(row(&inv, id).runnable, "{id}");
+            assert_eq!(row(&inv, id).decision, "blocked", "{id}");
+        }
+    }
+
+    /// Turning the Privacy switch on is the only consent a web call gets, so the page has to move with
+    /// it. A row that stayed "blocked" after the switch would tell the user the control does nothing —
+    /// and the Settings copy already promises it does.
+    #[test]
+    fn the_privacy_switch_is_what_moves_a_web_row_from_blocked_to_auto() {
+        let mut settings = Settings::default();
+        settings.privacy.allow_remote_providers = true;
+        let inv = inventory(&settings);
+        assert!(inv.network_allowed);
+        assert_eq!(row(&inv, "web_search").decision, "auto");
+        assert_eq!(row(&inv, "fetch_url").decision, "auto");
+        // Nothing else on the list changed: the switch opens the network class, not a shell.
+        assert_eq!(row(&inv, "terminal").decision, "ask");
     }
 
     /// A destructive call under the default dial asks rather than running, and the page says "ask" —

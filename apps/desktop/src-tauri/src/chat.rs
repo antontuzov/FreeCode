@@ -861,9 +861,11 @@ fn request_for(state: &ChatState, settings: &Settings, turn: &Turn, tools: bool)
     request.max_tokens = turn.max_tokens;
     request.reasoning_effort = Some(turn.effort.clone());
     if tools {
-        // Only the calls this build has executors for — the four reads and the one workspace edit: a
-        // schema the host cannot run is a promise the model would be asked to break.
-        request.tools = smollm_tools::executable_specs();
+        // Only the calls this build has executors for — the four reads, the one workspace edit, and the
+        // two web calls when the Privacy switch is on: a schema the host cannot run, or one that would
+        // leave the machine against the user's stated wish, is a promise the model would be asked to
+        // break.
+        request.tools = smollm_tools::executable_specs(settings.privacy.allow_remote_providers);
     }
     request
 }

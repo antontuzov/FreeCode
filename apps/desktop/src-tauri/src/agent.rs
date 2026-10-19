@@ -1,9 +1,12 @@
 //! The tool round: run what one answer asked for, and say in the transcript what each call did.
 //!
 //! This is the half of the agent loop that touches the machine. [`smollm_tools::EXECUTABLE`] names the
-//! calls that have executors — four reads of the workspace and one write inside it; anything else the
-//! model asks for is answered with a notice that says so rather than run, which is why the loop can
-//! keep the "Local" badge true and the composer's Coding control can stay an opt-in.
+//! calls that have executors — four reads of the workspace, one write inside it, and two that reach the
+//! internet; anything else the model asks for is answered with a notice that says so rather than run,
+//! which is why the loop can keep the "Local" badge true and the composer's Coding control can stay an
+//! opt-in. The two web calls are only *offered* while the Privacy switch is on, so a run that can leave
+//! the machine is one the user asked for; the executors themselves are what bound the pair of them, the
+//! way the sandbox bounds the five that touch disk.
 //!
 //! Every call takes the same road: [`smollm_core::approvals`] decides, [`smollm_tools::authorize`]
 //! resolves its paths against the workspace sandbox inside [`smollm_tools::execute`], and only then
@@ -113,7 +116,8 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
             result: format!(
                 "{name} is not available in this build: it reads nothing and changes nothing. The \
                  tools it has are read_file, list_dir, glob, grep_search and edit_file, which reach \
-                 nothing outside this workspace."
+                 nothing outside this workspace, plus web_search and fetch_url, which reach the \
+                 internet only while the Privacy switch is on."
             ),
         };
     }
@@ -229,7 +233,7 @@ fn cleared(
 /// The row's label argument: the path or pattern the call worked on, shown as the chip beside
 /// "Read file" rather than buried in a sentence about it.
 fn subject(name: &str, arguments: &Value) -> String {
-    ["path", "pattern", "file"]
+    ["path", "pattern", "file", "query", "url"]
         .iter()
         .find_map(|key| arguments.get(*key).and_then(Value::as_str))
         .unwrap_or(name)
@@ -241,6 +245,8 @@ fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
         "read_file" => StepKind::ReadFile,
         "grep_search" => StepKind::SearchContent,
         "edit_file" => StepKind::EditFile,
+        "web_search" => StepKind::WebSearch,
+        "fetch_url" => StepKind::WebReading,
         _ => StepKind::Tool,
     };
     let shown = subject(name, arguments);
@@ -264,12 +270,25 @@ mod tests {
             "src/lib.rs"
         );
         assert_eq!(subject("grep_search", &json!({ "pattern": "run" })), "run");
+        // The two web calls name themselves by what they looked up, so the row shows the words the run
+        // asked the internet with, and the page it opened.
+        assert_eq!(
+            subject("web_search", &json!({ "query": "Grace Hopper" })),
+            "Grace Hopper"
+        );
+        assert_eq!(
+            subject(
+                "fetch_url",
+                &json!({ "url": "https://en.wikipedia.org/wiki/Grace_Hopper" })
+            ),
+            "https://en.wikipedia.org/wiki/Grace_Hopper"
+        );
         // A call that named neither still gets a label rather than an empty chip.
         assert_eq!(subject("list_dir", &json!({})), "list_dir");
     }
 
     #[test]
-    fn the_offered_reads_and_the_one_write_open_a_row() {
+    fn the_offered_reads_the_write_and_the_web_calls_open_a_row() {
         // The executors and the offer have to agree, or a call would open a row nothing closes.
         for id in smollm_tools::EXECUTABLE {
             assert!(is_executable(id), "{id} is offered but not runnable");
@@ -277,11 +296,21 @@ mod tests {
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(smollm_tools::EXECUTABLE.len(), 5);
+        assert_eq!(smollm_tools::EXECUTABLE.len(), 7);
         // The write is the row the pill is built from, so it cannot silently degrade to a generic tool.
         assert_eq!(
             started_row("edit_file", &json!({ "path": "a/b.rs" })).kind,
             StepKind::EditFile
+        );
+        // Nor can the two web calls: a run that looked something up has to read as a lookup, not as
+        // "Ran tool", which is the row shape that says nothing about what left the machine.
+        assert_eq!(
+            started_row("web_search", &json!({ "query": "rust" })).kind,
+            StepKind::WebSearch
+        );
+        assert_eq!(
+            started_row("fetch_url", &json!({ "url": "https://example.com" })).kind,
+            StepKind::WebReading
         );
     }
 

@@ -25,6 +25,7 @@ export type StepKind =
   | "contextCompressed"
   | "subagent"
   | "artifact"
+  | "webSearch"
   | "webReading"
   | "source"
   | "blocked";
@@ -42,6 +43,7 @@ const I18N_KEYS: Record<StepKind, string> = {
   contextCompressed: "transcript.step.contextCompressed",
   subagent: "transcript.step.subagent",
   artifact: "transcript.step.artifact",
+  webSearch: "transcript.step.webSearch",
   webReading: "transcript.step.webReading",
   source: "transcript.step.source",
   blocked: "transcript.step.blocked",

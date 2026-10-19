@@ -42,6 +42,8 @@ pub enum StepKind {
     Subagent,
     /// An artifact created during the run.
     Artifact,
+    /// "Searched the web" — a lookup against the provider the run was given.
+    WebSearch,
     /// "Web reading" — a fetched page the run consulted.
     WebReading,
     /// A citation/source row.
@@ -66,6 +68,7 @@ impl StepKind {
             StepKind::ContextCompressed => "transcript.step.contextCompressed",
             StepKind::Subagent => "transcript.step.subagent",
             StepKind::Artifact => "transcript.step.artifact",
+            StepKind::WebSearch => "transcript.step.webSearch",
             StepKind::WebReading => "transcript.step.webReading",
             StepKind::Source => "transcript.step.source",
             StepKind::Blocked => "transcript.step.blocked",
@@ -99,6 +102,7 @@ pub fn all_i18n_keys() -> Vec<&'static str> {
         ContextCompressed,
         Subagent,
         Artifact,
+        WebSearch,
         WebReading,
         Source,
         Blocked,

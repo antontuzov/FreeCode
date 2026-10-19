@@ -7,7 +7,8 @@
 // restating it, so a tool added there shows up here without a second edit.
 //
 // The two facts worth a page are the ones no other surface shows. Which calls reach an executor in
-// this build (four reads and one edit inside the workspace; the rest are declared, and a call to one
+// this build (four reads and one edit inside the workspace, plus the two web calls the privacy switch
+// has to be on for; the rest are declared, and a call to one
 // is answered with a notice that says so rather than run), and what the run would do with each one
 // right now. The second is computed by `smollm_core::approvals::evaluate` against the settings and
 // sandbox in force — the same engine that decides it mid-run, so the page cannot tell a friendlier
