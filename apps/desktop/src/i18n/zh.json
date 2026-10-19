@@ -59,6 +59,8 @@
   "transcript.empty": "没有正在运行的任务。请描述你要本地模型做什么。",
   "transcript.keepGoing": "继续处理中…",
   "transcript.keepGoing.elapsed": "继续处理中… {{seconds}} 秒",
+  "transcript.keepGoing.long": "仍在处理… {{seconds}} 秒",
+  "transcript.keepGoing.veryLong": "这一次用时较长——回答仍在生成… {{seconds}} 秒",
   "transcript.checkpoints": "对话轮次",
   "transcript.checkpoint": "跳转到第 {{n}} 轮：{{text}}",
   "transcript.checkpoint.picture": "一张图片",

@@ -73,20 +73,34 @@ function RefusalRow({ step, locale }: { step: Step; locale: Locale }) {
 }
 
 function StepRow({ step, locale }: { step: Step; locale: Locale }) {
-  const [open, setOpen] = useState(true);
+  // The host says which rows start folded over their children, and a finished round is the one that
+  // needs it: its calls stand on screen while they run and fold under "Ran 8 tools" the moment they are
+  // all in, which is what keeps a long run one skimmable line per round rather than a wall of reads.
+  const [open, setOpen] = useState(!step.collapsed);
   const hasChildren = !!step.children?.length;
   // A notice's line is its catalog sentence with the run's own numbers in it; every other row's line
   // is the detail the host gave it.
   const text = stepText(locale, step);
 
   if (step.kind === "contextCompressed") {
+    // The seam is its own disclosure: the rule marks where the server ran out of window, and the
+    // sentence the host sent with it — which names the two controls that could have kept the room — is
+    // there for whoever wants it, rather than standing in the column as a paragraph about a fault.
     return (
-      <div className="my-[var(--space-4)] flex items-center gap-3 text-faint">
-        <span className="h-px flex-1 bg-line" />
-        <Icon name="context" size={14} />
-        <span className="text-quiet">{stepLabel(locale, step)}</span>
-        <span className="h-px flex-1 bg-line" />
-      </div>
+      <li className="row-enter my-[var(--space-4)]">
+        <details>
+          <summary className="flex cursor-pointer items-center gap-3 text-faint">
+            <span className="h-px flex-1 bg-line" />
+            <Icon name="context" size={14} />
+            <span className="text-quiet">{stepLabel(locale, step)}</span>
+            <Icon name="chevronDown" size={12} className="disclosure-icon" />
+            <span className="h-px flex-1 bg-line" />
+          </summary>
+          <p className="disclosure-panel mt-2 whitespace-pre-wrap break-words px-[var(--space-6)] text-fine text-muted">
+            {stepText(locale, step)}
+          </p>
+        </details>
+      </li>
     );
   }
 
@@ -277,6 +291,21 @@ function useRunSeconds(startedAt: number | null): number | null {
   return Math.max(0, Math.round((Date.now() - startedAt) / 1000));
 }
 
+/**
+ * The line's words for how far into a wait the user is.
+ *
+ * The clock is the only thing the app knows about a run that has not answered yet — the engine reports
+ * no progress while it pages weights in or reads the replay — so the ticker says where the *wait* is
+ * rather than pretending to know where the answer is. Three tiers of the same honest number: a run that
+ * has been going for four minutes should not read like one that started a second ago, which is what
+ * makes the reference's rotating line feel alive instead of stuck.
+ */
+function waitKey(seconds: number): string {
+  if (seconds >= 120) return "transcript.keepGoing.veryLong";
+  if (seconds >= 30) return "transcript.keepGoing.long";
+  return "transcript.keepGoing.elapsed";
+}
+
 export function Transcript({
   locale,
   onPickModel,
@@ -420,7 +449,7 @@ export function Transcript({
               <span className="dot-running" aria-hidden />
               {waited === null
                 ? translate(locale, "transcript.keepGoing")
-                : translate(locale, "transcript.keepGoing.elapsed", { seconds: waited })}
+                : translate(locale, waitKey(waited), { seconds: waited })}
             </p>
           )}
         </div>

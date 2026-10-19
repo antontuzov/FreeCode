@@ -106,6 +106,13 @@ export type Step = {
   hunk?: Hunk;
   /** For `toolBatch` and `running`: the rows nested underneath the header. */
   children?: Step[];
+  /**
+   * `TranscriptStep::collapsed_by_default`: the host's word for a row that starts folded over its
+   * children. A finished round is the case that matters — its calls are on screen while they run and
+   * fold under "Ran N tools" the moment they are all in, which is how the reference keeps a long run
+   * skimmable instead of leaving every read standing.
+   */
+  collapsed?: boolean;
   /** Seconds elapsed, only meaningful on a `running` header. */
   seconds?: number;
   /** For a `blocked` row: the single action that clears the refusal, as its catalog key and its URL. */
@@ -176,6 +183,9 @@ export function stepLabel(locale: Locale, step: Step): string {
   if (step.kind === "running") {
     return translate(locale, I18N_KEYS.running, { seconds: step.seconds ?? 0 });
   }
+  // A seam is named by the place it marks, not by the notice it carries: a line reading "Notice" over
+  // the rule where the history was shortened says a problem happened there, and none did.
+  if (step.kind === "contextCompressed") return translate(locale, I18N_KEYS.contextCompressed);
   if (step.notice) return translate(locale, "transcript.notice");
   // "Blocked" is the name of the row shape, not of what happened. A refusal says which problem it is.
   if (step.refusal) return translate(locale, `blocker.${step.refusal.code}.title`);
@@ -239,6 +249,12 @@ function carries(step: Step, message: string): boolean {
 
 /** Something the run worked around, on the same quiet footing as the answer it did not stop. */
 function noticeRow(notice: Notice): Step {
+  // One notice is not a thing the run had to forgive but a place the transcript has: where the server
+  // ran out of window, every row above the seam was written from a prompt that no longer held the
+  // conversation's start. So it draws the reference's rule across the column and keeps the host's
+  // sentence — the one that names the two controls that could undo it — folded under it.
+  if (notice.code === "context-trimmed")
+    return { id: nextId("seam"), kind: "contextCompressed", notice };
   return { id: nextId("notice"), kind: "blocked", status: "error", notice };
 }
 
@@ -283,6 +299,7 @@ function hostRow(step: HostStep, summary?: string): Step {
     detail: summary,
     diff: step.diff ? { added: step.diff.linesAdded, removed: step.diff.linesRemoved } : undefined,
     hunk: step.hunk ?? undefined,
+    collapsed: step.collapsedByDefault || undefined,
     status: hostStatus(step.status),
   };
 }
@@ -618,6 +635,9 @@ export const FIXTURE_ROWS: Row[] = [
   {
     id: "f2",
     kind: "toolBatch",
+    // The host declares a finished batch folded, and this is the row that shows what a run of the loop
+    // looks like once it is over: one line naming the round, with the calls under it on demand.
+    collapsed: true,
     children: [
       { id: "f2a", kind: "thought", detail: "The catalog pins a fork-only engine." },
       { id: "f2b", kind: "readFile", subject: "agent.rs" },
@@ -651,7 +671,10 @@ export const FIXTURE_ROWS: Row[] = [
       },
     ],
   },
-  { id: "f3", kind: "contextCompressed" },
+  // The seam the server's trim leaves: the rule across the column, with the host's sentence about what
+  // fell above it folded under it. No conversation on this machine has filled a window on purpose, so
+  // this is how the seam and its copy get reviewed in either language.
+  { id: "f3", kind: "contextCompressed", notice: { code: "context-trimmed", params: {} } },
   // A notice, on the footing of the answer it did not stop. Its sentence is the catalog's, so this row
   // is also how that copy gets looked at in either language without filling a context window on
   // purpose; the two numbers are the shape a real one arrives with, not this machine's measurement.

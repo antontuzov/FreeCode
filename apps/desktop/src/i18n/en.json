@@ -59,6 +59,8 @@
   "transcript.empty": "No task running. Describe what you want the local model to do.",
   "transcript.keepGoing": "Keeping going…",
   "transcript.keepGoing.elapsed": "Keeping going… {{seconds}}s",
+  "transcript.keepGoing.long": "Still working on it… {{seconds}}s",
+  "transcript.keepGoing.veryLong": "This one is taking a while — the answer is still coming… {{seconds}}s",
   "transcript.checkpoints": "Turns",
   "transcript.checkpoint": "Jump to turn {{n}}: {{text}}",
   "transcript.checkpoint.picture": "a picture",

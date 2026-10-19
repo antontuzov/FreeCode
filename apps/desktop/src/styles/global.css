@@ -134,6 +134,11 @@ body {
     rotate var(--dur-quick) var(--ease-standard),
     transform var(--dur-quick) var(--ease-standard);
 }
+/* A native disclosure turns its own chevron: the row that uses a `<details>` has no React state to
+ * read, and `open` is the state it already keeps. */
+details[open] > summary .disclosure-icon {
+  rotate: 180deg;
+}
 
 /* ---- the repeated shapes in the reference shots ---- */
 
