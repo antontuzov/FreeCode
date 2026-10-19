@@ -1120,6 +1120,19 @@ select.field-input {
 
 /* ---- the run's review panel ------------------------------------------------------------------ */
 
+/* The line a file leaves behind when its hunks are folded away — and the press that folds them. It is
+ * a row of the panel's own list, so it takes the hover the settings search's result rows take and no
+ * box: the counts at its right are already the reason to read it. */
+.review-file-head {
+  cursor: pointer;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+.review-file-head:hover {
+  background: var(--bg-hover);
+}
+
 /* The change in the column shot 06 gives it: one block per file, its hunks as diff lines, a gutter of
  * line numbers down the left. The bands are painted from the theme's own diff colours rather than a
  * palette a diff viewer brings with it, so switching the interface style repaints a review that is

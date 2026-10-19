@@ -59,6 +59,7 @@
   "review.scope": "Which change this reports",
   "review.scope.lastTurn": "Last turn",
   "review.scope.all": "Whole task",
+  "review.outline": "Fold the diff to its file list",
   "transcript.title": "Task",
   "transcript.more": "Task options",
   "transcript.empty": "No task running. Describe what you want the local model to do.",

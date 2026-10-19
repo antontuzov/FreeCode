@@ -94,6 +94,10 @@ const PATHS = {
   copy: "M9 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2zM5 16a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2",
   context: "M4 4h16v16H4zM4 10h16M10 4v16",
   review: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11",
+  // The reference's outline glyph: one entry on a trunk, and the two it branches to. It is the tree a
+  // diff folds to when the hunks are put away, so the boxes stand for the file names rather than for
+  // files — `readFile`'s folded corner already owns that.
+  outline: "M4 3h5v4H4zM6.5 7v9M6.5 10H11M11 8h5v4h-5zM6.5 16H11M11 14h5v4h-5z",
   warning:
     "M12 9v4M12 17h.01M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z",
   external: "M17 3h4v4M21 3l-9 9M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",

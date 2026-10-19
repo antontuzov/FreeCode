@@ -122,12 +122,34 @@ export function Review({ locale }: { locale: Locale }) {
   );
   const reviewFile = useNav((s) => s.reviewFile);
   const body = useRef<HTMLDivElement>(null);
+  // The sections whose hunks are put away, leaving the one line that names the file. Shot 06's header
+  // carries this as a control, and it is the panel's own answer to a long run: six files of hunks read
+  // as one long scroll, while six lines read as the set the change touched.
+  //
+  // A default and the exceptions to it, rather than a list of folded paths, because the list this panel
+  // folds is not on screen when the deep link is read: `?outline=1` arrives before the seeded rows are
+  // pushed, so a set built from the first render's files would be built from nothing.
+  const [foldAll, setFoldAll] = useState(
+    () => new URLSearchParams(window.location.search).get("outline") === "1",
+  );
+  const [except, setExcept] = useState<Record<string, boolean>>({});
+  const isFolded = (path: string) => except[path] ?? foldAll;
+  const allFolded = files.length > 0 && files.every((file) => isFolded(file.path));
+  const toggleAll = () => {
+    setFoldAll(!foldAll);
+    setExcept({});
+  };
+  const toggleFile = (path: string) => setExcept((prev) => ({ ...prev, [path]: !isFolded(path) }));
 
   // The file an edit row named, once the column is holding the change. Matching on the path rather
   // than on an index because the transcript and this list are two orderings of one set: the row was
   // written when the tool ran, and a file the run wrote twice folds both of its hunks under one path.
   useEffect(() => {
     if (!reviewFile || !body.current) return;
+    // A jump is a request to read the change, so it opens what it lands on. The unfold grows the
+    // section downward from the line it folded to, which leaves the top edge — where the scroll is
+    // aiming — exactly where it was put.
+    setExcept((prev) => (prev[reviewFile] === false ? prev : { ...prev, [reviewFile]: false }));
     const hit = [...body.current.querySelectorAll<HTMLElement>("[data-file]")].find(
       (section) => section.dataset.file === reviewFile,
     );
@@ -147,6 +169,18 @@ export function Review({ locale }: { locale: Locale }) {
         <Icon name="review" size={14} />
         <span className="text-quiet">{translate(locale, "review.title")}</span>
         <span className="flex-1" />
+        {files.length > 0 && (
+          <button
+            type="button"
+            onClick={toggleAll}
+            aria-pressed={allFolded}
+            className="icon-btn"
+            aria-label={translate(locale, "review.outline")}
+            title={translate(locale, "review.outline")}
+          >
+            <Icon name="outline" size={13} />
+          </button>
+        )}
         <button
           type="button"
           onClick={showInspector}
@@ -185,54 +219,70 @@ export function Review({ locale }: { locale: Locale }) {
             {translate(locale, "review.empty")}
           </p>
         ) : (
-          files.map((file) => (
-            <section
-              key={file.path}
-              data-file={file.path}
-              className="review-file border-b border-line/60"
-            >
-              <div className="flex items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)]">
-                <span className="insp-chip">
-                  <Icon name="editFile" size={13} />
-                </span>
-                {/* The name is what a changed-file row is scanned for, so the directories above it are
-                    the part allowed to run out of room. */}
-                <span className="flex min-w-0 flex-1 items-baseline text-quiet">
-                  <span className="truncate text-faint">
-                    {file.path.slice(0, file.path.lastIndexOf("/") + 1)}
+          files.map((file) => {
+            const folded = isFolded(file.path);
+            return (
+              <section
+                key={file.path}
+                data-file={file.path}
+                className="review-file border-b border-line/60"
+              >
+                {/* The header is the row the folded panel is made of, so it is the control that folds
+                    and opens rather than a caption above one. */}
+                <button
+                  type="button"
+                  onClick={() => toggleFile(file.path)}
+                  aria-expanded={!folded}
+                  className="review-file-head flex w-full items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left"
+                >
+                  <Icon
+                    name="chevronRight"
+                    size={12}
+                    className={`disclosure-icon shrink-0 ${folded ? "" : "rotate-90"}`}
+                  />
+                  <span className="insp-chip">
+                    <Icon name="editFile" size={13} />
                   </span>
-                  <span className="shrink-0">
-                    {file.path.slice(file.path.lastIndexOf("/") + 1)}
+                  {/* The name is what a changed-file row is scanned for, so the directories above it are
+                      the part allowed to run out of room. */}
+                  <span className="flex min-w-0 flex-1 items-baseline text-quiet">
+                    <span className="truncate text-faint">
+                      {file.path.slice(0, file.path.lastIndexOf("/") + 1)}
+                    </span>
+                    <span className="shrink-0">
+                      {file.path.slice(file.path.lastIndexOf("/") + 1)}
+                    </span>
                   </span>
-                </span>
-                <span className="shrink-0 font-mono text-micro tabular-nums">
-                  <span className="text-success">+{file.added}</span>{" "}
-                  <span className="text-danger">−{file.removed}</span>
-                </span>
-              </div>
-              {blocks(file.hunks).map((block, h) => (
-                <Fragment key={h}>
-                  {block.gap !== null && (
-                    <p className="diff-gap">
-                      {translate(
-                        locale,
-                        block.gap === 1 ? "review.unmodifiedOne" : "review.unmodifiedMany",
-                        { count: block.gap },
+                  <span className="shrink-0 font-mono text-micro tabular-nums">
+                    <span className="text-success">+{file.added}</span>{" "}
+                    <span className="text-danger">−{file.removed}</span>
+                  </span>
+                </button>
+                {!folded &&
+                  blocks(file.hunks).map((block, h) => (
+                    <Fragment key={h}>
+                      {block.gap !== null && (
+                        <p className="diff-gap">
+                          {translate(
+                            locale,
+                            block.gap === 1 ? "review.unmodifiedOne" : "review.unmodifiedMany",
+                            { count: block.gap },
+                          )}
+                        </p>
                       )}
-                    </p>
-                  )}
-                  <div className="review-hunk">
-                    {block.lines.map((line, i) => (
-                      <div key={i} className={`diff-line diff-${line.kind}`}>
-                        <span className="diff-n">{line.n ?? ""}</span>
-                        <span className="diff-text">{line.text}</span>
+                      <div className="review-hunk">
+                        {block.lines.map((line, i) => (
+                          <div key={i} className={`diff-line diff-${line.kind}`}>
+                            <span className="diff-n">{line.n ?? ""}</span>
+                            <span className="diff-text">{line.text}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </Fragment>
-              ))}
-            </section>
-          ))
+                    </Fragment>
+                  ))}
+              </section>
+            );
+          })
         )}
       </div>
     </aside>

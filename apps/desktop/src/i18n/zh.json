@@ -59,6 +59,7 @@
   "review.scope": "此处报告对应的改动范围",
   "review.scope.lastTurn": "最近一轮",
   "review.scope.all": "整个任务",
+  "review.outline": "将差异折叠为文件列表",
   "transcript.title": "任务",
   "transcript.more": "任务选项",
   "transcript.empty": "没有正在运行的任务。请描述你要本地模型做什么。",
