@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
 import type { RunReport } from "../lib/ipc";
-import { changedFiles, useTranscript, type DiffStat } from "../state/transcript";
+import { changedFiles, reviewRows, useTranscript, type DiffStat } from "../state/transcript";
 import { Icon, type IconName } from "./icons";
 
 type Group = {
@@ -246,10 +246,11 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
   const run = fixture ? FIXTURE_RUN : lastRun;
   // The changed files come off the transcript's own rows, in both modes: an edit row and a ledger row
   // are the host's answer to one `Edit`, so listing them from the rows keeps this group and the pill
-  // above the composer reading the same run.
+  // above the composer reading the same run. The rows are read from the last prompt down for the same
+  // reason — this column reports one run, and a conversation's earlier turns are not part of it.
   const files = useMemo<Item[]>(
     () =>
-      changedFiles(rows).map(({ path, added, removed }) => ({
+      changedFiles(reviewRows(rows, "lastTurn")).map(({ path, added, removed }) => ({
         label: path,
         diff: { added, removed },
       })),

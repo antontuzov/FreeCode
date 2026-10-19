@@ -368,6 +368,31 @@ function finishStep(rows: Row[], step: HostStep, summary: string): Row[] {
 }
 
 /**
+ * What the review panel counts: the last prompt's change, or everything the conversation wrote.
+ * The reference's header carries this as its first control because the two answers are different
+ * questions, and a panel that quietly picks one reports a change the reader did not ask about.
+ */
+export type ReviewScope = "lastTurn" | "all";
+
+/**
+ * The rows a scope reviews.
+ *
+ * "Last turn" is read off the conversation rather than off the run: the rows after the newest prompt,
+ * which is one run's worth while that run is the newest thing that happened, and stays so when the
+ * window re-renders mid-round or the run is still streaming. Without this the panel's file sections
+ * would walk every turn the conversation holds while its headline counted the last run alone, and the
+ * two would disagree on any conversation with two prompts in it.
+ */
+export function reviewRows(rows: Row[], scope: ReviewScope): Row[] {
+  if (scope === "all") return rows;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (row && isTurn(row) && row.role === "user") return rows.slice(i + 1);
+  }
+  return rows;
+}
+
+/**
  * The files this conversation's rows say were edited, newest edit folded into the file it touched.
  *
  * Read off the rows rather than off the run's total because the inspector names *which* files, and a
@@ -671,6 +696,10 @@ export const FIXTURE_ROWS: Row[] = [
       },
     ],
   },
+  // A second prompt, so the review panel's two scopes have something to disagree about: the edit above
+  // this row belongs to the previous turn, the two below it to the last one. A conversation with one
+  // prompt cannot show the selector doing anything, and a selector that does nothing is not one.
+  { id: "fq2", kind: "turn", role: "user", text: "now the round counter" },
   // The seam the server's trim leaves: the rule across the column, with the host's sentence about what
   // fell above it folded under it. No conversation on this machine has filled a window on purpose, so
   // this is how the seam and its copy get reviewed in either language.
@@ -762,12 +791,13 @@ export const FIXTURE_ROWS: Row[] = [
 ];
 
 /**
- * The pill `?fixture=1` shows: the two edits the scripted rows above report, added up. It is written
- * out rather than derived, so the number here is the shape a real `DiffStaged` arrives with instead of
- * a second source of truth computed from the rows — and it is *that* shape the rows' own hunks add up
- * to, so the pill, the sheet it opens and the transcript all describe one change.
+ * The pill `?fixture=1` shows: the two edits the last turn's rows report, added up. It is written out
+ * rather than derived, so the number here is the shape a real `DiffStaged` arrives with instead of a
+ * second source of truth computed from the rows — and it is *that* shape the rows of one turn add up
+ * to, so the pill, the review panel's last-turn scope and the transcript all describe one change. The
+ * panel's other scope counts the earlier turn's edit as well, which is the point of having two.
  */
-export const FIXTURE_DIFF: RunDiff = { files: 2, added: 15, removed: 6 };
+export const FIXTURE_DIFF: RunDiff = { files: 2, added: 9, removed: 3 };
 
 /** The step pill `?fixture=1` shows beside it: one round closed of the four the host budgets. The
  * scripted rows carry one "Ran 3 tools" header, and this is the figure that header would have left

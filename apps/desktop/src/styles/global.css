@@ -1132,6 +1132,33 @@ select.field-input {
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
+/* The panel's scope control. The reference draws it as a word and a chevron in no box, because it
+ * names the numbers beside it rather than holding a value the way a settings field does. */
+.review-scope {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text);
+}
+.review-scope select {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 2px 18px 2px 2px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.review-scope select:hover {
+  background: var(--bg-hover);
+}
+.review-scope svg {
+  position: absolute;
+  right: 3px;
+  pointer-events: none;
+  color: var(--text-faint);
+}
 .diff-line {
   display: grid;
   grid-template-columns: 3.5ch 1fr;

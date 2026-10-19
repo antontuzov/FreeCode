@@ -1,8 +1,14 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
 import { useNav } from "../state/nav";
-import { changedFiles, useTranscript, type Hunk } from "../state/transcript";
+import {
+  changedFiles,
+  reviewRows,
+  useTranscript,
+  type Hunk,
+  type ReviewScope,
+} from "../state/transcript";
 import { Icon } from "./icons";
 
 /**
@@ -95,11 +101,25 @@ function hunkEnd(lines: Line[]): number | undefined {
  */
 export function Review({ locale }: { locale: Locale }) {
   const rows = useTranscript((s) => s.rows);
-  const runDiff = useTranscript((s) => s.runDiff);
   const showInspector = useNav((s) => s.showInspector);
+  // `?scope=all` seeds the second scope the way `?q=` seeds the settings search: the switch is a press
+  // the native window cannot be given, and a control nobody has seen rendered is a guess.
+  const [scope, setScope] = useState<ReviewScope>(
+    new URLSearchParams(window.location.search).get("scope") === "all" ? "all" : "lastTurn",
+  );
   // A file the run wrote twice is one section with two hunks in it, which is what a diff reader
   // expects; two sections of the same path would read as a bug in the count above them.
-  const files = useMemo(() => changedFiles(rows).filter((file) => file.hunks.length > 0), [rows]);
+  const files = useMemo(
+    () => changedFiles(reviewRows(rows, scope)).filter((file) => file.hunks.length > 0),
+    [rows, scope],
+  );
+  // The headline counts the sections under it rather than the run's ledger, which is the difference
+  // between a panel that answers its own question and one whose two halves describe different spans:
+  // the ledger is one run's, and the last turn's rows and the whole task's are not the same set.
+  const totals = files.reduce(
+    (acc, file) => ({ added: acc.added + file.added, removed: acc.removed + file.removed }),
+    { added: 0, removed: 0 },
+  );
 
   return (
     <aside
@@ -121,14 +141,23 @@ export function Review({ locale }: { locale: Locale }) {
         </button>
       </header>
 
-      {runDiff && (
+      {files.length > 0 && (
         <div className="flex shrink-0 items-center gap-[var(--space-3)] border-b border-line px-[var(--space-4)] py-[var(--space-2)] text-fine text-muted">
-          {/* The same words the inspector's own header uses for the same span of time, because the two
-              columns report one run to either side of the same press. */}
-          <span>{translate(locale, "inspector.run")}</span>
+          {/* The reference's first control in this column: which span the numbers beside it count. */}
+          <label className="review-scope">
+            <select
+              aria-label={translate(locale, "review.scope")}
+              value={scope}
+              onChange={(e) => setScope(e.target.value as ReviewScope)}
+            >
+              <option value="lastTurn">{translate(locale, "review.scope.lastTurn")}</option>
+              <option value="all">{translate(locale, "review.scope.all")}</option>
+            </select>
+            <Icon name="chevronDown" size={12} />
+          </label>
           <span className="font-mono tabular-nums">
-            <span className="text-success">+{runDiff.added}</span>{" "}
-            <span className="text-danger">−{runDiff.removed}</span>
+            <span className="text-success">+{totals.added}</span>{" "}
+            <span className="text-danger">−{totals.removed}</span>
           </span>
         </div>
       )}
