@@ -431,18 +431,20 @@ export function changedFiles(rows: Row[]): (DiffStat & { path: string; hunks: Hu
 }
 
 /**
- * The pages this span's rows say the run opened, in the order it opened them.
+ * The addresses this span's rows say the run read something from, in the order it first read them:
+ * the pages a `fetch_url` opened, the files a `read_file` brought into the next round.
  *
- * The group has to be read off the rows for the same reason `changedFiles` is: `fetch_url` writes the
- * address into the row's subject, so a panel that listed anything else would disagree with the
- * transcript above it — including by advertising a page nobody fetched. Hence the status test: a call
- * the network policy refused, or one still in flight, is a row that says the run *asked*, not one that
- * says it read. Repeats fold to one entry, because a model that re-reads a page read one page.
+ * Both of the inspector's read groups are derived this way for the reason `changedFiles` is: the host
+ * writes the address into the row's own subject, so a panel that listed anything else would disagree
+ * with the transcript above it — including by advertising a page nobody fetched. Hence the status
+ * test: a call the network policy refused, or one still in flight, is a row that says the run *asked*,
+ * not one that says it read. Repeats fold to one entry, because a model that re-reads a file opened
+ * one file.
  */
-export function pagesRead(rows: Row[]): string[] {
+export function readSubjects(rows: Row[], kind: "webReading" | "readFile"): string[] {
   const seen = new Set<string>();
   for (const row of everyStep(rows)) {
-    if (row.kind !== "webReading" || row.status !== "ok" || !row.subject) continue;
+    if (row.kind !== kind || row.status !== "ok" || !row.subject) continue;
     seen.add(row.subject);
   }
   return [...seen];
@@ -689,7 +691,7 @@ export const FIXTURE_ROWS: Row[] = [
     collapsed: true,
     children: [
       { id: "f2a", kind: "thought", detail: "The catalog pins a fork-only engine." },
-      { id: "f2b", kind: "readFile", subject: "agent.rs" },
+      { id: "f2b", kind: "readFile", subject: "agent.rs", status: "ok" },
       {
         id: "f2c",
         kind: "editFile",
@@ -744,6 +746,15 @@ export const FIXTURE_ROWS: Row[] = [
     children: [
       { id: "f4a", kind: "terminal", detail: "cargo test -p smollm-core", status: "ok" },
       { id: "f4b", kind: "searchContent", detail: "\\.run\\(" },
+      // The read that found the line this batch then rewrote, naming a file the round also edits:
+      // opening a file is a source and changing it is a change, so the same path belongs in both of
+      // the inspector's lists, and this is the pair that shows the panel keeping them apart.
+      {
+        id: "f4b2",
+        kind: "readFile",
+        subject: "crates/smollm-core/src/transcript.rs",
+        status: "ok",
+      },
       { id: "f4c", kind: "editFile", subject: "crates/smollm-core/src/lib.rs", status: "running" },
       {
         id: "f4d",

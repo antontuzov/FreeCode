@@ -4,7 +4,7 @@ import { translate, type Locale } from "../i18n";
 import type { RunReport } from "../lib/ipc";
 import {
   changedFiles,
-  pagesRead,
+  readSubjects,
   reviewRows,
   useTranscript,
   type DiffStat,
@@ -30,10 +30,13 @@ const GROUPS: Group[] = [
   { key: "skills", icon: "skills" },
   { key: "artifact", icon: "artifact" },
   { key: "webReading", icon: "webReading" },
-  { key: "source", icon: "source" },
+  // The document glyph rather than a stack of them, because every row in this group is one file the
+  // run opened: the pair of path lists has to read as *read* against *changed* at a glance, which is
+  // what the two glyphs' shapes are for.
+  { key: "source", icon: "readFile" },
 ];
 
-type Item = { label: string; meta?: string; diff?: DiffStat; icon?: IconName };
+type Item = { label: string; meta?: string; diff?: DiffStat; icon?: IconName; path?: boolean };
 
 /**
  * The sites this build can name, and the sign each one gets on a row that says it was read. Only the
@@ -55,18 +58,19 @@ function hostMark(host: string): IconName | undefined {
 }
 
 /**
- * `?collapsed=<group keys>` starts named groups folded. Dev-only, like every other deep link here:
- * the fold is a control the reader has on screen, and this is the same press arriving from the URL,
- * which is what lets a capture reach the groups a full column pushes below the window.
+ * `?collapsed=<keys>` starts named sections folded — the five groups by key, and the run's own numbers
+ * as `run`. Dev-only, like every other deep link here: the fold is a control the reader has on screen,
+ * and this is the same press arriving from the URL, which is what lets a capture reach the sections a
+ * full column pushes below the window.
  */
 const SEEDED_FOLDED = new Set(
   (new URLSearchParams(window.location.search).get("collapsed") ?? "").split(","),
 );
 
 /**
- * `?fixture=1` only, for the four groups no loop in this build writes rows for yet — see the note in
- * state/transcript.ts about invented run output. The two groups a run *can* produce, `files` and
- * `webReading`, are read off the transcript in every mode, so what the panel lists and what the rows
+ * `?fixture=1` only, for the three groups no loop in this build writes rows for yet — see the note in
+ * state/transcript.ts about invented run output. The three a run *can* produce — `files`, `source` and
+ * `webReading` — are read off the transcript in every mode, so what the panel lists and what the rows
  * above it report stay one answer rather than two.
  */
 const FIXTURE_ITEMS: Record<string, Item[]> = {
@@ -76,7 +80,6 @@ const FIXTURE_ITEMS: Record<string, Item[]> = {
     { label: "tauri-desktop-native-verification" },
   ],
   artifact: [{ label: "README.md" }],
-  source: [{ label: "catalog/models.toml" }],
 };
 
 function SectionHeader({
@@ -108,8 +111,8 @@ function SectionHeader({
   );
 }
 
-/** A path split where it is worth keeping: the file name is what a changed-file row is scanned for, so
- * the directories above it are the part allowed to run out of room. */
+/** A path split where it is worth keeping: the file name is what both of the column's path lists are
+ * scanned for, so the directories above it are the part allowed to run out of room. */
 function FileLabel({ path }: { path: string }) {
   const dir = path.slice(0, path.lastIndexOf("/") + 1);
   return (
@@ -164,7 +167,7 @@ function Section({ group, items, locale }: { group: Group; items: Item[]; locale
                 <span className={`insp-chip ${group.round ? "round" : ""}`}>
                   <Icon name={item.icon ?? group.icon} size={14} />
                 </span>
-                {item.diff ? (
+                {item.diff || item.path ? (
                   <FileLabel path={item.label} />
                 ) : (
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
@@ -207,7 +210,7 @@ const rate = (value: number | null) => (value === null ? UNMEASURED : `${value.t
  * dash: the run is still the one they waited through, and it is not nothing.
  */
 function RunSection({ locale, run }: { locale: Locale; run: RunReport }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(!SEEDED_FOLDED.has("run"));
   const running = useTranscript((s) => s.running);
   const rows: [string, string][] = [
     [translate(locale, "inspector.run.generation"), rate(run.generatedPerSecond)],
@@ -306,22 +309,33 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
       })),
     [rows],
   );
-  // The pages come off the same span of rows as the files, for the same reason: `fetch_url` writes the
-  // address it opened into the row it leaves, so a group that listed anything else would tell the
-  // reader about a run the transcript above does not describe.
+  // The two read groups come off the same span of rows as the files, for the same reason: `fetch_url`
+  // writes the address it opened into the row it leaves, and `read_file` the path it brought into the
+  // next round, so a group that listed anything else would tell the reader about a run the transcript
+  // above does not describe. What a *source* is here is the run's own reading rather than the files a
+  // user attached: this build has no attachment path — the composer's add control says so on hover —
+  // so the honest occupant of the reference's Source group is what the run opened to answer.
   const pages = useMemo<Item[]>(
     () =>
-      pagesRead(reviewRows(rows, "lastTurn")).map((url) => {
+      readSubjects(reviewRows(rows, "lastTurn"), "webReading").map((url) => {
         const label = page(url);
         return { label, icon: hostMark(label.split("/")[0] ?? "") };
       }),
     [rows],
   );
+  const sources = useMemo<Item[]>(
+    () =>
+      readSubjects(reviewRows(rows, "lastTurn"), "readFile").map((path) => ({
+        label: path,
+        path: true,
+      })),
+    [rows],
+  );
   // The scripted groups fill in under the row-derived ones, which a fixture window therefore still
   // sees — and a real run does not, because it has no scripted rows to fill them from.
   const groups = useMemo<Record<string, Item[]>>(
-    () => ({ ...(fixture ? FIXTURE_ITEMS : {}), files, webReading: pages }),
-    [fixture, files, pages],
+    () => ({ ...(fixture ? FIXTURE_ITEMS : {}), files, source: sources, webReading: pages }),
+    [fixture, files, sources, pages],
   );
 
   return (
