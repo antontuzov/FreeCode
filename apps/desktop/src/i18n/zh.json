@@ -54,6 +54,8 @@
   "review.title": "审阅",
   "review.close": "返回运行报告",
   "review.empty": "还没有写入工作区的改动。",
+  "review.unmodifiedOne": "{{count}} 行未修改",
+  "review.unmodifiedMany": "{{count}} 行未修改",
   "transcript.title": "任务",
   "transcript.more": "任务选项",
   "transcript.empty": "没有正在运行的任务。请描述你要本地模型做什么。",

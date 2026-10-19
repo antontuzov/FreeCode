@@ -1124,6 +1124,14 @@ select.field-input {
   background: var(--code-bg);
   overflow-x: auto;
 }
+/* The stretch of the file no hunk printed, named between two hunks of one file so a jump in the
+ * gutter reads as an omission rather than as a change the counts above missed. */
+.diff-gap {
+  margin: 0 var(--space-3) var(--space-2);
+  font-size: var(--size-quiet);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
 .diff-line {
   display: grid;
   grid-template-columns: 3.5ch 1fr;

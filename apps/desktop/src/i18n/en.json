@@ -54,6 +54,8 @@
   "review.title": "Review",
   "review.close": "Back to the run report",
   "review.empty": "Nothing has been written to the workspace yet.",
+  "review.unmodifiedOne": "{{count}} unmodified line",
+  "review.unmodifiedMany": "{{count}} unmodified lines",
   "transcript.title": "Task",
   "transcript.more": "Task options",
   "transcript.empty": "No task running. Describe what you want the local model to do.",

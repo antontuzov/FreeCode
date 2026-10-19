@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 
 import { translate, type Locale } from "../i18n";
 import { useNav } from "../state/nav";
@@ -48,6 +48,40 @@ function numberHunk(hunk: Hunk): Line[] {
     next += 1;
     return { kind: "ctx", n, text: line.slice(1) };
   });
+}
+
+/**
+ * Each of a file's hunks, with the stretch of the file the block before it left off printing.
+ *
+ * The reference puts "99 unmodified lines" between two blocks so a jump in the gutter reads as an
+ * omission rather than as a deletion the count above missed; without it, a hunk ending on 220 followed
+ * by one starting on 258 looks like 38 lines vanished. Both ends of the stretch are the host's own
+ * numbers — the line the block stopped on and the line the next one starts on — so the figure is
+ * measured, never guessed. A block whose tail the result budget held back ends at a line nobody knows,
+ * so it announces no stretch: a wrong number here is worse than the missing one, because it is the
+ * kind a reader checks.
+ */
+function blocks(hunks: Hunk[]): { lines: Line[]; gap: number | null }[] {
+  const numbered = hunks.map(numberHunk);
+  return numbered.map((lines, i) => {
+    const prev = numbered[i - 1];
+    if (!prev) return { lines, gap: null };
+    const from = hunkEnd(prev);
+    const to = hunkStart(lines);
+    if (from === undefined || to === undefined) return { lines, gap: null };
+    return { lines, gap: to - from > 1 ? to - from - 1 : null };
+  });
+}
+
+/** The first line a block prints. A held line carries no number, so it cannot open one. */
+function hunkStart(lines: Line[]): number | undefined {
+  return lines.find((line) => line.n !== null)?.n ?? undefined;
+}
+
+/** The last line a block prints, or nothing when it cannot be trusted to have printed all of them. */
+function hunkEnd(lines: Line[]): number | undefined {
+  if (lines.some((line) => line.kind === "held")) return undefined;
+  return [...lines].reverse().find((line) => line.n !== null)?.n ?? undefined;
 }
 
 /**
@@ -126,15 +160,26 @@ export function Review({ locale }: { locale: Locale }) {
                   <span className="text-danger">−{file.removed}</span>
                 </span>
               </div>
-              {file.hunks.map((hunk, h) => (
-                <div key={h} className="review-hunk">
-                  {numberHunk(hunk).map((line, i) => (
-                    <div key={i} className={`diff-line diff-${line.kind}`}>
-                      <span className="diff-n">{line.n ?? ""}</span>
-                      <span className="diff-text">{line.text}</span>
-                    </div>
-                  ))}
-                </div>
+              {blocks(file.hunks).map((block, h) => (
+                <Fragment key={h}>
+                  {block.gap !== null && (
+                    <p className="diff-gap">
+                      {translate(
+                        locale,
+                        block.gap === 1 ? "review.unmodifiedOne" : "review.unmodifiedMany",
+                        { count: block.gap },
+                      )}
+                    </p>
+                  )}
+                  <div className="review-hunk">
+                    {block.lines.map((line, i) => (
+                      <div key={i} className={`diff-line diff-${line.kind}`}>
+                        <span className="diff-n">{line.n ?? ""}</span>
+                        <span className="diff-text">{line.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Fragment>
               ))}
             </section>
           ))

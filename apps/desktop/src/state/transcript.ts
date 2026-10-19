@@ -717,6 +717,28 @@ export const FIXTURE_ROWS: Row[] = [
         },
         status: "ok",
       },
+      {
+        id: "f4e",
+        kind: "editFile",
+        subject: "apps/desktop/src-tauri/src/agent.rs",
+        detail: "1 copy replaced",
+        // The same file written a second time in one run, as shot 06's batch does: one section with two
+        // hunks, and the stretch of the file between them named — the number a reader checks the
+        // gutter against.
+        diff: { added: 2, removed: 1 },
+        hunk: {
+          at: 262,
+          lines: [
+            " fn close_batch(app: &AppHandle, rows: &mut Vec<HostRow>, total: Option<DiffStat>) {",
+            "     rows.push(HostRow::batch_closed(total));",
+            '-    let _ = app.emit("run://round", rows.len());',
+            "+    let round = u32::try_from(rows.len()).unwrap_or(u32::MAX);",
+            '+    let _ = app.emit("run://round", round);',
+            " }",
+          ].join("\n"),
+        },
+        status: "ok",
+      },
     ],
   },
   // A refusal, as the load guard reports it, so the card can be looked at without uninstalling the
@@ -745,7 +767,7 @@ export const FIXTURE_ROWS: Row[] = [
  * a second source of truth computed from the rows — and it is *that* shape the rows' own hunks add up
  * to, so the pill, the sheet it opens and the transcript all describe one change.
  */
-export const FIXTURE_DIFF: RunDiff = { files: 2, added: 13, removed: 5 };
+export const FIXTURE_DIFF: RunDiff = { files: 2, added: 15, removed: 6 };
 
 /** The step pill `?fixture=1` shows beside it: one round closed of the four the host budgets. The
  * scripted rows carry one "Ran 3 tools" header, and this is the figure that header would have left
