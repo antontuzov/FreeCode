@@ -31,7 +31,9 @@ const GROUPS: { key: string; items: { id: Page; icon: IconName }[] }[] = [
     items: [
       { id: "appearance", icon: "wand" },
       { id: "voice", icon: "voice" },
-      { id: "agent", icon: "automations" },
+      // Not the sidebar's `automations`, which this page borrows nothing from: what is set here is
+      // what the agent may do to the machine, so the glyph is the one that means a boundary.
+      { id: "agent", icon: "shield" },
     ],
   },
   {

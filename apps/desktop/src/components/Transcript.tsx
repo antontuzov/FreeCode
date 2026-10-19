@@ -26,7 +26,7 @@ function StatusMark({ step }: { step: Step }) {
   if (step.notice) return <Icon name="warning" size={13} className="text-muted" />;
   if (step.status === "error" || step.status === "stopped")
     return <Icon name="warning" size={13} className="text-danger" />;
-  return <Icon name="review" size={13} className="text-accent-ink" />;
+  return <Icon name="check" size={13} className="text-accent-ink" />;
 }
 
 /**

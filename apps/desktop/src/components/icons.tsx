@@ -94,6 +94,10 @@ const PATHS = {
   copy: "M9 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2zM5 16a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2",
   context: "M4 4h16v16H4zM4 10h16M10 4v16",
   review: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11",
+  // The tick the reference puts at the head of every finished step row: a circle with the check
+  // inside it, drawn on the same 24 grid as `review`'s box so the two read as one family. They are
+  // not the same mark — the panel's square says "the run's changes", this says "this one is done".
+  check: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8.3 12.2l2.6 2.6 5-5.4",
   // The reference's outline glyph: one entry on a trunk, and the two it branches to. It is the tree a
   // diff folds to when the hunks are put away, so the boxes stand for the file names rather than for
   // files — `readFile`'s folded corner already owns that.
