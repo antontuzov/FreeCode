@@ -67,6 +67,14 @@ export type Refusal = { code: string; params: Record<string, string> };
 export type DiffStat = { added: number; removed: number };
 
 /**
+ * `smollm_core::transcript::Hunk`: one block of a change as the tool that made it wrote it. `lines` is
+ * the diff text — `+`, `-`, and the two context lines on either side — and `at` is the line of the
+ * file *before* the write that the first of them sits on, which is what lets the review number its
+ * gutter rather than guess where the block fell.
+ */
+export type Hunk = { at: number; lines: string };
+
+/**
  * What a run has changed so far, as the pill above the composer reads it. `files` is the host's count
  * of *distinct* paths, not the number of edit rows: a model that fixes one file four times changed one
  * file, and saying "4 files" would be a number nobody can check.
@@ -90,6 +98,12 @@ export type Step = {
   subject?: string;
   status?: StepStatus;
   diff?: DiffStat;
+  /**
+   * On an `editFile` row: the change as diff lines, exactly as the host handed them to the model. The
+   * review panel draws the run's edits from these rather than from the `DiffStat`, which counts lines
+   * but cannot say which ones.
+   */
+  hunk?: Hunk;
   /** For `toolBatch` and `running`: the rows nested underneath the header. */
   children?: Step[];
   /** Seconds elapsed, only meaningful on a `running` header. */
@@ -268,6 +282,7 @@ function hostRow(step: HostStep, summary?: string): Step {
     subject: step.detail || undefined,
     detail: summary,
     diff: step.diff ? { added: step.diff.linesAdded, removed: step.diff.linesRemoved } : undefined,
+    hunk: step.hunk ?? undefined,
     status: hostStatus(step.status),
   };
 }
@@ -341,9 +356,12 @@ function finishStep(rows: Row[], step: HostStep, summary: string): Row[] {
  * Read off the rows rather than off the run's total because the inspector names *which* files, and a
  * `DiffStat` carries a count of them, not their paths. The two agree by construction: the host writes
  * the row's numbers and its ledger off the same `Edit`, one path at a time.
+ *
+ * Each entry also carries the file's hunks, in the order the run wrote them: two edits to one file
+ * make two blocks of diff lines under one path rather than a merge no diff tool could produce.
  */
-export function changedFiles(rows: Row[]): (DiffStat & { path: string })[] {
-  const byPath = new Map<string, DiffStat>();
+export function changedFiles(rows: Row[]): (DiffStat & { path: string; hunks: Hunk[] })[] {
+  const byPath = new Map<string, { diff: DiffStat; hunks: Hunk[] }>();
   // A round's rows live under their "Ran N tools" header once the batch closes, so the walk goes one
   // level in: an edit that folded away is still a file the workspace lost.
   const every: Step[] = rows.flatMap((row) =>
@@ -354,11 +372,14 @@ export function changedFiles(rows: Row[]): (DiffStat & { path: string })[] {
     const path = row.subject;
     const seen = byPath.get(path);
     byPath.set(path, {
-      added: (seen?.added ?? 0) + row.diff.added,
-      removed: (seen?.removed ?? 0) + row.diff.removed,
+      diff: {
+        added: (seen?.diff.added ?? 0) + row.diff.added,
+        removed: (seen?.diff.removed ?? 0) + row.diff.removed,
+      },
+      hunks: row.hunk ? [...(seen?.hunks ?? []), row.hunk] : (seen?.hunks ?? []),
     });
   }
-  return [...byPath].map(([path, diff]) => ({ path, ...diff }));
+  return [...byPath].map(([path, entry]) => ({ path, ...entry.diff, hunks: entry.hunks }));
 }
 
 function reduce(rows: Row[], event: AgentEvent): Row[] {
@@ -604,7 +625,29 @@ export const FIXTURE_ROWS: Row[] = [
         id: "f2c",
         kind: "editFile",
         subject: "apps/desktop/src-tauri/src/agent.rs",
-        diff: { added: 29, removed: 12 },
+        // The row's `diff` and its `hunk` are the same change counted and written, so the pill above
+        // the composer and the review panel it opens cannot disagree. `?fixture=1` shows a shortened
+        // edit rather than a 29-line one for the same reason the host shortens one: a hunk is cut to
+        // the result budget, and the cut is what the panel has to survive.
+        diff: { added: 6, removed: 3 },
+        hunk: {
+          at: 214,
+          lines: [
+            " let mut rows = Vec::new();",
+            " let mut total: Option<DiffStat> = None;",
+            "-run_round(&call, &policy).await;",
+            "-rows.push(host_row(&outcome));",
+            "-state.note(&path);",
+            "+let outcome = dispatch(&call, &policy, &state).await;",
+            "+rows.push(host_row(&outcome).with_detail(&call.path));",
+            "+if let Some(edit) = outcome.edit {",
+            "+    total = Some(state.stage(&edit.path, edit.added, edit.removed));",
+            "+}",
+            "+close_batch(&app, &mut rows, total);",
+            " }",
+            " broadcast(&app, AgentEvent::ToolBatchClosed);",
+          ].join("\n"),
+        },
       },
     ],
   },
@@ -632,6 +675,23 @@ export const FIXTURE_ROWS: Row[] = [
         subject: "crates/smollm-core/src/events.rs",
         detail: "1 copy replaced",
         diff: { added: 7, removed: 2 },
+        hunk: {
+          at: 41,
+          lines: [
+            " pub enum AgentEvent {",
+            "     DiffStaged { diff: DiffStat },",
+            "-    ToolFinished { step: TranscriptStep, ok: bool },",
+            "-    RunFinished { elapsed_ms: u64 },",
+            "+    ToolFinished {",
+            "+        step: TranscriptStep,",
+            "+        outcome: ToolOutcome,",
+            "+    },",
+            "+    RunFinished {",
+            "+        elapsed_ms: u64,",
+            "+        total_diff: Option<DiffStat>,",
+            " }",
+          ].join("\n"),
+        },
         status: "ok",
       },
     ],
@@ -659,9 +719,10 @@ export const FIXTURE_ROWS: Row[] = [
 /**
  * The pill `?fixture=1` shows: the two edits the scripted rows above report, added up. It is written
  * out rather than derived, so the number here is the shape a real `DiffStaged` arrives with instead of
- * a second source of truth computed from the rows.
+ * a second source of truth computed from the rows — and it is *that* shape the rows' own hunks add up
+ * to, so the pill, the sheet it opens and the transcript all describe one change.
  */
-export const FIXTURE_DIFF: RunDiff = { files: 2, added: 36, removed: 14 };
+export const FIXTURE_DIFF: RunDiff = { files: 2, added: 13, removed: 5 };
 
 /** The step pill `?fixture=1` shows beside it: one round closed of the four the host budgets. The
  * scripted rows carry one "Ran 3 tools" header, and this is the figure that header would have left

@@ -1078,3 +1078,59 @@ select.field-input {
 .answer .hljs-tag {
   color: var(--text-muted);
 }
+
+/* ---- the run's review panel ------------------------------------------------------------------ */
+
+/* The change in the column shot 06 gives it: one block per file, its hunks as diff lines, a gutter of
+ * line numbers down the left. The bands are painted from the theme's own diff colours rather than a
+ * palette a diff viewer brings with it, so switching the interface style repaints a review that is
+ * already on screen. */
+.review-hunk {
+  margin: 0 var(--space-3) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  overflow-x: auto;
+}
+.diff-line {
+  display: grid;
+  grid-template-columns: 3.5ch 1fr;
+  gap: var(--space-3);
+  align-items: start;
+  /* Every line carries the border, transparent where nothing changed, so the code of a context line
+   * and of the added one under it start at the same column. */
+  border-left: 2px solid transparent;
+  padding-inline: var(--space-2) var(--space-3);
+  font-family: var(--font-family-code);
+  font-size: var(--size-code);
+  line-height: 1.6;
+  /* A removed or added line that happens to be empty carries no glyph to hold its row open. */
+  min-height: calc(1.6 * var(--size-code));
+}
+.diff-n {
+  position: sticky;
+  left: 0;
+  /* The count is the panel's addition; selecting the line should copy the line. */
+  user-select: none;
+  text-align: right;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  background: inherit;
+}
+.diff-text {
+  white-space: pre;
+}
+.diff-add {
+  border-left-color: var(--success);
+  background: var(--diff-added);
+}
+.diff-del {
+  border-left-color: var(--danger);
+  background: var(--diff-removed);
+}
+/* The line that says how much of the change the result budget held back. It is not a line of the file,
+ * so it gets no number and no band — an empty gutter cell is what keeps it out of the code's column. */
+.diff-held .diff-text {
+  color: var(--text-faint);
+  font-style: italic;
+}

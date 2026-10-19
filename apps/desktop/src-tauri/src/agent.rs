@@ -25,7 +25,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use smollm_config::Settings;
 use smollm_core::approvals::{evaluate, ApprovalDecision, Pending};
 use smollm_core::events::{AgentEvent, NoticeCode, ToolOutcome};
-use smollm_core::transcript::{tool_batch, DiffStat, StepKind, StepStatus, TranscriptStep};
+use smollm_core::transcript::{tool_batch, DiffStat, Hunk, StepKind, StepStatus, TranscriptStep};
 use smollm_llama::ToolCall;
 use smollm_tools::{execute, is_executable, SandboxPolicy};
 
@@ -133,11 +133,18 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
                         lines_removed: edit.removed,
                         files_changed: 1,
                     };
-                    (edit.path, diff)
+                    (
+                        edit.path,
+                        diff,
+                        Hunk {
+                            at: edit.hunk_at,
+                            lines: edit.hunk,
+                        },
+                    )
                 });
                 (
                     ToolOutcome {
-                        diff: staged.as_ref().map(|(_, diff)| *diff),
+                        diff: staged.as_ref().map(|(_, diff, _)| *diff),
                         ..ToolOutcome::ok(done.summary.clone())
                     },
                     done.content,
@@ -168,9 +175,10 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
     let mut total = None;
     // The executor reports a write's path and line counts together, so one tuple arm is the whole test
     // that this call changed the tree.
-    if let Some((path, diff)) = edited {
+    if let Some((path, diff, hunk)) = edited {
         row.diff = Some(diff);
         row.detail = path.clone();
+        row.hunk = Some(hunk);
         total = Some(app.state::<crate::chat::ChatState>().stage(
             &path,
             diff.lines_added,

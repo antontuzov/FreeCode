@@ -86,6 +86,14 @@ pub struct Edit {
     /// How many copies of `old_string` were replaced. More than one only when the call asked for
     /// `replace_all`, which is the difference between "fixed a line" and "renamed a symbol".
     pub occurrences: u32,
+    /// The change as diff lines — `+`, `−`, and the two lines of context on either side — without the
+    /// caption the model's copy carries, because the file it names is already this edit's `path`.
+    /// The same text the tool result quotes, so the review a window draws and the answer that wrote it
+    /// cannot disagree about what changed.
+    pub hunk: String,
+    /// The line [`Edit::hunk`] opens on, 1-based, in the file as it stood before the write. The window
+    /// needs it to number a diff's gutter; the model's copy gets it in the caption instead.
+    pub hunk_at: u32,
 }
 
 /// What one call produced: a clause for the transcript row and the text the model is handed.
@@ -491,11 +499,14 @@ fn edit_file(
     fs::write(&path, &edited).map_err(|e| io_error(tool, &label, &e))?;
 
     let (removed, added) = changed_lines(old, new);
+    let (at, hunk) = hunk(&text, old, new);
     let edit = Edit {
         path: relative(policy, &path),
         added: (added * times) as u32,
         removed: (removed * times) as u32,
         occurrences: times as u32,
+        hunk: hunk.clone(),
+        hunk_at: at as u32,
     };
     let summary = if times > 1 {
         format!("{times} copies replaced")
@@ -504,11 +515,8 @@ fn edit_file(
     };
     Ok(Executed {
         content: format!(
-            "Edited {} (+{} −{}): {summary}\n{}",
-            edit.path,
-            edit.added,
-            edit.removed,
-            hunk(&label, &text, old, new)
+            "Edited {} (+{} −{}): {summary}\n{label}, at line {at}:\n{hunk}",
+            edit.path, edit.added, edit.removed,
         ),
         summary,
         edit: Some(edit),
@@ -542,14 +550,17 @@ fn changed_lines(old: &str, new: &str) -> (usize, usize) {
     (before.len() - head - tail, after.len() - head - tail)
 }
 
-/// The change as the model sees it: the lines it took out and put back, with two of the file on either
-/// side, in the `+`/`−` shape a diff uses — and the same shared edges [`changed_lines`] cancels printed
-/// as context, so a hunk and the counts standing over it cannot disagree.
+/// The change as the diff lines it is drawn from: the lines it took out and put back, with two of the
+/// file on either side, in the `+`/`−` shape a diff uses — and the same shared edges [`changed_lines`]
+/// cancels printed as context, so a hunk and the counts standing over it cannot disagree.
+///
+/// Returns the 1-based line the hunk opens on with the body, because the caption the model's copy
+/// carries names that line and the window's row already names the file.
 ///
 /// Only the first change gets a hunk: a `replace_all` over forty copies would spend the whole result
 /// budget saying the same forty lines forty times. A hunk past the budget is cut, and says how much of
 /// itself the cut left out.
-fn hunk(label: &str, text: &str, old: &str, new: &str) -> String {
+fn hunk(text: &str, old: &str, new: &str) -> (usize, String) {
     let lines: Vec<&str> = text.lines().collect();
     let start = text
         .find(old)
@@ -559,7 +570,7 @@ fn hunk(label: &str, text: &str, old: &str, new: &str) -> String {
     let (head, tail) = shared_edges(&before, &after);
     let end = start + before.len();
 
-    let mut body: Vec<String> = vec![format!("{label}, at line {}:", start + 1)];
+    let mut body: Vec<String> = Vec::new();
     for i in start.saturating_sub(CTX_LINES)..(start + head) {
         body.push(format!(" {}", lines.get(i).copied().unwrap_or("")));
     }
@@ -593,7 +604,7 @@ fn hunk(label: &str, text: &str, old: &str, new: &str) -> String {
     if held > 0 {
         kept.push(format!("…{held} lines of the change are not shown."));
     }
-    kept.join("\n")
+    (start + 1, kept.join("\n"))
 }
 
 /// One file's matches, printed with their context merged between neighbours: a hit's line carries
@@ -1343,6 +1354,32 @@ mod tests {
             got.content,
             "Edited src/lib.rs (+1 −1): 1 copy replaced\nsrc/lib.rs, at line 2:\n one\n-two\n+TWO\n three"
         );
+    }
+
+    #[test]
+    fn the_edit_carries_the_same_hunk_the_model_was_shown_without_its_caption() {
+        let (_d, p) = plain();
+        let got = ran(
+            "edit_file",
+            &json!({ "path": "src/lib.rs", "old_string": "two", "new_string": "TWO" }),
+            &p,
+        )
+        .expect("an edit runs");
+        // The window's row already names the file and the line the caption counts, so the copy that
+        // crosses the boundary is the change alone — and it is the same text, not a second rendering
+        // of it, which is what keeps the review and the answer from disagreeing.
+        let content = got.content;
+        let edit = got.edit.unwrap();
+        assert_eq!(edit.hunk, " one\n-two\n+TWO\n three");
+        assert!(
+            content.ends_with(&format!("at line 2:\n{}", edit.hunk)),
+            "{content}"
+        );
+        // The gutter the window numbers its diff lines from. It names the *changed* line rather than
+        // the first printed one, which is what the caption says too — so the two cannot drift, and the
+        // panel steps back over its own context lines to find where the block starts.
+        assert_eq!(edit.hunk_at, 2);
+        assert!(content.contains(&format!("at line {}:\n", edit.hunk_at)));
     }
 
     #[test]

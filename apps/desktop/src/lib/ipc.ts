@@ -243,6 +243,13 @@ export type HostDiff = {
 };
 
 /**
+ * `smollm_core::transcript::Hunk`: one block of a change, as the tool that made it saw it. `at` is the
+ * line in the file before the write that `lines` opens on, 1-based, which is what lets the review
+ * panel number a diff gutter without re-deriving the position from the file it no longer matches.
+ */
+export type HostHunk = { at: number; lines: string };
+
+/**
  * `smollm_core::transcript::TranscriptStep`: one row as the host declares it.
  *
  * The host owns which row exists and what it measured; the catalog owns the words around it. `params`
@@ -259,6 +266,12 @@ export type HostStep = {
   detail: string;
   /** The lines this call cost, or null for a row that changed nothing. */
   diff: HostDiff | null;
+  /**
+   * `smollm_core::transcript::TranscriptStep::hunk`: the change as diff lines, on an `edit_file` row
+   * and on no other. It is the text the model was handed, not a second rendering of it, so the review
+   * a window draws cannot describe a different change than the answer that asked for it.
+   */
+  hunk: HostHunk | null;
   /** The registry id, which is what tells a generic "Ran tool" row which tool it ran. */
   toolId: string | null;
   collapsedByDefault: boolean;

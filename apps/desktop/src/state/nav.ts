@@ -13,6 +13,13 @@ export type View =
   | { kind: "knowledge"; model: string }
   | { kind: "extensions" };
 
+/**
+ * What the right-hand column is holding: the run's report, or the change it made. Shot 06 has the
+ * review in that column rather than under the answer, because a diff needs a code line's width and the
+ * transcript column cannot give one without shrinking the answer it describes.
+ */
+export type Panel = "inspector" | "review";
+
 /** Two views that paint the same thing are one view, so re-opening the surface you are standing on
  * cannot stack a copy of it behind you. */
 function keyOf(view: View): string {
@@ -35,9 +42,9 @@ function query(name: string): string | null {
 }
 
 /** The deep links the native captures go through (`?settings=model`, `?knowledge=<id>`,
- * `?extensions=1`, `?sidebar=collapsed`) seed the stack with the conversation underneath them, which
- * is where Esc from that capture would have gone. */
-function seed() {
+ * `?extensions=1`, `?sidebar=collapsed`, `?review=1`) seed the stack with the conversation underneath
+ * them, which is where Esc from that capture would have gone. */
+function seed(): { history: View[]; cursor: number; collapsed: boolean; panel: Panel } {
   const history: View[] = [{ kind: "chat" }];
   const settings = query("settings");
   const knowledge = query("knowledge");
@@ -49,6 +56,9 @@ function seed() {
     history,
     cursor: history.length - 1,
     collapsed: query("sidebar") === "collapsed",
+    // `?review=1` puts the change in the right column: the press that opens it is a click on the
+    // pill, which the native window cannot be given, so the panel would otherwise never be seen.
+    panel: query("review") === "1" ? "review" : "inspector",
   };
 }
 
@@ -57,6 +67,8 @@ type NavStore = {
   cursor: number;
   /** The sidebar's column folded away to its rail. */
   collapsed: boolean;
+  /** Which of the two reports the right column is holding. */
+  panel: Panel;
   /** Open a surface over the ones already on the stack. */
   push: (view: View) => void;
   /** Step back along the stack. Reports whether there was anything behind the current view, so the
@@ -65,6 +77,9 @@ type NavStore = {
   /** Step forward again. Same answer for the same reason: an arrow with nowhere to go is a no-op. */
   forward: () => boolean;
   toggleSidebar: () => void;
+  /** The diff pill and the panel's own close control are the same press seen from either side. */
+  toggleReview: () => void;
+  showInspector: () => void;
 };
 
 export const useNav = create<NavStore>((set, get) => ({
@@ -93,6 +108,8 @@ export const useNav = create<NavStore>((set, get) => ({
     return true;
   },
   toggleSidebar: () => set((s) => ({ collapsed: !s.collapsed })),
+  toggleReview: () => set((s) => ({ panel: s.panel === "review" ? "inspector" : "review" })),
+  showInspector: () => set({ panel: "inspector" }),
 }));
 
 export function currentView(s: NavStore): View {

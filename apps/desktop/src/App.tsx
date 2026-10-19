@@ -5,6 +5,7 @@ import { Inspector } from "./components/Inspector";
 import { Knowledge } from "./components/Knowledge";
 import { ModelStatus } from "./components/ModelStatus";
 import { Palette } from "./components/Palette";
+import { Review } from "./components/Review";
 import { Settings } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
@@ -35,6 +36,11 @@ export default function App() {
   const view = useNav(currentView);
   const push = useNav((s) => s.push);
   const back = useNav((s) => s.back);
+  // Which of the two reports the right column is holding, and the press that gives it back. The review
+  // is not on the navigation stack: it is the same column answering a different question, and a Back
+  // arrow that un-opened it would leave the conversation exactly as it was anyway.
+  const panel = useNav((s) => s.panel);
+  const showInspector = useNav((s) => s.showInspector);
   // `?search=<query>` opens the palette with that query already typed — the deep link the panel is
   // captured through, since the window takes no injected keystrokes and a search nobody can type
   // into is a search nobody can see.
@@ -155,8 +161,13 @@ export default function App() {
     // Twice closes it, because the second press is the user changing their mind.
     palette: () => setPaletteOpen((open) => !open),
     // Esc leaves a step of the history when there is one to leave and stops the run when the window is
-    // already back at the conversation. The stack knows both, so neither branch names a surface.
+    // already back at the conversation. The one control that means two things takes three in hand: a
+    // review panel the user opened is the nearest thing to close, and it is not on the stack.
     escape: () => {
+      if (panel === "review") {
+        showInspector();
+        return;
+      }
       if (!back() && running) void stop();
     },
   });
@@ -211,7 +222,14 @@ export default function App() {
         </div>
         <div className="flex flex-col">
           <ModelStatus locale={locale} />
-          <Inspector locale={locale} fixture={fixture} />
+          {/* One column, two reports: the run's numbers, or the change those numbers name. Shot 06 has
+              the diff here rather than under the answer, because a code line needs the width the
+              transcript would have to give up to show it. */}
+          {panel === "review" ? (
+            <Review locale={locale} />
+          ) : (
+            <Inspector locale={locale} fixture={fixture} />
+          )}
         </div>
       </div>
       {paletteOpen && (

@@ -153,6 +153,19 @@ impl DiffStat {
     }
 }
 
+/// One block of a change, as the tool that made it saw it: the diff lines, and the file line the
+/// first of them sits on.
+///
+/// The count and the text come from the same write, so a review panel can number its gutter without
+/// re-deriving anything — and without the caption the *model's* copy carries, which names the file
+/// this row already names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hunk {
+    pub at: u32,
+    pub lines: String,
+}
+
 /// One transcript row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -167,6 +180,12 @@ pub struct TranscriptStep {
     pub detail: String,
     #[serde(default)]
     pub diff: Option<DiffStat>,
+    /// The change a write row made, as diff lines and the line they open on. Only an `edit_file` row
+    /// carries one, and its text is what the model was handed rather than a second rendering of it, so
+    /// the review the window draws cannot describe a different change than the answer that asked for
+    /// it.
+    #[serde(default)]
+    pub hunk: Option<Hunk>,
     /// Set for tool rows: the registry id whose `title` the UI shows when there is no localized
     /// label.
     #[serde(default)]
@@ -183,6 +202,7 @@ impl TranscriptStep {
             status: StepStatus::Running,
             detail: String::new(),
             diff: None,
+            hunk: None,
             tool_id: None,
             // Reasoning rows and finished batches start collapsed, as in the reference shot.
             collapsed_by_default: matches!(kind, StepKind::Processed | StepKind::ToolBatch),

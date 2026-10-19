@@ -4,6 +4,7 @@ import { translate, type Locale } from "../i18n";
 import { toPictureDataUrl } from "../lib/image";
 import { shortcutLabel } from "../lib/shortcuts";
 import { useChat } from "../state/chat";
+import { useNav } from "../state/nav";
 import { useTranscript } from "../state/transcript";
 import { Icon } from "./icons";
 import { ModelPicker } from "./ModelPicker";
@@ -29,6 +30,10 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
   const error = useChat((s) => s.error);
+  // The diff pill and the right column's review are one control at either end of the same press, so
+  // the pill reads the column's state rather than holding its own copy of it.
+  const review = useNav((s) => s.panel) === "review";
+  const toggleReview = useNav((s) => s.toggleReview);
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<ApprovalMode>("ask");
   // The Coding control: whether the next prompt offers the workspace reads. It is per prompt rather
@@ -97,7 +102,21 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
             // distinct files, not the number of edit rows, and it moves while the run goes rather than
             // arriving once it ends — an agent that has changed six files is a different thing to
             // watch than one that has changed none.
-            <span className="inline-flex items-center gap-[var(--space-2)] rounded-[var(--radius-pill)] border border-line bg-elevated px-[var(--space-3)] py-1 text-fine text-muted">
+            //
+            // It is also the control that opens the change. Every write row carries the lines it wrote
+            // from the build that stages them, so a pill that counted a diff and could not show one
+            // would be a number the user has to go and find in the workspace themselves.
+            <button
+              type="button"
+              onClick={toggleReview}
+              aria-expanded={review}
+              title={translate(locale, review ? "composer.review.close" : "composer.review.open")}
+              className={`inline-flex items-center gap-[var(--space-2)] rounded-[var(--radius-pill)] border px-[var(--space-3)] py-1 text-fine transition-colors ${
+                review
+                  ? "border-accent-line bg-accent-soft text-fg"
+                  : "border-line bg-elevated text-muted hover:bg-hover hover:text-fg"
+              }`}
+            >
               <Icon name="review" size={13} />
               {translate(
                 locale,
@@ -110,7 +129,15 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
                 <span className="text-success">+{runDiff.added}</span>{" "}
                 <span className="text-danger">−{runDiff.removed}</span>
               </span>
-            </span>
+              {/* The one glyph that says which way this press goes: down opens, and the same control
+                  with the chevron turned is the one that closes. */}
+              <Icon
+                name="chevronDown"
+                size={12}
+                className={`disclosure-icon shrink-0 ${review ? "rotate-180" : ""}`}
+                aria-hidden
+              />
+            </button>
           )}
         </div>
       )}

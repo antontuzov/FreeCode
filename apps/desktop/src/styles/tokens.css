@@ -54,6 +54,10 @@
      hit padding, narrow enough to read as chrome rather than a second, emptier column. */
   --sidebar-rail-width: 44px;
   --inspector-width: 320px;
+  /* The review column, which stands in for the inspector while the run's change is on screen. Wider
+     than the inspector on purpose: a diff is read as a code line, and at 320px the gutter plus a
+     Rust indentation leaves nothing of the line to read. */
+  --review-width: 460px;
   /* The reading column. Task content and the composer share one width so the answer and the prompt
      that produced it line up; the Appearance page's "Content width" moves them together. */
   --content-width: 720px;
