@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { translate, type Locale } from "../i18n";
 import { useNav } from "../state/nav";
@@ -90,6 +90,36 @@ function hunkEnd(lines: Line[]): number | undefined {
   return [...lines].reverse().find((line) => line.n !== null)?.n ?? undefined;
 }
 
+/** Whether one printed line says what the find field asked for. Compared lower-case on both sides. */
+function says(text: string, needle: string): boolean {
+  return needle !== "" && text.toLowerCase().includes(needle);
+}
+
+/**
+ * A diff line with its matches painted.
+ *
+ * The text stays the host's own — the query never rewrites what the run wrote, only what stands out
+ * in it — so the same line the model was handed is still the line on screen. Split rather than
+ * replaced, because a `dangerouslySetInnerHTML` of a query the user typed is the bug, not the fix.
+ */
+function marked(text: string, needle: string): ReactNode {
+  if (needle === "") return text;
+  const lower = text.toLowerCase();
+  const out: ReactNode[] = [];
+  let from = 0;
+  for (let at = lower.indexOf(needle); at >= 0; at = lower.indexOf(needle, from)) {
+    out.push(text.slice(from, at));
+    out.push(
+      <mark key={at} className="diff-mark">
+        {text.slice(at, at + needle.length)}
+      </mark>,
+    );
+    from = at + needle.length;
+  }
+  out.push(text.slice(from));
+  return out;
+}
+
 /**
  * The run's change, in the column the reference gives it (shot 06), opened from the pill that counted
  * it.
@@ -139,7 +169,46 @@ export function Review({ locale }: { locale: Locale }) {
     setFoldAll(!foldAll);
     setExcept({});
   };
-  const toggleFile = (path: string) => setExcept((prev) => ({ ...prev, [path]: !isFolded(path) }));
+
+  // The reference's other header control: a query over the change itself. A run that touched six
+  // files puts a wall of hunks in this column, and what a reader does with a wall is look something
+  // in it for a line.
+  //
+  // Seeded from the URL for the reason `?outline=1` is — the field opens on a click the native
+  // window cannot be given, and a control nobody has seen rendered is a guess.
+  const [find, setFind] = useState(
+    () => new URLSearchParams(window.location.search).get("find") ?? "",
+  );
+  const [findOpen, setFindOpen] = useState(() => find !== "");
+  const needle = find.trim().toLowerCase();
+  const findField = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (findOpen) findField.current?.focus();
+  }, [findOpen]);
+
+  // One pass per rendered file: the blocks it prints, and how many of their lines the query says.
+  // Counted here rather than in the row because a file's own fold and the total beside the field are
+  // the same number, and two places working it out are two places that can disagree.
+  const sections = useMemo(
+    () =>
+      files.map((file) => {
+        const printed = blocks(file.hunks);
+        const hits = printed.reduce(
+          (n, block) => n + block.lines.filter((line) => says(line.text, needle)).length,
+          0,
+        );
+        return { file, printed, hits };
+      }),
+    [files, needle],
+  );
+  const matches = sections.reduce((n, section) => n + section.hits, 0);
+
+  // A query folds the files it found nothing in, and a fold the reader cannot open is a dead control,
+  // so the press still answers: an explicit `except` outranks both the outline switch and the query.
+  const foldedBy = (path: string, hits: number) =>
+    except[path] ?? (foldAll || (needle !== "" && hits === 0));
+  const toggleFile = (path: string, hits: number) =>
+    setExcept((prev) => ({ ...prev, [path]: !foldedBy(path, hits) }));
 
   // The file an edit row named, once the column is holding the change. Matching on the path rather
   // than on an index because the transcript and this list are two orderings of one set: the row was
@@ -172,6 +241,18 @@ export function Review({ locale }: { locale: Locale }) {
         {files.length > 0 && (
           <button
             type="button"
+            onClick={() => setFindOpen(!findOpen)}
+            aria-expanded={findOpen}
+            className="icon-btn"
+            aria-label={translate(locale, "review.find")}
+            title={translate(locale, "review.find")}
+          >
+            <Icon name="search" size={13} />
+          </button>
+        )}
+        {files.length > 0 && (
+          <button
+            type="button"
             onClick={toggleAll}
             aria-pressed={allFolded}
             className="icon-btn"
@@ -191,6 +272,45 @@ export function Review({ locale }: { locale: Locale }) {
           <Icon name="close" size={13} />
         </button>
       </header>
+
+      {findOpen && files.length > 0 && (
+        <div className="review-find-row">
+          <label className="field review-find">
+            <Icon name="search" size={14} />
+            <input
+              ref={findField}
+              className="field-input"
+              type="search"
+              value={find}
+              placeholder={translate(locale, "review.find")}
+              aria-label={translate(locale, "review.find")}
+              onChange={(e) => setFind(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Escape") return;
+                // One press, one thing. The window's own Esc handler closes a review panel, so
+                // without this the press that empties the field also throws the change out of the
+                // column, and the second press the user has to make is one they did not ask for.
+                e.stopPropagation();
+                setFind("");
+                setFindOpen(false);
+              }}
+            />
+          </label>
+          {/* The count is the field's own answer, so it sits beside it rather than in the header's
+              totals, which count lines added and removed and would read as a third number. */}
+          {needle === "" ? null : matches === 0 ? (
+            <span className="text-fine text-faint">
+              {translate(locale, "review.noMatch", { query: find.trim() })}
+            </span>
+          ) : (
+            <span className="text-fine text-muted tabular-nums">
+              {translate(locale, matches === 1 ? "review.matchOne" : "review.matchMany", {
+                count: matches,
+              })}
+            </span>
+          )}
+        </div>
+      )}
 
       {files.length > 0 && (
         <div className="flex shrink-0 items-center gap-[var(--space-3)] border-b border-line px-[var(--space-4)] py-[var(--space-2)] text-fine text-muted">
@@ -219,8 +339,8 @@ export function Review({ locale }: { locale: Locale }) {
             {translate(locale, "review.empty")}
           </p>
         ) : (
-          files.map((file) => {
-            const folded = isFolded(file.path);
+          sections.map(({ file, printed, hits }) => {
+            const folded = foldedBy(file.path, hits);
             return (
               <section
                 key={file.path}
@@ -231,7 +351,7 @@ export function Review({ locale }: { locale: Locale }) {
                     and opens rather than a caption above one. */}
                 <button
                   type="button"
-                  onClick={() => toggleFile(file.path)}
+                  onClick={() => toggleFile(file.path, hits)}
                   aria-expanded={!folded}
                   className="review-file-head flex w-full items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left"
                 >
@@ -259,7 +379,7 @@ export function Review({ locale }: { locale: Locale }) {
                   </span>
                 </button>
                 {!folded &&
-                  blocks(file.hunks).map((block, h) => (
+                  printed.map((block, h) => (
                     <Fragment key={h}>
                       {block.gap !== null && (
                         <p className="diff-gap">
@@ -274,7 +394,7 @@ export function Review({ locale }: { locale: Locale }) {
                         {block.lines.map((line, i) => (
                           <div key={i} className={`diff-line diff-${line.kind}`}>
                             <span className="diff-n">{line.n ?? ""}</span>
-                            <span className="diff-text">{line.text}</span>
+                            <span className="diff-text">{marked(line.text, needle)}</span>
                           </div>
                         ))}
                       </div>

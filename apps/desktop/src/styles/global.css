@@ -1185,6 +1185,28 @@ select.field-input {
   pointer-events: none;
   color: var(--text-faint);
 }
+/* The find row under the header. The field takes the row's width and the count beside it takes only
+ * what it needs, because a query that matched nothing has to be readable in full. */
+.review-find-row {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) var(--space-4);
+}
+.review-find {
+  flex: 1;
+  min-width: 0;
+}
+/* A match is painted, not described: the line's own text stays the host's. `--accent-soft` is the
+ * fill the reference promotes a selection with, and `--accent-ink` is the only ink the contrast
+ * contract allows standing on that fill — the browser's own yellow `mark` would be neither. */
+.diff-mark {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-radius: var(--radius-sm);
+}
 .diff-line {
   display: grid;
   grid-template-columns: 3.5ch 1fr;
