@@ -397,6 +397,12 @@ details[open] > summary .disclosure-icon {
   color: var(--text-muted);
   font-size: var(--size-quiet);
 }
+/* The one Settings section whose content is prose rather than rows. `.card` carries no padding of its
+ * own because every row it has held supplied its own, so unrowded text has to borrow a row's inset or
+ * it sits against the border. */
+.diag-notices {
+  padding: var(--space-4);
+}
 /* A row's own admission that this build saves the choice and does not act on it. It rides one step
  * down the ink ladder from the description under it, which is the same distance the description sits
  * below the title — the page has one ladder, and an admission is not the loudest thing on a row. */

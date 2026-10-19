@@ -17,10 +17,11 @@ import {
 import { Icon, type IconName } from "./icons";
 import { MASCOT_TILES, launchTile } from "./BrandMark";
 import { has, translate, type Locale } from "../i18n";
-import { formatBytes } from "../lib/bytes";
+import { formatBytes, formatMemory } from "../lib/bytes";
 import {
   ipc,
   type Accent,
+  type DiagnosticsReport,
   type SettingsDoc,
   type StorageArea,
   type StorageReport,
@@ -37,6 +38,7 @@ const PAGE_IDS = [
   "reasoning",
   "shortcuts",
   "storage",
+  "diagnostics",
 ] as const;
 type Page = (typeof PAGE_IDS)[number];
 
@@ -61,7 +63,13 @@ const GROUPS: { key: string; items: { id: Page; icon: IconName }[] }[] = [
   },
   // Its own group because it sets nothing: this page answers a question about the machine, which is
   // not a preference, and filing it under Model would imply a control that is not there.
-  { key: "machine", items: [{ id: "storage", icon: "storage" }] },
+  {
+    key: "machine",
+    items: [
+      { id: "storage", icon: "storage" },
+      { id: "diagnostics", icon: "pulse" },
+    ],
+  },
 ];
 
 /**
@@ -133,6 +141,19 @@ const CONTROLS: Record<Page, string[]> = {
   ],
   shortcuts: ["shortcutNewTask", "shortcutPalette", "shortcutSettings", "shortcutEscape"],
   storage: ["storageWeights", "storageEngine", "storageSessions", "storageFree"],
+  diagnostics: [
+    "diagVersion",
+    "diagSystem",
+    "diagRoot",
+    "diagBackend",
+    "diagChip",
+    "diagMemory",
+    "diagGpuMemory",
+    "diagSimd",
+    "diagModel",
+    "diagEngine",
+    "diagPacking",
+  ],
 };
 
 const STYLES: { id: Accent; label: string }[] = [
@@ -354,6 +375,8 @@ function Page({
       return <Shortcuts t={t} />;
     case "storage":
       return <Storage t={t} />;
+    case "diagnostics":
+      return <Diagnostics locale={locale} t={t} />;
   }
 }
 
@@ -1069,5 +1092,181 @@ function Storage({ t }: { t: T }) {
         </Row>
       </Section>
     </>
+  );
+}
+
+/**
+ * Which machine this is, and which build is running on it.
+ *
+ * The second page in the group that sets nothing, and the one that answers the question the status
+ * card cannot: not "may I run" but "what are these numbers". Every figure comes from the same
+ * assembly the card reads, so the two surfaces cannot disagree about one probe, and the notices the
+ * card folds behind a disclosure are printed here in full — a page whose whole job is reporting has
+ * nothing to fold. Values are rendered into the DOM rather than held in a parallel list because the
+ * copy control below takes what is on the screen, in the language on the screen; a report that
+ * drifted from the page that produced it would be the worst kind of wrong.
+ */
+function Diagnostics({ locale, t }: { locale: Locale; t: T }) {
+  const [report, setReport] = useState<DiagnosticsReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
+  const page = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let live = true;
+    void ipc
+      .diagnosticsReport()
+      .then((found) => {
+        if (live) setReport(found);
+      })
+      .catch((e: unknown) => {
+        if (live) setError(String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // The same beat the fence copy uses: the label states a fact about the pasteboard, so it holds
+  // long enough to read and then stops claiming anything.
+  useEffect(() => {
+    if (copied === "idle") return;
+    const id = window.setTimeout(() => setCopied("idle"), 1800);
+    return () => window.clearTimeout(id);
+  }, [copied]);
+
+  if (error) {
+    return (
+      <p
+        role="alert"
+        className="rounded-[var(--radius-md)] border border-danger px-[var(--space-3)] py-[var(--space-2)] text-quiet text-danger"
+      >
+        {t("diagnostics.failed", { error })}
+      </p>
+    );
+  }
+  // This is the probe the status card pays at launch, so it is not instant on a machine with gigabytes
+  // of weights to stat.
+  if (!report) return <p className="text-muted">{t("diagnostics.reading")}</p>;
+
+  const row = (key: string, text: string) => (
+    <Row key={key} title={t(`row.${key}`)} description={t(`row.${key}.desc`)}>
+      {/* `data-fact` is the hook the copy control below reads this figure back off the DOM by, not a
+       * style: the figure's own classes are the Storage page's. */}
+      <span
+        data-fact="true"
+        className="max-w-[60%] break-words text-right font-mono tabular-nums text-quiet text-fg"
+      >
+        {text}
+      </span>
+    </Row>
+  );
+  // A path is not a figure. It goes where the Storage page puts its paths — in the row's own
+  // description, which is left-aligned and wraps on its own terms — rather than in the trailing
+  // slot, where a 60-character directory breaks into an orphaned letter.
+  const pathRow = (key: string, path: string) => (
+    <Row key={key} title={t(`row.${key}`)} description={path} />
+  );
+
+  // The unchecked ones are marked here rather than hidden: this is the surface a user reads before
+  // pasting the report into a bug thread, and a caveat about another machine is still a caveat about
+  // the pin, which is what the thread is about.
+  const notices = [
+    ...(report.blocker
+      ? [
+          `${translate(locale, `blocker.${report.blocker.code}.title`)} — ${report.blocker.technical}`,
+        ]
+      : []),
+    ...report.warnings,
+    ...report.uncheckedWarnings.map((w) => `${w} (${t("diag.unverified")})`),
+  ];
+
+  async function copy() {
+    const root = page.current;
+    if (!root || !report) return;
+    // Read back what rendered, in the order it rendered: the page and the pasteboard are then one
+    // text by construction rather than two lists that happen to agree today.
+    const facts = [...root.querySelectorAll<HTMLElement>(".card-row")].map((r) => {
+      const label = r.querySelector(".row-title")?.textContent?.trim() ?? "";
+      // A row's value is its figure, or — for the one row whose value is a path — the description the
+      // path is rendered in.
+      const figure =
+        r.querySelector('[data-fact="true"]')?.textContent?.trim() ||
+        r.querySelector(".row-desc")?.textContent?.trim() ||
+        "";
+      return `${label}: ${figure}`;
+    });
+    try {
+      await ipc.copyText(
+        [
+          `${t("diag.heading", { version: report.appVersion })} · ${new Date().toLocaleString()}`,
+          ...facts,
+          ...notices,
+        ].join("\n"),
+      );
+      setCopied("done");
+    } catch (reason) {
+      // The host's reason is about the pasteboard; the label has already said the copy did not happen.
+      console.warn("copy failed", reason);
+      setCopied("failed");
+    }
+  }
+
+  return (
+    <div ref={page}>
+      <Section label={t("section.diagBuild")} description={t("section.diagBuild.desc")}>
+        {row("diagVersion", report.appVersion)}
+        {row("diagSystem", report.system)}
+        {pathRow("diagRoot", report.root)}
+      </Section>
+
+      <Section label={t("section.diagMachine")} description={t("section.diagMachine.desc")}>
+        {row("diagBackend", report.backend)}
+        {row("diagChip", report.chip ?? t("row.diagChip.none"))}
+        {row("diagMemory", formatMemory(report.totalRamBytes))}
+        {row(
+          "diagGpuMemory",
+          report.gpuRamBytes === null
+            ? t("row.diagGpuMemory.shared")
+            : formatMemory(report.gpuRamBytes),
+        )}
+        {row("diagSimd", report.simd ?? t("row.diagSimd.none"))}
+      </Section>
+
+      <Section label={t("section.diagRun")} description={t("section.diagRun.desc")}>
+        {row("diagModel", `${report.model} · ${report.repoId}`)}
+        {row("diagEngine", report.engineInstalled ? report.engineTag : t("row.diagEngine.missing"))}
+        {row("diagPacking", `${report.packing} · ${report.sizeGb.toFixed(2)} GB`)}
+      </Section>
+
+      <Section label={t("section.diagNotices")} description={t("section.diagNotices.desc")}>
+        <div className="diag-notices">
+          {notices.length === 0 ? (
+            <p className="text-quiet text-muted">{t("diag.nothing")}</p>
+          ) : (
+            <ul className="flex flex-col gap-[var(--space-2)]">
+              {notices.map((notice) => (
+                <li key={notice} className="text-quiet text-warning">
+                  {notice}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Section>
+
+      <button
+        type="button"
+        onClick={() => void copy()}
+        className="mt-[var(--space-4)] inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-[var(--space-3)] py-1 text-quiet text-muted hover:bg-hover hover:text-fg"
+      >
+        <Icon name="copy" size={13} />
+        {copied === "done"
+          ? t("diag.copied")
+          : copied === "failed"
+            ? t("diag.copyFailed")
+            : t("diag.copy")}
+      </button>
+    </div>
   );
 }

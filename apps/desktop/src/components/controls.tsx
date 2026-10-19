@@ -37,7 +37,9 @@ export function Row({
    * document it saves is the same one a later build will render — but the row does not get to imply
    * an effect it does not have. */
   inert?: string;
-  children: ReactNode;
+  /** Absent on a row whose only answer is its description — a directory has no trailing figure to
+   * draw, and emptying the slot for it is what keeps the path from breaking into an orphaned letter. */
+  children?: ReactNode;
 }) {
   return (
     <div className="card-row">

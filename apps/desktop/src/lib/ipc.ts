@@ -600,6 +600,30 @@ export type StorageReport = {
   root: string;
 };
 
+/** Mirrors `diagnostics::Report` — the machine and the build, not the settings. */
+export type DiagnosticsReport = {
+  appVersion: string;
+  system: string;
+  backend: string;
+  /** What the GPU probe named, when it reached one. */
+  chip: string | null;
+  totalRamBytes: number;
+  /** Absent on unified-memory machines, where `totalRamBytes` is also what the GPU sees. */
+  gpuRamBytes: number | null;
+  /** The vector set an x86 probe settled on; null where the question is not asked. */
+  simd: string | null;
+  root: string;
+  engineTag: string;
+  engineInstalled: boolean;
+  model: string;
+  repoId: string;
+  packing: string;
+  sizeGb: number;
+  warnings: string[];
+  uncheckedWarnings: string[];
+  blocker: ModelStatus["blocked"];
+};
+
 export const ipc = {
   modelStatus: () => invoke<ModelStatus>("model_status"),
   /** Every model and packing the catalog pins, with the ones on this machine marked. */
@@ -609,6 +633,8 @@ export const ipc = {
   /** The three directories this app writes into, measured from the files on disk, plus the room the
    * volume has left. The walk is over gigabytes, so the page asks once and shows what comes back. */
   storageReport: () => invoke<StorageReport>("storage_report"),
+  /** Which machine this is and which build is on it, assembled by the same probe the status card reads. */
+  diagnosticsReport: () => invoke<DiagnosticsReport>("diagnostics_report"),
   /** Fetch and unpack the pinned fork engine. Progress arrives on `onEngineInstall`. */
   installEngine: () => invoke<InstallOutcome>("install_engine"),
   onEngineInstall: (onProgress: (progress: EngineInstallProgress) => void): Promise<() => void> =>

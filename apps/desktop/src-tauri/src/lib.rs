@@ -10,6 +10,7 @@ mod appearance;
 mod brand;
 mod chat;
 mod clipboard;
+mod diagnostics;
 mod engine;
 mod extensions;
 mod knowledge;
@@ -79,6 +80,19 @@ async fn storage_report(app: AppHandle) -> Result<storage::Report, String> {
     tauri::async_runtime::spawn_blocking(move || storage::Report::build(&root, &settings))
         .await
         .map_err(|e| format!("storage report failed: {e}"))?
+}
+
+/// The Diagnostics page: which machine this is and which build is running on it. Assembled the same
+/// way `model_status` is, so the two surfaces cannot report different figures for one probe.
+#[tauri::command]
+async fn diagnostics_report(app: AppHandle) -> Result<diagnostics::Report, String> {
+    let (root, settings) = root_and_settings(&app)?;
+    let version = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        diagnostics::Report::build(&root, &settings, &version)
+    })
+    .await
+    .map_err(|e| format!("diagnostics report failed: {e}"))?
 }
 
 #[tauri::command]
@@ -234,6 +248,8 @@ pub fn run() {
             extensions_inventory,
             // What this app has put on the machine, and what the machine has left.
             storage_report,
+            // Which machine that is, and which build is running on it.
+            diagnostics_report,
             install_engine,
             download_weights,
             load_appearance,

@@ -8,7 +8,16 @@ import { readFileSync } from "node:fs";
 
 const SETTINGS = "apps/desktop/src/components/Settings.tsx";
 const CATALOG = "apps/desktop/src/i18n/en.json";
-const PAGE_IDS = ["appearance", "voice", "agent", "model", "reasoning", "shortcuts", "storage"];
+const PAGE_IDS = [
+  "appearance",
+  "voice",
+  "agent",
+  "model",
+  "reasoning",
+  "shortcuts",
+  "storage",
+  "diagnostics",
+];
 
 const source = readFileSync(SETTINGS, "utf8");
 const catalog = JSON.parse(readFileSync(CATALOG, "utf8"));
