@@ -70,9 +70,11 @@ Bonsai 1.7B — and the download happens in the app.
   hostname resolves and again on every redirect, and the result capped both on the wire and in
   characters. DNS rebinding remains the residual risk of reading arbitrary URLs at all, which is why the
   whole module sits behind that one switch.
-- **Approvals.** The dial in Settings decides whether a call runs, asks, or is refused, and the
-  Extensions page computes each tool's answer with the same engine the loop uses mid-run, so the page
-  cannot tell a friendlier story than the agent acts.
+- **Approvals.** The mode the next run is built with — the composer's pill and Settings → Agent both
+  edit the same value, which the host re-reads when a prompt is sent. A call it refuses comes back as a
+  blocked row naming the policy. Nothing asks: this build has no prompt a run could wait on, so the mode
+  named "Ask every time" runs nothing. The Extensions page computes each tool's answer with the same
+  engine the loop uses mid-run, so the page cannot tell a friendlier story than the agent acts.
 
 ## Where things live
 

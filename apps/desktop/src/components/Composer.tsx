@@ -1,27 +1,33 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
 import { toPictureDataUrl } from "../lib/image";
+import type { ApprovalMode } from "../lib/ipc";
 import { shortcutLabel } from "../lib/shortcuts";
 import { useChat } from "../state/chat";
 import { useNav } from "../state/nav";
+import { useSettings } from "../state/settings";
 import { useTranscript } from "../state/transcript";
 import { Icon } from "./icons";
 import { ModelPicker } from "./ModelPicker";
 
-const APPROVAL_MODES = ["auto", "ask", "plan"] as const;
-type ApprovalMode = (typeof APPROVAL_MODES)[number];
+/**
+ * The three modes a press of the dial cycles through, in order. `custom` is deliberately absent: it is
+ * a per-tool table only Settings can fill, so a press leaves that mode rather than landing in it.
+ */
+const DIAL: ApprovalMode[] = ["auto_approve", "ask_always", "plan_only"];
 
 /** `?coding=1` stands in for the press of the Coding control the native window cannot be given, so the
  * control's on state — and the tool rows it earns — can be looked at in the real app. */
 const CODING_SEEDED = new URLSearchParams(window.location.search).get("coding") === "1";
 
 /**
- * The composer's approval selector is the agent loop's permission dial, so its default is the
- * conservative one and every mode is named out loud rather than shown as an icon the user has to
- * decode. The loop does read the approval document now — a call the policy refuses comes back as a
- * blocked row — but this control does not write it, so pressing it changes nothing, and it says so on
- * hover rather than pretending to.
+ * The composer's approval selector is the agent loop's permission dial, and it edits the one value the
+ * loop reads: `approvals.mode` in the settings the host loads when a prompt is sent, which is the same
+ * document the Settings page writes. A call the mode refuses comes back as a blocked row naming the
+ * policy, so the label has to be exact — and this build has no prompt for a call to wait on, which
+ * means the mode that would ask refuses instead. Hover says so per mode, because "Ask every time" that
+ * refused everything would be a worse surprise than naming it.
  */
 export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel: () => void }) {
   const running = useTranscript((s) => s.running);
@@ -35,7 +41,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   const review = useNav((s) => s.panel) === "review";
   const toggleReview = useNav((s) => s.toggleReview);
   const [draft, setDraft] = useState("");
-  const [mode, setMode] = useState<ApprovalMode>("ask");
+  const mode = useSettings((s) => s.doc?.approvals.mode);
   // The Coding control: whether the next prompt offers the workspace reads. It is per prompt rather
   // than per conversation, because each round costs the context window a tool result, and that is a
   // price the user agrees to one question at a time rather than once per chat.
@@ -66,6 +72,23 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
       // suppresses and the user reads as the button having stopped working.
       if (picker.current) picker.current.value = "";
     }
+  };
+
+  // The dial names a value the host owns, so it is read at launch rather than after the first press:
+  // a pill that held nothing until the Settings page was opened would be a control with no state.
+  useEffect(() => {
+    const store = useSettings.getState();
+    if (!store.loaded) void store.load();
+  }, []);
+
+  // A press writes the same document the Settings page edits, and the host reads it when the next
+  // prompt is sent — so the run already on screen is unaffected, and the one after it is not.
+  const cycleApproval = async () => {
+    if (!useSettings.getState().loaded) await useSettings.getState().load();
+    const current = useSettings.getState().doc?.approvals.mode ?? "auto_approve";
+    // `custom` is not in the cycle, so its index is -1 and the next press lands on the first mode.
+    const next = DIAL[(DIAL.indexOf(current) + 1) % DIAL.length] ?? "auto_approve";
+    await useSettings.getState().update((doc) => void (doc.approvals.mode = next));
   };
 
   const submit = () => {
@@ -243,19 +266,17 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           </button>
           <button
             type="button"
-            onClick={() =>
-              setMode(
-                (m) =>
-                  APPROVAL_MODES[(APPROVAL_MODES.indexOf(m) + 1) % APPROVAL_MODES.length] ?? "ask",
-              )
-            }
-            // The dial works and the label changes; what it dials into does not answer differently
-            // yet, and a control that quietly rewrites its own name would claim otherwise.
-            title={translate(locale, "composer.approve.inert")}
+            onClick={() => void cycleApproval()}
+            // Until the host's value arrives the pill names the control rather than guessing at what it
+            // holds, the way the model pill carries its own title before the engine's answer does.
+            title={translate(
+              locale,
+              mode ? `composer.approve.${mode}` : "settings.row.approvalMode",
+            )}
             className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-fine text-muted hover:bg-hover hover:text-fg"
           >
             <Icon name="review" size={13} />
-            {translate(locale, `composer.approve.${mode}`)}
+            {translate(locale, mode ? `settings.opt.${mode}` : "settings.section.approvals")}
             <Icon name="chevronDown" size={12} />
           </button>
 
