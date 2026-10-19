@@ -44,7 +44,13 @@ function query(name: string): string | null {
 /** The deep links the native captures go through (`?settings=model`, `?knowledge=<id>`,
  * `?extensions=1`, `?sidebar=collapsed`, `?review=1`) seed the stack with the conversation underneath
  * them, which is where Esc from that capture would have gone. */
-function seed(): { history: View[]; cursor: number; collapsed: boolean; panel: Panel } {
+function seed(): {
+  history: View[];
+  cursor: number;
+  collapsed: boolean;
+  panel: Panel;
+  reviewFile: string | null;
+} {
   const history: View[] = [{ kind: "chat" }];
   const settings = query("settings");
   const knowledge = query("knowledge");
@@ -59,6 +65,9 @@ function seed(): { history: View[]; cursor: number; collapsed: boolean; panel: P
     // `?review=1` puts the change in the right column: the press that opens it is a click on the
     // pill, which the native window cannot be given, so the panel would otherwise never be seen.
     panel: query("review") === "1" ? "review" : "inspector",
+    // `?file=<path>` is the same device for the jump an edit row's chip does: the panel opens scrolled
+    // to that file, which is the only proof the two columns are wired to each other.
+    reviewFile: query("file"),
   };
 }
 
@@ -69,6 +78,9 @@ type NavStore = {
   collapsed: boolean;
   /** Which of the two reports the right column is holding. */
   panel: Panel;
+  /** The file the review column was asked to show, and which it scrolls to when it does. Cleared by
+   * either way out of the column, so a jump is not replayed on a panel the reader already looked at. */
+  reviewFile: string | null;
   /** Open a surface over the ones already on the stack. */
   push: (view: View) => void;
   /** Step back along the stack. Reports whether there was anything behind the current view, so the
@@ -80,6 +92,9 @@ type NavStore = {
   /** The diff pill and the panel's own close control are the same press seen from either side. */
   toggleReview: () => void;
   showInspector: () => void;
+  /** An edit row's file chip: the column switches to the change and opens on that file, because one
+   * press that lands on the section is the answer to what was clicked. */
+  openReviewAt: (path: string) => void;
 };
 
 export const useNav = create<NavStore>((set, get) => ({
@@ -109,7 +124,8 @@ export const useNav = create<NavStore>((set, get) => ({
   },
   toggleSidebar: () => set((s) => ({ collapsed: !s.collapsed })),
   toggleReview: () => set((s) => ({ panel: s.panel === "review" ? "inspector" : "review" })),
-  showInspector: () => set({ panel: "inspector" }),
+  showInspector: () => set({ panel: "inspector", reviewFile: null }),
+  openReviewAt: (path) => set({ panel: "review", reviewFile: path }),
 }));
 
 export function currentView(s: NavStore): View {

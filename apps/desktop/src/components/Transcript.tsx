@@ -72,12 +72,20 @@ function RefusalRow({ step, locale }: { step: Step; locale: Locale }) {
   );
 }
 
+/** The path chip a tool row carries. It reads the same whether it is a label or a press, because a
+ * control that looked different from its own caption would be a second thing to learn. */
+const CHIP = "rounded-[var(--radius-sm)] bg-sunken px-1.5 py-0.5 font-mono text-micro text-muted";
+
 function StepRow({ step, locale }: { step: Step; locale: Locale }) {
   // The host says which rows start folded over their children, and a finished round is the one that
   // needs it: its calls stand on screen while they run and fold under "Ran 8 tools" the moment they are
   // all in, which is what keeps a long run one skimmable line per round rather than a wall of reads.
   const [open, setOpen] = useState(!step.collapsed);
   const hasChildren = !!step.children?.length;
+  const openReviewAt = useNav((s) => s.openReviewAt);
+  // Only an edit this window holds the diff for can be jumped to. A row whose hunk the result budget
+  // never carried would open a panel with nothing scrolled into view, which is a control that lies.
+  const jumpFile = step.kind === "editFile" && step.hunk ? step.subject : undefined;
   // A notice's line is its catalog sentence with the run's own numbers in it; every other row's line
   // is the detail the host gave it.
   const text = stepText(locale, step);
@@ -130,11 +138,21 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
           <StatusMark step={step} />
         )}
         <span className="text-quiet font-medium text-fg">{stepLabel(locale, step)}</span>
-        {step.subject && (
-          <code className="rounded-[var(--radius-sm)] bg-sunken px-1.5 py-0.5 font-mono text-micro text-muted">
-            {step.subject}
-          </code>
-        )}
+        {step.subject &&
+          (jumpFile ? (
+            // The chip is the file, and the file is what the review column is keyed by: pressing it
+            // answers the question the row already raised — what did this one actually change.
+            <button
+              type="button"
+              onClick={() => openReviewAt(jumpFile)}
+              title={translate(locale, "transcript.edit.jump")}
+              className={`${CHIP} cursor-pointer hover:bg-sunken hover:text-fg`}
+            >
+              {step.subject}
+            </button>
+          ) : (
+            <code className={CHIP}>{step.subject}</code>
+          ))}
         {step.diff && (
           <span className="font-mono text-micro">
             <span className="text-success">+{step.diff.added}</span>{" "}

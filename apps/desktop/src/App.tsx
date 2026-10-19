@@ -220,7 +220,13 @@ export default function App() {
           />
           <StatusBar locale={locale} />
         </div>
-        <div className="flex flex-col">
+        {/* The column owns its width, not either report inside it: both are the same column's turn, and
+            a height the pair has to share is one constraint the reports should not each re-declare. */}
+        <div
+          className={`flex min-h-0 shrink-0 flex-col ${
+            panel === "review" ? "w-[var(--review-width)]" : "w-[var(--inspector-width)]"
+          }`}
+        >
           <ModelStatus locale={locale} />
           {/* One column, two reports: the run's numbers, or the change those numbers name. Shot 06 has
               the diff here rather than under the answer, because a code line needs the width the

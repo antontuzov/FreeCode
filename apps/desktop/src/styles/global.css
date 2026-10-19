@@ -365,6 +365,12 @@ details[open] > summary .disclosure-icon {
   animation: checkpoint-flash 1.4s var(--ease-standard);
 }
 
+/* The file an edit row's chip jumped to, for the same beat: the column scrolled, and the section it
+ * landed on is the one the press asked about. */
+.review-file[data-flash="true"] {
+  animation: checkpoint-flash 1.4s var(--ease-standard);
+}
+
 @keyframes checkpoint-flash {
   from {
     background: var(--accent-soft);
@@ -803,7 +809,8 @@ select.field-input {
   .row-enter,
   .disclosure-panel,
   .turn-anchor[data-flash="true"],
-  .card-row[data-flash="true"] {
+  .card-row[data-flash="true"],
+  .review-file[data-flash="true"] {
     animation: none;
   }
 }

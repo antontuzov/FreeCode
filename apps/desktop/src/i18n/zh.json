@@ -309,6 +309,7 @@
   "transcript.step.blocked": "已阻止",
   "transcript.diff.fileChanged": "已更改 {{count}} 个文件",
   "transcript.diff.filesChanged": "已更改 {{count}} 个文件",
+  "transcript.edit.jump": "在“审阅”中查看此改动",
   "notice.effort-not-supported": "{{model}} 支持的推理强度为 {{accepted}}；已保存的选项 “{{chosen}}” 不在其中，因此本次回复使用 “{{sent}}”。可在“设置 › 推理”中更改。",
   "notice.engine-restarted": "引擎在两次运行之间停止了，正在重新启动（第 {{attempt}} 次，共 {{max}} 次）。它最后几行：\n{{log}}",
   "notice.tool-call-without-tools": "模型请求调用工具（{{name}}）。发送这条提示时输入区的“编码”开关是关的，因此没有读取任何文件，答案完全来自模型。按下这个开关再问一次，才会真正查看工作区。",

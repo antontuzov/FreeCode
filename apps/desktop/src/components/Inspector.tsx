@@ -261,7 +261,7 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
   return (
     <aside
       aria-label={translate(locale, "inspector.title")}
-      className="flex h-full w-[var(--inspector-width)] shrink-0 flex-col overflow-y-auto border-l border-line bg-bg"
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto border-l border-line bg-bg"
     >
       {run ? <RunSection locale={locale} run={run} /> : <UnmeasuredSection locale={locale} />}
       {GROUPS.map((group) => (

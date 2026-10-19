@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
 import { useNav } from "../state/nav";
@@ -120,11 +120,28 @@ export function Review({ locale }: { locale: Locale }) {
     (acc, file) => ({ added: acc.added + file.added, removed: acc.removed + file.removed }),
     { added: 0, removed: 0 },
   );
+  const reviewFile = useNav((s) => s.reviewFile);
+  const body = useRef<HTMLDivElement>(null);
+
+  // The file an edit row named, once the column is holding the change. Matching on the path rather
+  // than on an index because the transcript and this list are two orderings of one set: the row was
+  // written when the tool ran, and a file the run wrote twice folds both of its hunks under one path.
+  useEffect(() => {
+    if (!reviewFile || !body.current) return;
+    const hit = [...body.current.querySelectorAll<HTMLElement>("[data-file]")].find(
+      (section) => section.dataset.file === reviewFile,
+    );
+    if (!hit) return;
+    hit.scrollIntoView({ block: "start" });
+    hit.dataset.flash = "true";
+    const id = window.setTimeout(() => delete hit.dataset.flash, 1400);
+    return () => window.clearTimeout(id);
+  }, [reviewFile, files]);
 
   return (
     <aside
       aria-label={translate(locale, "review.title")}
-      className="flex h-full w-[var(--review-width)] shrink-0 flex-col overflow-hidden border-l border-line bg-bg"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden border-l border-line bg-bg"
     >
       <header className="flex shrink-0 items-center gap-[var(--space-2)] border-b border-line px-[var(--space-3)] py-[var(--space-2)]">
         <Icon name="review" size={14} />
@@ -162,14 +179,18 @@ export function Review({ locale }: { locale: Locale }) {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={body} className="min-h-0 flex-1 overflow-y-auto">
         {files.length === 0 ? (
           <p className="px-[var(--space-4)] py-[var(--space-3)] text-fine text-faint">
             {translate(locale, "review.empty")}
           </p>
         ) : (
           files.map((file) => (
-            <section key={file.path} className="border-b border-line/60">
+            <section
+              key={file.path}
+              data-file={file.path}
+              className="review-file border-b border-line/60"
+            >
               <div className="flex items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)]">
                 <span className="insp-chip">
                   <Icon name="editFile" size={13} />

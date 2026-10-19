@@ -768,6 +768,49 @@ export const FIXTURE_ROWS: Row[] = [
         },
         status: "ok",
       },
+      {
+        id: "f4f",
+        kind: "editFile",
+        subject: "crates/smollm-core/src/transcript.rs",
+        detail: "1 copy replaced",
+        // The third file of the round, and the one that gives the panel a section below the section a
+        // jump lands on: a diff with two short sections cannot show a scroll arriving anywhere, because
+        // there is nothing under it to scroll past.
+        diff: { added: 12, removed: 4 },
+        hunk: {
+          at: 88,
+          lines: [
+            " pub struct TranscriptStep {",
+            "     pub kind: StepKind,",
+            "-    pub detail: Option<String>,",
+            "-    pub subject: Option<String>,",
+            "-    pub diff: Option<DiffStat>,",
+            "-    pub hunk: Option<String>,",
+            "+    /// The host's line for this row, already measured: the catalog never re-counts it.",
+            "+    pub detail: Option<String>,",
+            "+    /// The path the row touched, so a reader can jump from the run to the file.",
+            "+    pub subject: Option<String>,",
+            "+    /// The change counted, and the same change written out.",
+            "+    pub diff: Option<DiffStat>,",
+            "+    pub hunk: Option<String>,",
+            "+    /// Whether the row starts folded over its children.",
+            "+    pub collapsed: bool,",
+            "+    /// What the run worked around, on the footing of the answer it did not stop.",
+            "+    pub notice: Option<Notice>,",
+            "+    /// The engine's own words, behind a refusal's disclosure.",
+            "+    pub technical: Option<String>,",
+            "     pub status: StepStatus,",
+            " }",
+            "",
+            " impl TranscriptStep {",
+            "     pub fn notice(code: impl Into<String>, params: Params) -> Self {",
+            "         Self {",
+            "             kind: StepKind::Blocked,",
+            "             notice: Some(Notice {",
+          ].join("\n"),
+        },
+        status: "ok",
+      },
     ],
   },
   // A refusal, as the load guard reports it, so the card can be looked at without uninstalling the
@@ -791,13 +834,13 @@ export const FIXTURE_ROWS: Row[] = [
 ];
 
 /**
- * The pill `?fixture=1` shows: the two edits the last turn's rows report, added up. It is written out
+ * The pill `?fixture=1` shows: the three edits the last turn's rows report, added up. It is written out
  * rather than derived, so the number here is the shape a real `DiffStaged` arrives with instead of a
  * second source of truth computed from the rows — and it is *that* shape the rows of one turn add up
  * to, so the pill, the review panel's last-turn scope and the transcript all describe one change. The
  * panel's other scope counts the earlier turn's edit as well, which is the point of having two.
  */
-export const FIXTURE_DIFF: RunDiff = { files: 2, added: 9, removed: 3 };
+export const FIXTURE_DIFF: RunDiff = { files: 3, added: 21, removed: 7 };
 
 /** The step pill `?fixture=1` shows beside it: one round closed of the four the host budgets. The
  * scripted rows carry one "Ran 3 tools" header, and this is the figure that header would have left

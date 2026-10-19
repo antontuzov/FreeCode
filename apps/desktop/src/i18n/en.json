@@ -309,6 +309,7 @@
   "transcript.step.blocked": "Blocked",
   "transcript.diff.fileChanged": "{{count}} file changed",
   "transcript.diff.filesChanged": "{{count}} files changed",
+  "transcript.edit.jump": "Show this change in Review",
   "notice.effort-not-supported": "{{model}} accepts reasoning effort {{accepted}}; the saved choice \"{{chosen}}\" is not among them, so this server replies at \"{{sent}}\". Settings › Reasoning can change it.",
   "notice.engine-restarted": "The engine stopped between runs, so it is being started again (restart {{attempt}} of {{max}}). Its last lines:\n{{log}}",
   "notice.tool-call-without-tools": "The model asked for a tool ({{name}}). This prompt went out with the composer's Coding control off, so nothing was read and the answer is from the model alone. Press it and ask again to have the workspace actually looked at.",
