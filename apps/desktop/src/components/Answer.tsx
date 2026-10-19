@@ -23,6 +23,7 @@ import remarkMath from "remark-math";
 
 import { translate, type Locale } from "../i18n";
 import { rehypeCodeLines } from "../lib/codeLines";
+import { fenceLanguage, rehypeFenceLanguage } from "../lib/fenceLanguage";
 import { ipc } from "../lib/ipc";
 import { ExternalLink } from "./ExternalLink";
 import { Icon } from "./icons";
@@ -67,7 +68,7 @@ function CodeFence({ children, locale }: { children: ReactNode; locale: Locale }
   useEffect(() => () => window.clearTimeout(reset.current), []);
 
   const first = (Array.isArray(children) ? children[0] : children) as Fenced | undefined;
-  const lang = /language-([\w-]+)/.exec(first?.props?.className ?? "")?.[1];
+  const lang = fenceLanguage(first?.props?.className);
 
   async function copy() {
     if (!box.current) return;
@@ -91,8 +92,8 @@ function CodeFence({ children, locale }: { children: ReactNode; locale: Locale }
   return (
     <div className="answer-code" ref={box}>
       <div className="answer-code-tools">
-        {/* Named even when the fence did not say: `detect` filled it in from the content, and the
-            chip reports which of the two it was. */}
+        {/* Only a fence the model named gets a chip; `detect`'s guess colours the block but says
+            nothing the answer claimed, so it stays unlabelled. */}
         {lang && <span className="answer-code-lang">{lang}</span>}
         <button
           type="button"
@@ -137,6 +138,9 @@ export function Answer({
       <Markdown
         remarkPlugins={[remarkMath]}
         rehypePlugins={[
+          // Before the highlighter, because `detect` writes its guess onto the node as a
+          // `language-*` class, and after it runs a named fence and a guessed one look identical.
+          rehypeFenceLanguage,
           [rehypeHighlight, { detect: true, ignoreMissing: true }],
           // After the highlighter, because it is the one that folds the snippet into a single span;
           // the line split reads that span's newlines and keeps each token's class with both halves.
