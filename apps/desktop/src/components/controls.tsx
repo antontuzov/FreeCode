@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import { Icon, type IconName } from "./icons";
 import type { ShortcutDoc } from "../lib/ipc";
+import { shortcutChips } from "../lib/shortcuts";
 
 export function Section({
   label,
@@ -185,13 +186,7 @@ export function ShortcutChips({
    * put the smallest text in the app back under the contrast floor. */
   hint?: string;
 }) {
-  const chips = [
-    shortcut.cmd && "⌘",
-    shortcut.ctrl && "⌃",
-    shortcut.alt && "⌥",
-    shortcut.shift && "⇧",
-    shortcut.key.toUpperCase(),
-  ].filter((c): c is string => Boolean(c));
+  const chips = shortcutChips(shortcut);
   return (
     <span className="flex items-center gap-1" title={hint} aria-disabled={hint ? true : undefined}>
       {chips.map((c) => (

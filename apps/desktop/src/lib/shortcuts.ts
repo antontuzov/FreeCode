@@ -25,21 +25,33 @@ export const SHORTCUTS: Record<ShortcutId, ShortcutDoc> = {
   escape: { cmd: false, shift: false, alt: false, ctrl: false, key: "Escape" },
 };
 
-/** The key as the user would have to press it, modifiers first. */
-export function shortcutLabel(id: ShortcutId): string {
-  const s = SHORTCUTS[id];
-  // The shell states the platform when it paints the window, so a Windows build reads `Ctrl+N`
-  // rather than a Mac glyph the keyboard there has no key for.
+/** Whether this window's primary modifier is the Mac key, as the shell stated it when it painted. */
+function primaryIsCommand(): boolean {
   const platform = document.documentElement.dataset.platform;
-  const mac = platform !== "win32" && platform !== "linux";
-  const modifiers = [
-    s.cmd && (mac ? "⌘" : "Ctrl"),
-    s.ctrl && (mac ? "⌃" : "Ctrl"),
-    s.alt && (mac ? "⌥" : "Alt"),
-    s.shift && (mac ? "⇧" : "Shift"),
-  ].filter((m): m is string => Boolean(m));
-  const key = s.key === "Escape" ? "Esc" : s.key.toUpperCase();
-  return mac ? [...modifiers, key].join("") : [...modifiers, key].join("+");
+  return platform !== "win32" && platform !== "linux";
+}
+
+/**
+ * The binding as its user would press it, one entry per key, modifiers first.
+ *
+ * Every spelling of a key this app prints comes through here — the chip row a control shows and the
+ * single string a tooltip carries are built from the same list. They used to be two rules, and the
+ * chip rule had no platform in it, so a Windows build read `⌘` for a key its keyboard has no key for.
+ */
+export function shortcutChips(shortcut: ShortcutDoc): string[] {
+  const mac = primaryIsCommand();
+  return [
+    shortcut.cmd && (mac ? "⌘" : "Ctrl"),
+    shortcut.ctrl && (mac ? "⌃" : "Ctrl"),
+    shortcut.alt && (mac ? "⌥" : "Alt"),
+    shortcut.shift && (mac ? "⇧" : "Shift"),
+    shortcut.key === "Escape" ? "Esc" : shortcut.key.toUpperCase(),
+  ].filter((chip): chip is string => Boolean(chip));
+}
+
+/** The whole key as one string: `⌘K` where the primary modifier is ⌘, `Ctrl+K` where it is not. */
+export function shortcutLabel(id: ShortcutId): string {
+  return shortcutChips(SHORTCUTS[id]).join(primaryIsCommand() ? "" : "+");
 }
 
 export function matches(event: KeyboardEvent, id: ShortcutId): boolean {

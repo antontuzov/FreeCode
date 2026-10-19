@@ -25,11 +25,19 @@ import {
   type StorageArea,
   type StorageReport,
 } from "../lib/ipc";
-import { shortcutLabel } from "../lib/shortcuts";
+import { SHORTCUTS, shortcutLabel } from "../lib/shortcuts";
 import { useModel } from "../state/model";
 import { useSettings } from "../state/settings";
 
-const PAGE_IDS = ["appearance", "voice", "agent", "model", "reasoning", "storage"] as const;
+const PAGE_IDS = [
+  "appearance",
+  "voice",
+  "agent",
+  "model",
+  "reasoning",
+  "shortcuts",
+  "storage",
+] as const;
 type Page = (typeof PAGE_IDS)[number];
 
 const GROUPS: { key: string; items: { id: Page; icon: IconName }[] }[] = [
@@ -41,6 +49,7 @@ const GROUPS: { key: string; items: { id: Page; icon: IconName }[] }[] = [
       // Not the sidebar's `automations`, which this page borrows nothing from: what is set here is
       // what the agent may do to the machine, so the glyph is the one that means a boundary.
       { id: "agent", icon: "shield" },
+      { id: "shortcuts", icon: "keyboard" },
     ],
   },
   {
@@ -122,6 +131,7 @@ const CONTROLS: Record<Page, string[]> = {
     "repetitionPenalty",
     "systemPrompt",
   ],
+  shortcuts: ["shortcutNewTask", "shortcutPalette", "shortcutSettings", "shortcutEscape"],
   storage: ["storageWeights", "storageEngine", "storageSessions", "storageFree"],
 };
 
@@ -340,6 +350,8 @@ function Page({
       return <Model doc={doc} set={set} t={t} />;
     case "reasoning":
       return <Reasoning doc={doc} set={set} t={t} />;
+    case "shortcuts":
+      return <Shortcuts t={t} />;
     case "storage":
       return <Storage t={t} />;
   }
@@ -786,6 +798,33 @@ function Agent({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
         </Row>
       </Section>
     </>
+  );
+}
+
+/**
+ * The keys this window answers, and nothing else.
+ *
+ * There is no control on this page because there is no preference behind one: the four bindings are
+ * the table `lib/shortcuts.ts` holds, which is the same table the window's listener reads and the
+ * script that fails the build when a printed key has no handler. A row here is therefore a promise
+ * the app keeps, and a fifth row would need a binding before it could exist.
+ */
+function Shortcuts({ t }: { t: T }) {
+  return (
+    <Section label={t("section.keys")} description={t("section.keys.desc")}>
+      {(
+        [
+          ["shortcutNewTask", "newTask"],
+          ["shortcutPalette", "palette"],
+          ["shortcutSettings", "settings"],
+          ["shortcutEscape", "escape"],
+        ] as const
+      ).map(([key, id]) => (
+        <Row key={key} title={t(`row.${key}`)} description={t(`row.${key}.desc`)}>
+          <ShortcutChips shortcut={SHORTCUTS[id]} />
+        </Row>
+      ))}
+    </Section>
   );
 }
 
