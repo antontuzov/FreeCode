@@ -5,8 +5,8 @@
 //! tile showed a tree. The pick therefore moved here, and the window asks the host for the number
 //! rather than rolling its own.
 //!
-//! Settings › Appearance can pin one of the twelve instead of rolling, which is the same number
-//! stored in the settings document; the roll is what happens when nothing is pinned.
+//! Settings › Appearance can pin one of the set instead of rolling, which is the same number stored
+//! in the settings document; the roll is what happens when nothing is pinned.
 //!
 //! Two things this cannot promise, said rather than quietly skipped:
 //!
@@ -16,18 +16,21 @@
 //! * A tile chosen at every launch cannot be baked into a bundle, so Finder's icon for the app on
 //!   disk stays the drawn bonsai. Only the running app's Dock tile is the mascot.
 //!
-//! The tiles are 256px round PNGs on transparent margin — the Dock clips nothing, so a square tile
+//! The ducks are 256px round PNGs on transparent margin — the Dock clips nothing, so a square tile
 //! would show black corners among the app's own icons — and they are compiled into the binary rather
 //! than bundled as resources: `NSImage` decodes the bytes it is handed, so no path has to be resolved
 //! at runtime. Round costs alpha and alpha costs PNG: the twelve are 1.1 MB here where the same
-//! crops as opaque JPEG weighed 151 KB.
+//! crops as opaque JPEG weighed 151 KB. The two brand tiles are rounded squares rather than discs,
+//! which is the shape macOS itself uses, and they weigh 52 KB between them because the sheet they are
+//! cut from is one mark on one ground rather than twelve photographs.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// The twelve tiles, numbered the way `?mascot=<1..12>` names them, cut from the sheet by
-/// `scripts/render-mascot-logos.py` alongside the webp set the webview loads.
+/// The tiles, numbered the way `?mascot=<1..14>` names them: the twelve ducks, cut from the sheet by
+/// `scripts/render-mascot-logos.py` alongside the webp set the webview loads, and the brand mark on
+/// the two grounds a Dock can have, cut by `scripts/render-brand-tiles.py`.
 const TILES: &[&[u8]] = &[
     include_bytes!("../mascots/mascot-01.png"),
     include_bytes!("../mascots/mascot-02.png"),
@@ -41,6 +44,8 @@ const TILES: &[&[u8]] = &[
     include_bytes!("../mascots/mascot-10.png"),
     include_bytes!("../mascots/mascot-11.png"),
     include_bytes!("../mascots/mascot-12.png"),
+    include_bytes!("../mascots/mascot-13.png"),
+    include_bytes!("../mascots/mascot-14.png"),
 ];
 
 /// The mascot for this process, one-based so the number the Dock was drawn from is the number the
@@ -84,9 +89,9 @@ fn rolled() -> usize {
 static PINNED: AtomicUsize = AtomicUsize::new(0);
 
 /// Say what the stored settings pin, before [`init_script`] runs and again after every save. A
-/// number outside the twelve is discarded rather than trusted — a settings file edited by hand must
-/// not be able to name a tile that does not ship, and the same rule keeps a future document with
-/// more than twelve tiles from crashing a build that has fewer.
+/// number outside the set is discarded rather than trusted — a settings file edited by hand must not
+/// be able to name a tile that does not ship, and the same rule keeps a future document with more
+/// tiles than this build from crashing one that has fewer.
 pub fn prefer(pinned: Option<usize>) {
     PINNED.store(
         pinned
@@ -150,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_wears_one_of_the_twelve_and_never_changes_its_mind() {
+    fn a_launch_wears_one_of_the_tiles_and_never_changes_its_mind() {
         let _serial = lock();
         prefer(None);
         let first = tile();
@@ -187,13 +192,44 @@ mod tests {
     }
 
     #[test]
-    fn a_number_outside_the_twelve_is_not_a_tile() {
+    fn a_number_outside_the_set_is_not_a_tile() {
         let _serial = lock();
         prefer(None);
         let rolled = tile();
-        for bogus in [0, 13, 4096] {
+        for bogus in [0, TILES.len() + 1, 4096] {
             prefer(Some(bogus));
             assert_eq!(tile(), rolled, "{bogus} names nothing that ships");
+        }
+    }
+
+    /// The page's set is a glob of `../src/assets/mascots/*.webp` and this one is the list above, so
+    /// the two are kept in step by nothing but this. A tile added on one side is a Dock that wears a
+    /// face the window cannot show, and a number that means two different pictures depending on which
+    /// side of the bridge it is read on — which is the exact thing `tile()` exists to prevent.
+    #[test]
+    fn the_page_globs_the_same_tiles_the_host_ships() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/assets/mascots");
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|why| panic!("the page's tiles are the directory {dir:?}: {why}"))
+            .filter_map(|entry| {
+                let name = entry.ok()?.file_name().to_string_lossy().into_owned();
+                name.ends_with(".webp").then_some(name)
+            })
+            .collect();
+        names.sort();
+        assert_eq!(
+            names.len(),
+            TILES.len(),
+            "the page globs {} tiles where the host ships {}",
+            names.len(),
+            TILES.len()
+        );
+        for (index, name) in names.iter().enumerate() {
+            assert_eq!(
+                name,
+                &format!("mascot-{:02}.webp", index + 1),
+                "the sorted glob has to number the way TILES is written"
+            );
         }
     }
 }

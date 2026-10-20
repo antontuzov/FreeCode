@@ -16,7 +16,9 @@ import { useAppearance } from "../state/appearance";
  * `MascotMark` spends the other trade on purpose. Twelve hand-drawn duck heads, pasted exactly as
  * they are, because a mascot re-tinted to the accent stops being a mascot — it is art on its own
  * ground, ringed and cut to a circle, and it is the face the app shows when it runs. The drawn mark
- * stays what carries the name.
+ * stays what carries the name. Beside the ducks it wears the two brand tiles — the mark on a white
+ * ground and on a black one — because the tile goes on a Dock the operating system paints either way
+ * and the ducks are painted on black and cannot answer both.
  */
 export function BrandMark({ size = 44 }: { size?: number }) {
   return (
@@ -46,10 +48,11 @@ export function BrandMark({ size = 44 }: { size?: number }) {
   );
 }
 
-/** Cut from the sheet by `scripts/render-mascot-logos.py`. The set is the directory rather than a
- * list of imports, so a thirteenth duck is a file dropped beside the others — though the host keeps
- * its own twelve in `brand.rs`, because a Dock tile is bytes handed to `NSImage` and wants a line
- * there too. */
+/** Cut from the sheet by `scripts/render-mascot-logos.py`, plus the brand mark on the two grounds
+ * `scripts/render-brand-tiles.py` draws. The set is the directory rather than a list of imports, so a
+ * thirteenth tile is a file dropped beside the others — though the host keeps its own list in
+ * `brand.rs`, because a Dock tile is bytes handed to `NSImage` and wants a line there too. The test
+ * beside that list is what keeps the two in step. */
 const mascotTiles = import.meta.glob<string>("../assets/mascots/*.webp", {
   eager: true,
   query: "?url",
@@ -60,16 +63,16 @@ const mascots: string[] = Object.keys(mascotTiles)
   .sort()
   .flatMap((path) => mascotTiles[path] ?? []);
 
-/** The twelve, in the order both this page and `brand.rs` number them, for the picker that has to
+/** The whole set, in the order both this page and `brand.rs` number it, for the picker that has to
  * show every one of them rather than only the worn one. */
 export const MASCOT_TILES = mascots;
 
-/** One duck per run, and it is the host's duck: the same picture goes on the Dock the moment the app
+/** One tile per run, and it is the host's tile: the same picture goes on the Dock the moment the app
  * opens (`brand.rs`), so the window that asks would otherwise be wearing a different face than the
  * tile beside it.
  *
- * `?mascot=<1..12>` names the tile instead, for the same reason the other deep links exist: a pick
- * nobody can re-ask for is a set of twelve that only one of ever got looked at. */
+ * `?mascot=<1..14>` names the tile instead, for the same reason the other deep links exist: a pick
+ * nobody can re-ask for is a set nobody has all looked at. */
 const urlTile = (() => {
   const forced = Number(new URLSearchParams(window.location.search).get("mascot"));
   return Number.isInteger(forced) && forced >= 1 && forced <= mascots.length ? forced : null;

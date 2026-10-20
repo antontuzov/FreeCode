@@ -472,7 +472,7 @@ function Appearance({
             />
           ))}
         </div>
-        {/* The twelve tiles already ship and the app already wears one of them; this adds only the
+        {/* The tiles already ship and the app already wears one of them; this adds only the
             choice, in the same group the reference puts its own icon control in. Pinning is host-side
             on purpose — the Dock tile is drawn by the host, which cannot see what the page decides —
             so the number travels through the settings document and the host repaints the tile the

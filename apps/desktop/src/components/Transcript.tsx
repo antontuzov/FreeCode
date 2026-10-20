@@ -433,7 +433,7 @@ export function Transcript({
         >
           {rows.length === 0 ? (
             // The one screen in the app with nothing on it, so it is the one carrying the name — and
-            // the mascot, one of twelve drawn ducks picked once per run. The duck is a raster and
+            // the mascot, one of the drawn tiles picked once per run. A tile is a raster and
             // takes no accent, which is why it is the picture above the name rather than the mark
             // beside it: that one is still drawn, so the name reads in all eight theme combinations.
             <div className="flex flex-col items-center gap-2 pt-[var(--space-6)] text-accent-ink">

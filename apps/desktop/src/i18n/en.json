@@ -214,7 +214,7 @@
   "settings.row.appIcon": "App icon",
   "settings.row.appIcon.option": "Icon {{index}}",
   "settings.row.appIconRoll": "A new icon every launch",
-  "settings.row.appIconRoll.desc": "Draw one of the twelve when the app opens. Choosing a tile above keeps that one instead, and turning this off keeps the icon the app is wearing now.",
+  "settings.row.appIconRoll.desc": "Roll one of the set when the app opens. Choosing a tile above keeps that one instead, and turning this off keeps the icon the app is wearing now. The set is the twelve duck heads the app draws, and the brand mark on a white and on a black ground, for the two colours a Dock can have.",
   "settings.row.lightCodeTheme": "Light code theme",
   "settings.row.lightCodeTheme.desc": "Highlighting theme used for code content in the light interface.",
   "settings.row.darkCodeTheme": "Dark code theme",

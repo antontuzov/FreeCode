@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Row } from "../state/transcript";
 
 /**
- * Which of the twelve mascot ducks this launch wears, one-based, or `null` when nothing set it.
+ * Which of the mascot tiles this launch wears, one-based, or `null` when nothing set it.
  *
  * The host decides before the page's own scripts run and hands the number over as a global, because a
  * number the UI had to `invoke` for would put one duck in the window and another in the Dock for a
@@ -159,7 +159,7 @@ export type AppearanceState = {
    * rather than only to the document the Settings surface edits. */
   showLineNumbers: boolean;
   wrapLongLines: boolean;
-  /** Which of the twelve mascot tiles the app wears, one-based, or null to roll one each launch.
+  /** Which of the mascot tiles the app wears, one-based, or null to roll one each launch.
    * The host owns the Dock tile, so the pin lives on the wire rather than only in the page. */
   appIcon: number | null;
 };
@@ -381,7 +381,7 @@ export type AppearanceDoc = {
   fontStyle: FontStyle;
   contentWidth: ContentWidth;
   fileIcons: FileIconSet;
-  /** One-based index into the twelve mascot tiles; null lets each launch roll its own. Same value as
+  /** One-based index into the mascot tiles; null lets each launch roll its own. Same value as
    * `AppearanceState.appIcon`, which the shell reads for the window's own face. */
   appIcon: number | null;
   uiFontSizePx: number;

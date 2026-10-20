@@ -129,7 +129,7 @@ pub struct Appearance {
     pub font_style: FontStyle,
     pub content_width: ContentWidth,
     pub file_icons: FileIconSet,
-    /// Which of the twelve mascot tiles the app wears, one-based. `None` lets each launch roll a new
+    /// Which of the mascot tiles the app wears, one-based. `None` lets each launch roll a new
     /// one; `Some` pins it. Pinning belongs on disk rather than in the webview because the Dock tile
     /// is drawn by the host, which never sees the page's own state.
     pub app_icon: Option<u8>,

@@ -846,7 +846,8 @@ select.field-input {
   --preview-chrome: var(--style-slate-tint);
 }
 
-/* The twelve mascot tiles the app can wear. Each is shown against both ends of the live palette —
+/* The mascot tiles the app can wear: the twelve drawn ducks and the brand mark on a white and a
+ * black ground. Each is shown against both ends of the live palette —
  * raised surface down to gutter — because the tile goes over whatever the OS puts behind it, and a
  * picker that only ever shows one ground cannot say whether the other reads. Selection follows the
  * style cards above: the outline plus a filled dot, so it is never colour alone. */
