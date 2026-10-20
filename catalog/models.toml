@@ -291,6 +291,9 @@ repetition_penalty = 1.0
 # The chat template accepts low | medium | xhigh (and "none" to disable thinking). It does NOT
 # accept "high" — sending it returns HTTP 500 (KNOWN_ISSUES.md). `low` is accepted but measured to
 # use about as many tokens as xhigh, so the UI maps "low" onto xhigh and says so.
+# These two lists are what the launch hands the server as --reasoning-effort-allow and
+# --reasoning-effort-fallback (crates/smollm-llama/src/launch.rs::reasoning_flags), so a client other
+# than this app's cannot reach the template with a level it raises on.
 default_effort = "xhigh"
 supported_efforts = ["xhigh", "medium", "none"]
 unsupported_efforts = ["low", "high"]
@@ -311,7 +314,7 @@ server_reasoning_flag = "auto"
 one_system_message_first = true                 # llama.cpp#? KNOWN_ISSUES.md: two or misplaced system messages -> HTTP 500
 empty_tool_arguments_as_object = true           # #112: empty/non-JSON tool arguments -> HTTP 500/400; send "{}"
 do_not_echo_reasoning_into_history = true       # Bonsai-demo#183: re-rendering reasoning breaks the prompt cache
-min_generation_budget_tokens = 4096             # a small cap ends generation mid-thought -> empty reply
+min_generation_budget_tokens = 4096             # a small cap ends generation mid-thought -> empty reply; the launcher also passes it as --reasoning-max-tokens-floor, so a request from any client on the port is raised to it, not just this app's
 recommended_generation_budget_tokens = 16384
 recommended_context = 65536                     # card's "start here" table pairs -n 16384 with -c 65536
 kv_cache_types = ["f16", "q8_0", "q4_0"]        # q5_0 is several times slower (#191)
@@ -559,7 +562,9 @@ repetition_penalty = 1.0
 #   --reasoning-budget 0 --reasoning-format none --chat-template-kwargs '{"enable_thinking": false}'
 # Both mechanisms, because the script serves every generation. Only the server flags can have any
 # effect on this one: the string `enable_thinking` does not occur in its template, so the kwarg is
-# parsed and then ignored.
+# parsed and then ignored. For the same reason the launcher gives this generation no
+# --reasoning-effort-allow list — there is no effort word for the server to police, and its /props
+# says supports_reasoning_effort: false.
 default_effort = "none"
 supported_efforts = ["none"]
 unsupported_efforts = ["low", "medium", "high", "xhigh"]
@@ -918,7 +923,8 @@ repetition_penalty = 1.0
 # model thinks, and thinks by default (card: "Thinking mode (default)"), and this app's client can
 # only send reasoning_effort, never chat_template_kwargs. `default_effort` therefore says what the
 # request field carries, not what the model does — see the output floor below, which is sized for
-# thinking being on.
+# thinking being on. The launcher sends this generation no --reasoning-effort-allow list either: the
+# word it would police is not in the template.
 default_effort = "none"
 supported_efforts = ["none"]
 unsupported_efforts = ["low", "medium", "high", "xhigh"]

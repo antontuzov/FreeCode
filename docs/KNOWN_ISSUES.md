@@ -48,19 +48,35 @@ _Enforced_: `GenerationBudget::default` is 16 384 tokens with a 32 768 window, a
 least 1 024 tokens above the reply budget — `crates/smollm-config/src/sampling.rs`.
 _Not the card's exact numbers_: upstream pairs `-n 16384` with `-c 65536`; this app's default window
 is 32 768, because the window is sized from the machine below.
-_New in the 2026-10-20 pin, not yet used_: `73bfe6cc` adds `--reasoning-max-tokens-floor N`, which
-raises a client `max_tokens` below `N` up to `N` server-side when thinking is on — the same job as
-`MIN_MAX_TOKENS`, done where the launch is owned. The client-side clamp stays because it also covers
-a shared server this app did not start; adopting the switch is filed as its own change rather than
-smuggled into the bump.
+_Enforced at the launch as well_: `73bfe6cc` added `--reasoning-max-tokens-floor N`, which raises a
+client `max_tokens` below `N` up to `N` server-side, so a small cap from **any** client on the port —
+not only this app's — cannot end the request before the answer arrives. `LaunchPlan` passes the
+catalog's `min_generation_budget_tokens` for it, which is the same number `clamp_budget` floors to,
+so the two halves of the rule read one value; the client-side clamp stays because it also covers a
+server this app did not start. Measured on this host with the pinned build and the 1.7B pack:
+`max_tokens: 1` returned one token and `finish_reason: "length"`, and the same request against the
+same server with the floor at 1024 answered in full (45 tokens, `"stop"`). A prompt of 3 268 tokens
+in a 4 096 window — less room left than the floor asks for — still returned 200 and stopped
+naturally, so the floor does not turn a nearly-full window into an error.
 
 **`reasoning_effort: "high"` is an HTTP 500.** The template knows `low`, `medium`, `xhigh`, `none`.
 _Enforced_: the catalog declares `never_send = ["high"]` and `wire_effort` rejects it before a
 request is built — `crates/smollm-llama/src/client.rs`. Test: `high_is_never_sent_and_low_goes_out_as_xhigh`.
-_New in the 2026-10-20 pin, not yet used_: the same release adds `--reasoning-effort-allow` and
+_Enforced at the launch as well_: the same release added `--reasoning-effort-allow` and
 `--reasoning-effort-fallback`, so a server can substitute a safe level for a rejected one instead of
-raising. `never_send` stays: rejecting on the client is what lets the control say what it will
-actually send, and the switch only protects a server this app started.
+raising. `LaunchPlan` hands the 27B its catalog `supported_efforts` as the allow list and its
+`default_effort` (`xhigh`) as the substitution, so a `high` from anything else on the port becomes the
+word this app already sends for `low` rather than an HTTP 500. `never_send` stays: rejecting on the
+client is what lets the picker say what it will actually send, and the switch only protects a server
+this app started. The pair goes only to a generation that has an effort vocabulary — measured on the
+1.7B, whose `/props` reports `supports_reasoning_effort: false` and whose server answers a
+`reasoning_effort: "high"` request with 200, so on that generation there is nothing to substitute
+for. The 4B declares the same single-word contract for the same reason: its template has no
+`reasoning_effort` string in it.
+**Not observed here**: the substitution acting on a template that really raises, which needs 27B
+weights this machine does not hold. What was run is that the pinned binary accepts the exact list and
+fallback this plan emits, and answers a request carrying `high` both as a top-level field and inside
+`chat_template_kwargs`.
 
 **`low` does not shorten reasoning.** Upstream measured it at about the same cost as `xhigh`, so
 offering it as "brief" would promise something untrue.
@@ -75,8 +91,11 @@ a server left at `--reasoning auto`.
 
 **`--reasoning on` overrides a client's `reasoning_effort: "none"`.**
 _Enforced_: the launcher emits neither `on` nor `off`, so `auto` (llama.cpp's own default) stays in
-force — `crates/smollm-llama/src/launch.rs`. Test:
-`no_reasoning_flag_is_emitted_because_auto_is_the_only_safe_default`.
+force — `crates/smollm-llama/src/launch.rs`. The same test keeps out `--reasoning-preserve`, which the
+pinned build proposes on startup and which `/props` reports as unsupported for the 1.7B, and
+`--reasoning-budget`, because the reply cap above is the lever this app uses. Test:
+`the_bare_reasoning_flag_stays_out_because_auto_is_the_only_safe_default`; the three `--reasoning-*`
+switches it does emit are the two notes above.
 
 ## Tool calling and the agent loop
 

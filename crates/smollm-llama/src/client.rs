@@ -231,6 +231,10 @@ pub fn wire_effort(
 /// The budget that goes on the wire: never below the model's minimum — a small cap "ends generation
 /// mid-thought" and yields an empty reply — and never above what can share the loaded context with
 /// the prompt.
+///
+/// A server this app started enforces the same `min_generation_budget_tokens` itself, as the
+/// `--reasoning-max-tokens-floor` the launcher passes from that field. This clamp stays because it is
+/// the half that also covers a server the app did not start, and a launch plan it did not assemble.
 pub fn clamp_budget(max_tokens: u32, context_tokens: u32, constraints: &AgentConstraints) -> u32 {
     let floor = constraints.min_generation_budget_tokens;
     let ceiling = context_tokens / 2;

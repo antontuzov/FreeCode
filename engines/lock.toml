@@ -25,7 +25,8 @@
 # upstream published b10776/b10777 (2026-10-14) and b10787 (2026-10-19) since, and because the 15
 # commits between the two tags are content rather than recency: 73bfe6cc adds the server's
 # `--reasoning-effort-allow`/`--reasoning-effort-fallback` and `--reasoning-max-tokens-floor` switches
-# (the knobs docs/KNOWN_ISSUES.md says this app works around in client-side policy), ad232815 fixes
+# (the knobs whose job docs/KNOWN_ISSUES.md recorded this app as doing in client-side policy, and which
+# the launch now also does server-side), ad232815 fixes
 # the Vulkan signed-FWHT fusion fallback that #349 landed, 483bdaba adds a CUDA PQ2_0 mat-vec for
 # Pascal, and 2972e008 with d00e2525/e3de7152 bring the TernSYCL Intel path and its documentation.
 #
@@ -236,7 +237,9 @@ known_blocker = "was: setup.sh failing to build mlx on macOS 27 / Xcode 26.5 (Bo
 #     replaying its reasoning, a stream the caller stopped kept its text, and a stock llama.cpp
 #     binary was refused before the server started.
 # This bump does NOT verify the other eleven targets — there is no Windows, Linux, CUDA, HIP or
-# Vulkan host here, so their digests are GitHub's own and nothing more. It also leaves the three
-# switches 73bfe6cc adds (`--reasoning-effort-allow`, `--reasoning-effort-fallback`,
-# `--reasoning-max-tokens-floor`) unused: the app's client-side reasoning policy still does that job,
-# and moving it onto the server is a separate change with its own testing.
+# Vulkan host here, so their digests are GitHub's own and nothing more. It also deliberately left the
+# three switches 73bfe6cc adds (`--reasoning-effort-allow`, `--reasoning-effort-fallback`,
+# `--reasoning-max-tokens-floor`) unused: the app's client-side reasoning policy already did that job,
+# and moving it onto the server is a separate change with its own testing. That change landed the same
+# day — see crates/smollm-llama/src/launch.rs::reasoning_flags, and the two "Enforced at the launch as
+# well" notes in docs/KNOWN_ISSUES.md for what was measured and what was not.

@@ -315,8 +315,10 @@ async fn ask(r: &Real, handle: &ServerHandle, history: &[Message]) -> Reply {
 /// preserving reasoning, consider enabling it via `--reasoning-preserve`", the flag is real, and the
 /// 1.7B's template does read `message.reasoning_content` — so declining it is a decision, not an
 /// omission: re-rendering an earlier thought into a later prompt is what misses the prompt cache on
-/// every turn of a tool loop (Bonsai-demo#183). The launch therefore carries no `--reasoning` flag at
-/// all, and [`Message`] has no field a thought could be replayed through.
+/// every turn of a tool loop (Bonsai-demo#183). The launch therefore carries no bare `--reasoning`
+/// switch and nothing that touches the server's history — the three `--reasoning-*` flags
+/// `reasoning_flags` emits are the reply floor and the effort allow list, which say nothing about
+/// replay — and [`Message`] has no field a thought could be replayed through.
 ///
 /// What only the real server can settle is the price of that choice. Stripping reasoning is only
 /// harmless if the answer alone still carries the conversation — so this asks a second turn something

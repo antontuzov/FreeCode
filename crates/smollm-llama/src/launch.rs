@@ -1,6 +1,9 @@
 //! The `llama-server` command line: what the pinned fork must be started with for these weights.
 //!
-//! Every flag here is transcribed from `PrismML-Eng/Bonsai-demo`, not chosen. The authority is
+//! Every flag here is transcribed from `PrismML-Eng/Bonsai-demo`, not chosen — except the three
+//! reasoning switches `reasoning_flags` emits, which post-date the demo's script and are taken from
+//! the pinned build's own `--help` and from what it was measured doing on this host.
+//! The authority is
 //! `scripts/start_llama_server.sh` — the *server* launcher — whose 27B branch runs
 //! ```text
 //! exec "$BIN" -m "$MODEL" --host "$HOST" --port "$PORT" -ngl "$NGL" -fa on -c "$_ctx" \
@@ -185,6 +188,11 @@ impl LaunchPlan {
         // field the agent loop depends on; the demo's 27B branch always sets it.
         args.push("--jinja".into());
 
+        // Everything above transcribes the demo's launcher; these are the fork's own additions, and
+        // they sit before `server_flags_extra` / `extra_args` so an explicit extra arg still overrides
+        // them the way a later flag does in llama.cpp's own parser.
+        args.extend(reasoning_flags(req.model));
+
         if let Some(mmproj) = &req.tuning.vision_projector {
             args.extend(["--mmproj".into(), mmproj.display().to_string()]);
             if req.tuning.vision_on_cpu {
@@ -300,6 +308,47 @@ fn sampling_flags(profile: &ProfileValues) -> Vec<String> {
     flags
 }
 
+/// The three switches the fork added in `73bfe6cc`, which no line of the demo's script contains.
+///
+/// Both halves do the same job as a rule this app already enforces in its own client — passing them
+/// to the server moves that rule to where the launch is owned, so a request from anything else on the
+/// port gets it too. They are emitted from the catalog's numbers, never from new constants, so the
+/// client and the server cannot disagree about what the floor is.
+///
+/// The reply floor goes out for every generation: `clamp_budget` already refuses to send less than
+/// `min_generation_budget_tokens`, so raising a request to that number is the launch agreeing with
+/// its own client. Measured on the pinned build with the 1.7B pack on 2026-10-20: `max_tokens: 1`
+/// came back as one token and `finish_reason: "length"`, and with the floor at 1024 the same request
+/// answered in full (45 tokens, `finish_reason: "stop"`).
+///
+/// The effort pair goes only to a generation whose template reads effort words — which is the same
+/// thing as the catalog having more than the one word that turns thinking off. On the others the
+/// substitution cannot change anything, and the pinned server says so itself: `/props` on the 1.7B
+/// reports `supports_reasoning_effort: false`, and a request carrying `reasoning_effort: "high"` is
+/// answered with HTTP 200 rather than the 500 the 27B's template raises.
+fn reasoning_flags(model: &ModelEntry) -> Vec<String> {
+    let reasoning = &model.sampling.reasoning;
+    let mut flags = vec![
+        "--reasoning-max-tokens-floor".into(),
+        model
+            .agent_constraints
+            .min_generation_budget_tokens
+            .to_string(),
+    ];
+    if reasoning.supported_efforts.len() > 1 {
+        // Anything outside the levels this app will send becomes the model's own default level rather
+        // than reaching the template: for the 27B that turns `high` (HTTP 500) into `xhigh`, and
+        // `low` into `xhigh` too, which is the mapping `wire_effort` already applies client-side.
+        flags.extend([
+            "--reasoning-effort-allow".into(),
+            reasoning.supported_efforts.join(","),
+            "--reasoning-effort-fallback".into(),
+            reasoning.default_effort.clone(),
+        ]);
+    }
+    flags
+}
+
 /// `common.sh bonsai_llama_ngl()`: 99 for CUDA / ROCm-HIP / Vulkan / Apple Silicon Metal, 0 for an
 /// Intel Mac ("no Metal") and for CPU-only hosts.
 pub fn layers_to_offload(os: &str, arch: &str, backend: Backend) -> u32 {
@@ -343,6 +392,7 @@ fn decimal(v: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::clamp_budget;
     use smollm_models::catalog::Pack;
     use smollm_models::lock::EngineLock;
     use smollm_models::Catalog;
@@ -423,6 +473,23 @@ mod tests {
             model_path,
             hardware,
         }
+    }
+
+    /// The same fork engine with a different catalog generation swapped in, weights file and all. The
+    /// three ternary entries have different reasoning contracts, and a fixture that always used the
+    /// first one could not see that.
+    fn fixture_with_model(backend: Backend, ram_gib: u64, catalog_id: &str) -> Fixture {
+        let mut f = fixture(backend, ram_gib);
+        let catalog = Catalog::load_default(&repo_root()).expect("catalog must load");
+        f.model = catalog
+            .model(catalog_id)
+            .expect("a catalog id a test names")
+            .clone();
+        let pack = f.model.packs.first().expect("a seeded pack").clone();
+        let path = crate::models_root(f.tmp.path()).join(&pack.file);
+        std::fs::write(&path, b"gguf").expect("weights file");
+        f.model_path = path;
+        f
     }
 
     #[test]
@@ -631,26 +698,118 @@ mod tests {
         assert_eq!(plan.arg("--cache-type-v"), Some("q4_0"));
     }
 
+    /// `--reasoning` (and its `-rea` alias) is the switch that must stay unset: `--reasoning on`
+    /// overrides a client's `reasoning_effort: "none"`, and `auto` is already llama.cpp's default, so
+    /// the launcher sends neither.
+    ///
+    /// The rest of this list is the family the launcher still refuses. `--reasoning-preserve` is the
+    /// one the pinned build proposes on startup: preserving a trace in the server's history is
+    /// precisely the re-rendering Bonsai-demo#183 costs a prompt-cache miss per turn, so reasoning
+    /// stays out of the replayed history and `real_bonsai_server` proves a second turn still has the
+    /// first — and `/props` on the 1.7B reports `supports_preserve_reasoning: false` anyway.
+    /// `--reasoning-budget` stays out because the reply cap is the lever this app uses.
+    ///
+    /// This asserts against names rather than the `--reasoning` prefix because `reasoning_flags` now
+    /// emits three members of that family; which ones are adopted, and why, is those tests' claim.
     #[test]
-    fn no_reasoning_flag_is_emitted_because_auto_is_the_only_safe_default() {
+    fn the_bare_reasoning_flag_stays_out_because_auto_is_the_only_safe_default() {
         let f = fixture(Backend::Metal, 16);
         let plan = f.plan(LaunchTuning::default());
-        // KNOWN_ISSUES.md: `--reasoning on` overrides a client's `reasoning_effort: "none"`, and
-        // `auto` is already llama.cpp's default — so the launcher sends neither.
-        //
-        // The same assertion is what keeps `--reasoning-preserve` out, which is the one the pinned
-        // build proposes on startup. Preserving a trace in the server's history is precisely the
-        // re-rendering Bonsai-demo#183 costs a prompt-cache miss per turn, so reasoning stays out of
-        // the replayed history and `real_bonsai_server` proves a second turn still has the first.
-        assert!(
-            !plan.args.iter().any(|a| a.starts_with("--reasoning")),
-            "{:?}",
-            plan.args
-        );
+        for forbidden in [
+            "--reasoning",
+            "-rea",
+            "--reasoning-preserve",
+            "--no-reasoning-preserve",
+            "--reasoning-budget",
+            "--reasoning-budget-message",
+            "--reasoning-format",
+        ] {
+            assert!(
+                !plan.args.iter().any(|a| a == forbidden),
+                "{forbidden} must stay unset: {:?}",
+                plan.args
+            );
+        }
         assert_eq!(
             f.model.sampling.reasoning.server_reasoning_flag, "auto",
             "the catalog's stated default must be the flag-less launch"
         );
+    }
+
+    /// The reply floor is the number the client already clamps to, so the launch and the request
+    /// builder cannot drift apart on what counts as too small an answer. It goes out for every
+    /// generation, including the ones whose thinking is empty, because a truncated reply is the same
+    /// failure whatever produced it.
+    #[test]
+    fn the_launch_enforces_the_reply_floor_the_client_clamps_to() {
+        for id in [
+            "ternary-bonsai-2-27b",
+            "ternary-bonsai-1-7b",
+            "ternary-bonsai-2-4b",
+        ] {
+            let f = fixture_with_model(Backend::Metal, 16, id);
+            let plan = f.plan(LaunchTuning::default());
+            let floor = plan
+                .arg("--reasoning-max-tokens-floor")
+                .expect("every generation gets a reply floor");
+            // Reached through `clamp_budget` rather than restated, because the point is that the two
+            // halves read one number.
+            let client_floor = clamp_budget(1, u32::MAX, &f.model.agent_constraints).to_string();
+            assert_eq!(floor, client_floor, "{id}");
+            // `assemble` floors `-c` at the same catalog number, so the floor can never demand a
+            // reply larger than the window that was loaded.
+            let window: u32 = plan.arg("-c").expect("-c").parse().expect("-c is a number");
+            let floor_tokens: u32 = floor.parse().expect("the floor is a number");
+            assert!(window >= floor_tokens, "{id}: -c {window} < floor {floor}");
+        }
+    }
+
+    /// A template that reads effort words is the one that can raise on an unknown one — on the 27B
+    /// that rejection is an HTTP 500 (KNOWN_ISSUES.md). The server is now told which levels to pass
+    /// and what to substitute, so the port cannot be made to fail by a client this app does not own.
+    /// The client's own rejection stays: it is what lets the picker say what it will send.
+    #[test]
+    fn a_template_that_validates_effort_words_gets_the_allow_list() {
+        let f = fixture_with_model(Backend::Metal, 16, "ternary-bonsai-2-27b");
+        let plan = f.plan(LaunchTuning::default());
+        let r = &f.model.sampling.reasoning;
+        let allow_list = r.supported_efforts.join(",");
+        assert_eq!(
+            plan.arg("--reasoning-effort-allow"),
+            Some(allow_list.as_str())
+        );
+        assert_eq!(
+            plan.arg("--reasoning-effort-fallback"),
+            Some(r.default_effort.as_str())
+        );
+        // Exactly the words the client refuses to put on the wire are the words the server was told to
+        // replace — so the two halves are one contract, not two lists that happen to agree today.
+        for never in &r.never_send {
+            assert!(
+                !allow_list.split(',').any(|w| w == never),
+                "{never} is on the allow list the server was given"
+            );
+        }
+        // Substituting a level the template also rejects would be worse than the 500 it replaces.
+        assert!(
+            r.supported_efforts.contains(&r.default_effort),
+            "the fallback {} is not a level this template takes",
+            r.default_effort
+        );
+    }
+
+    /// The other two generations declare no effort vocabulary: their templates do not read the field,
+    /// which the pinned server confirms for the 1.7B by reporting `supports_reasoning_effort: false`,
+    /// and an allow list would be a flag that cannot do anything.
+    #[test]
+    fn a_generation_that_reads_no_effort_words_gets_no_allow_list() {
+        for id in ["ternary-bonsai-1-7b", "ternary-bonsai-2-4b"] {
+            let f = fixture_with_model(Backend::Metal, 16, id);
+            let plan = f.plan(LaunchTuning::default());
+            assert_eq!(plan.arg("--reasoning-effort-allow"), None, "{id}");
+            assert_eq!(plan.arg("--reasoning-effort-fallback"), None, "{id}");
+            assert!(plan.arg("--reasoning-max-tokens-floor").is_some(), "{id}");
+        }
     }
 
     #[test]
