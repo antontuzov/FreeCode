@@ -16,15 +16,20 @@ const PATHS = {
     "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 3v18M16.5 9l-3 3 3 3",
   sidebarExpand:
     "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 3v18M13.5 9l3 3-3 3",
-  back: "M15 5l-7 7 7 7",
-  forward: "M9 5l7 7-7 7",
+  // The reference's history arrows are arrows, not chevrons: a shaft from the tip to the far edge, and
+  // the head's two arms off it. The chevron this glyph used to be is 7 units wide beside a panel glyph
+  // 18 units wide, which is why the top row read as two small ticks between two big shapes.
+  back: "M20 12H4M10.5 6.5 4 12l6.5 5.5",
+  forward: "M4 12h16M13.5 6.5 20 12l-6.5 5.5",
   // A terminal inside a square, not a check: the pill names the mode that edits files, and the
   // reference draws its prompt rather than its outcome.
   coding: "M4 4h16v16H4zM7 9l3 3-3 3M13 15h4",
   // A dial with the hand leaving the ring, not a plus: the gap and the stroke are one gesture, which
   // is how the reference marks the row that starts a run.
   newTask: "M11 12l8-8M13.1 4.3A8 8 0 1 0 17.9 8",
-  search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35",
+  // The glass and its handle inside one box with the panel glyph: the handle used to run to the 24's
+  // corner, which made this the widest shape in the header row by a unit and a half of stroke.
+  search: "M11 18.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15zM20 20l-3.9-3.9",
   workspace: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   knowledge: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 3v17",
   sites: "M3 5h18v14H3zM3 10h18M8 5v5",
@@ -75,7 +80,8 @@ const PATHS = {
   // outline is deliberately the same sheet so the pair reads as "file", varied only by its mark.
   createFile: "M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM12 9v6M9 12h6",
   editFile: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
-  searchContent: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35M8 11h6",
+  // `search`'s glass with the matched line inside it, on the same box so the two read as one object.
+  searchContent: "M11 18.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15zM20 20l-3.9-3.9M8 11h6",
   mic: "M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zM19 10a7 7 0 0 1-14 0M12 17v4",
   stop: "M6 6h12v12H6z",
   send: "M12 19V5M5 12l7-7 7 7",
