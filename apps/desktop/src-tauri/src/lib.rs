@@ -15,6 +15,7 @@ mod engine;
 mod extensions;
 mod knowledge;
 mod paths;
+mod reveal;
 mod sessions;
 mod status;
 mod storage;
@@ -259,6 +260,9 @@ pub fn run() {
             // The one write the UI may make to the machine it runs on: the text of a code fence, onto
             // the pasteboard. See `clipboard`.
             clipboard::copy_text,
+            // Handing a file this run changed back to the desktop's default handler. Confined to the
+            // workspace by the same sandbox a `read_file` goes through — see `reveal`.
+            reveal::open_file,
             chat::start_engine,
             chat::stop_engine,
             chat::engine_status,

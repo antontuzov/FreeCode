@@ -1139,6 +1139,15 @@ select.field-input {
   background: var(--bg-hover);
 }
 
+/* One file row's answer to a press that did not land, in the panel's own red. The host's reason is
+ * quoted rather than paraphrased because it names the path and the rule that refused it, which is
+ * the difference between a dead end and something the user can act on or report. */
+.review-open-failed {
+  margin: 0 var(--space-3) var(--space-2);
+  font-size: var(--size-quiet);
+  color: var(--danger);
+}
+
 /* The change in the column shot 06 gives it: one block per file, its hunks as diff lines, a gutter of
  * line numbers down the left. The bands are painted from the theme's own diff colours rather than a
  * palette a diff viewer brings with it, so switching the interface style repaints a review that is

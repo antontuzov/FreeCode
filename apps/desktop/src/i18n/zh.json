@@ -65,6 +65,8 @@
   "review.matchOne": "{{count}} 处匹配",
   "review.matchMany": "{{count}} 处匹配",
   "review.noMatch": "改动中没有包含 “{{query}}” 的行",
+  "review.open": "用默认应用打开此文件",
+  "review.openFailed": "未能打开它：{{why}}",
   "transcript.title": "任务",
   "transcript.more": "任务选项",
   "transcript.empty": "没有正在运行的任务。请描述你要本地模型做什么。",

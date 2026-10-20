@@ -65,6 +65,8 @@
   "review.matchOne": "{{count}} match",
   "review.matchMany": "{{count}} matches",
   "review.noMatch": "No line of the change says {{query}}",
+  "review.open": "Open this file with its default app",
+  "review.openFailed": "Nothing opened it: {{why}}",
   "transcript.title": "Task",
   "transcript.more": "Task options",
   "transcript.empty": "No task running. Describe what you want the local model to do.",

@@ -667,6 +667,16 @@ export const ipc = {
    * has actually taken the text — which is what lets the button say "Copied" truthfully.
    */
   copyText: (text: string) => invoke<void>("copy_text", { text }),
+  /**
+   * Hand one of the files this run changed to the desktop's default handler, so the page an agent
+   * built can be looked at rather than only read as a diff.
+   *
+   * The host opens it and confines the path to the workspace, because the webview's own opener is
+   * scoped to `http` and `https` on purpose: a `file://` capability there would let any address a
+   * model prints ask the desktop to launch something. Rejects with the host's reason — the panel
+   * that just said this file changed shows it rather than going quiet.
+   */
+  openFile: (path: string) => invoke<void>("open_file", { path }),
   /** Launch the supervised fork server, or refuse with the load guard's own reason. */
   startEngine: () => invoke<EngineView>("start_engine"),
   stopEngine: () => invoke<void>("stop_engine"),

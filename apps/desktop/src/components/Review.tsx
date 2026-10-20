@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { translate, type Locale } from "../i18n";
+import { ipc } from "../lib/ipc";
 import { useNav } from "../state/nav";
 import {
   changedFiles,
@@ -168,6 +169,23 @@ export function Review({ locale }: { locale: Locale }) {
   const toggleAll = () => {
     setFoldAll(!foldAll);
     setExcept({});
+  };
+
+  // A press of a row's open control that the desktop refused, kept per path so the sentence lands
+  // under the file it is about and a later press that works clears it. The panel has just told the
+  // user this file changed; asking for a press and answering it with silence is the failure here.
+  const [refused, setRefused] = useState<Record<string, string>>({});
+  const open = async (path: string) => {
+    setRefused((held) => {
+      const rest = { ...held };
+      delete rest[path];
+      return rest;
+    });
+    try {
+      await ipc.openFile(path);
+    } catch (why) {
+      setRefused((held) => ({ ...held, [path]: String(why) }));
+    }
   };
 
   // The reference's other header control: a query over the change itself. A run that touched six
@@ -341,6 +359,7 @@ export function Review({ locale }: { locale: Locale }) {
         ) : (
           sections.map(({ file, printed, hits }) => {
             const folded = foldedBy(file.path, hits);
+            const why = refused[file.path];
             return (
               <section
                 key={file.path}
@@ -348,40 +367,57 @@ export function Review({ locale }: { locale: Locale }) {
                 className="review-file border-b border-line/60"
               >
                 {/* The header is the row the folded panel is made of, so it is the control that folds
-                    and opens rather than a caption above one. */}
-                <button
-                  type="button"
-                  onClick={() => toggleFile(file.path, hits)}
-                  aria-expanded={!folded}
-                  className="review-file-head flex w-full items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left"
-                >
-                  <Icon
-                    name="chevronRight"
-                    size={12}
-                    className={`disclosure-icon shrink-0 ${folded ? "" : "rotate-90"}`}
-                  />
-                  <span className="insp-chip">
-                    {/* A file the run made is marked as one, because the create is the difference
-                        between "the agent changed my file" and "the agent wrote this" — and the two
-                        counts alone do not say it, since an edit that only added lines reads +N −0
-                        too. */}
-                    <Icon name={file.created ? "createFile" : "editFile"} size={13} />
-                  </span>
-                  {/* The name is what a changed-file row is scanned for, so the directories above it are
-                      the part allowed to run out of room. */}
-                  <span className="flex min-w-0 flex-1 items-baseline text-quiet">
-                    <span className="truncate text-faint">
-                      {file.path.slice(0, file.path.lastIndexOf("/") + 1)}
+                    and opens rather than a caption above one. The open control sits beside it rather
+                    than inside it, because a button may not hold another. */}
+                <div className="review-file-head flex w-full items-center">
+                  <button
+                    type="button"
+                    onClick={() => toggleFile(file.path, hits)}
+                    aria-expanded={!folded}
+                    className="flex min-w-0 flex-1 items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left"
+                  >
+                    <Icon
+                      name="chevronRight"
+                      size={12}
+                      className={`disclosure-icon shrink-0 ${folded ? "" : "rotate-90"}`}
+                    />
+                    <span className="insp-chip">
+                      {/* A file the run made is marked as one, because the create is the difference
+                          between "the agent changed my file" and "the agent wrote this" — and the two
+                          counts alone do not say it, since an edit that only added lines reads +N −0
+                          too. */}
+                      <Icon name={file.created ? "createFile" : "editFile"} size={13} />
                     </span>
-                    <span className="shrink-0">
-                      {file.path.slice(file.path.lastIndexOf("/") + 1)}
+                    {/* The name is what a changed-file row is scanned for, so the directories above it
+                        are the part allowed to run out of room. */}
+                    <span className="flex min-w-0 flex-1 items-baseline text-quiet">
+                      <span className="truncate text-faint">
+                        {file.path.slice(0, file.path.lastIndexOf("/") + 1)}
+                      </span>
+                      <span className="shrink-0">
+                        {file.path.slice(file.path.lastIndexOf("/") + 1)}
+                      </span>
                     </span>
-                  </span>
-                  <span className="shrink-0 font-mono text-micro tabular-nums">
-                    <span className="text-success">+{file.added}</span>{" "}
-                    <span className="text-danger">−{file.removed}</span>
-                  </span>
-                </button>
+                    <span className="shrink-0 font-mono text-micro tabular-nums">
+                      <span className="text-success">+{file.added}</span>{" "}
+                      <span className="text-danger">−{file.removed}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void open(file.path)}
+                    className="icon-btn mr-[var(--space-2)] shrink-0"
+                    aria-label={translate(locale, "review.open")}
+                    title={translate(locale, "review.open")}
+                  >
+                    <Icon name="external" size={13} />
+                  </button>
+                </div>
+                {why && (
+                  <p className="review-open-failed">
+                    {translate(locale, "review.openFailed", { why })}
+                  </p>
+                )}
                 {!folded &&
                   printed.map((block, h) => (
                     <Fragment key={h}>

@@ -16,8 +16,8 @@ engine or the host actually measured.
 - **Runs a coding loop.** The composer's Coding control turns the same model into an agent that reads,
   searches, creates files, edits them and — with the Privacy switch on — looks things up on the web, which
   is what lets it lay out a small app from nothing rather than only patch one. Each round narrates
-  itself in the transcript; each write lands in a review panel with its diff, its line numbers and a find
-  control inside it.
+  itself in the transcript; each write lands in a review panel with its diff, its line numbers, a find
+  control inside it, and a press on its file row that hands the page to the desktop's own handler.
 - **Files conversations on this machine.** The sidebar searches them, reopens them, and moves deleted
   ones to a Trash that Settings → Storage can put back.
 - **Reports the run.** Token rates, prompt-cache reuse, the wait, the pages read, the files opened, the
