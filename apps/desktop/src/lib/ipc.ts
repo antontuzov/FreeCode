@@ -309,13 +309,20 @@ export type HostStep = {
 };
 
 /**
- * `smollm_core::events::ToolOutcome`. The three fields a call that reads or edits can answer with are
- * here; the rest of the Rust struct — an exit code, artifacts — belongs to a build that runs shells
- * and produces files, and this one does neither.
+ * `smollm_core::events::ToolOutcome`. The fields a call that reads or edits can answer with are here;
+ * the rest of the Rust struct — an exit code, artifacts — belongs to a build that runs shells and
+ * produces files, and this one does neither.
+ *
+ * `summaryKey` names the catalog sentence the row shows, and `summary` is that sentence in English —
+ * which is what the model was handed inside the tool result, and what a line with no key (a page's own
+ * title) falls back to. `verify-transcript-i18n` is what keeps a key that arrives from being one the
+ * catalogs do not hold.
  */
 export type HostToolOutcome = {
   ok: boolean;
   summary: string;
+  summaryKey?: string | null;
+  summaryParams?: Record<string, string | number> | null;
   diff: HostDiff | null;
 };
 

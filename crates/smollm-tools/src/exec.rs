@@ -29,7 +29,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use walkdir::WalkDir;
 
 use crate::{authorize, registry::is_executable, web, Access, SandboxPolicy, ToolsError};
@@ -99,11 +99,193 @@ pub struct Edit {
     pub hunk_at: u32,
 }
 
+/// Which of the app's own sentences a row's one-line result is.
+///
+/// A summary is the part of a run that is wording rather than measurement, so it is the part that can
+/// be said in another language: the catalog holds the sentence and this names it, which is the same
+/// contract `smollm_core::transcript::StepKind` runs the label above it on. The English a call also
+/// builds is what the *model* reads inside [`Executed::content`] — a tool result goes back into the
+/// prompt, and a prompt in the interface's language would be a prompt in a language nobody asked the
+/// model to answer in.
+///
+/// [`SummaryKey::params`] is the list `verify-transcript-i18n` holds both halves to: a catalog blank
+/// no key names renders as an empty hole mid-sentence, and a key that sends a field the sentence does
+/// not ask for has measured something the row never shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SummaryKey {
+    /// A file with no lines in it at all.
+    Empty,
+    /// `{{count}}` lines — a whole file, or the last line a range could reach.
+    Lines,
+    /// A range whose end falls before its start.
+    NoRange,
+    /// One line longer than the whole output budget, so no part of it fits.
+    LineTooLong,
+    /// `{{from}}`–`{{to}}` of a `{{total}}`-line file.
+    LineRange,
+    /// The same range, ended early by the byte budget rather than by the file.
+    LineRangeCapped,
+    /// `{{listed}}` entries shown of `{{total}}` the directory holds.
+    EntriesShown,
+    /// Exactly one file matched `{{pattern}}`.
+    FileMatches,
+    /// `{{count}}` files matched `{{pattern}}`.
+    FilesMatch,
+    /// Nothing in the workspace matched `{{pattern}}`.
+    NoMatches,
+    /// One matching line, in the one file it was found in.
+    MatchInFile,
+    /// One matching line, spread across `{{files}}` files.
+    MatchInFiles,
+    /// `{{count}}` matching lines, all of them in one file.
+    MatchesInFile,
+    /// `{{count}}` matching lines across `{{files}}` files.
+    MatchesInFiles,
+    /// One copy of the searched text replaced.
+    CopyReplaced,
+    /// `{{count}}` copies replaced, which is a rename rather than a fix.
+    CopiesReplaced,
+    /// The search answered nothing for `{{query}}`.
+    NoResults,
+    /// One hit.
+    Result,
+    /// `{{count}}` hits.
+    Results,
+    /// A page read only as far as the character budget, so its `{{title}}` says so.
+    PageCut,
+    /// One file created.
+    FileCreated,
+}
+
+impl SummaryKey {
+    /// Every key the executors can answer with, so a catalog entry no executor reaches is named as the
+    /// dead copy it is.
+    pub const ALL: [Self; 21] = [
+        Self::Empty,
+        Self::Lines,
+        Self::NoRange,
+        Self::LineTooLong,
+        Self::LineRange,
+        Self::LineRangeCapped,
+        Self::EntriesShown,
+        Self::FileMatches,
+        Self::FilesMatch,
+        Self::NoMatches,
+        Self::MatchInFile,
+        Self::MatchInFiles,
+        Self::MatchesInFile,
+        Self::MatchesInFiles,
+        Self::CopyReplaced,
+        Self::CopiesReplaced,
+        Self::NoResults,
+        Self::Result,
+        Self::Results,
+        Self::PageCut,
+        Self::FileCreated,
+    ];
+
+    pub fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Empty => "transcript.summary.empty",
+            Self::Lines => "transcript.summary.lines",
+            Self::NoRange => "transcript.summary.noRange",
+            Self::LineTooLong => "transcript.summary.lineTooLong",
+            Self::LineRange => "transcript.summary.lineRange",
+            Self::LineRangeCapped => "transcript.summary.lineRangeCapped",
+            Self::EntriesShown => "transcript.summary.entriesShown",
+            Self::FileMatches => "transcript.summary.fileMatches",
+            Self::FilesMatch => "transcript.summary.filesMatch",
+            Self::NoMatches => "transcript.summary.noMatches",
+            Self::MatchInFile => "transcript.summary.matchInFile",
+            Self::MatchInFiles => "transcript.summary.matchInFiles",
+            Self::MatchesInFile => "transcript.summary.matchesInFile",
+            Self::MatchesInFiles => "transcript.summary.matchesInFiles",
+            Self::CopyReplaced => "transcript.summary.copyReplaced",
+            Self::CopiesReplaced => "transcript.summary.copiesReplaced",
+            Self::NoResults => "transcript.summary.noResults",
+            Self::Result => "transcript.summary.result",
+            Self::Results => "transcript.summary.results",
+            Self::PageCut => "transcript.summary.pageCut",
+            Self::FileCreated => "transcript.summary.fileCreated",
+        }
+    }
+
+    /// The fields this sentence has blanks for.
+    pub fn params(self) -> &'static [&'static str] {
+        match self {
+            Self::Lines | Self::MatchesInFile | Self::CopiesReplaced | Self::Results => &["count"],
+            Self::NoRange => &["from", "to"],
+            Self::LineTooLong => &["line"],
+            Self::LineRange | Self::LineRangeCapped => &["from", "to", "total"],
+            Self::EntriesShown => &["listed", "total"],
+            Self::FilesMatch => &["count", "pattern"],
+            Self::FileMatches | Self::NoMatches => &["pattern"],
+            Self::MatchInFiles => &["files"],
+            Self::MatchesInFiles => &["count", "files"],
+            Self::NoResults => &["query"],
+            Self::PageCut => &["title"],
+            Self::Empty
+            | Self::MatchInFile
+            | Self::CopyReplaced
+            | Self::Result
+            | Self::FileCreated => &[],
+        }
+    }
+}
+
+/// The one line under a transcript row's label.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Summary {
+    /// Which sentence this is, or `None` when the line is the thing itself — a page's title — and a
+    /// catalog has no business re-wording it.
+    pub key: Option<SummaryKey>,
+    /// Its fields, named exactly as [`SummaryKey::params`] lists them.
+    pub params: Value,
+    /// The same line in English, which is what [`Executed::content`] quotes to the model.
+    pub text: String,
+}
+
+impl Summary {
+    /// A line the catalog words.
+    pub fn said(key: SummaryKey, params: Value, text: impl Into<String>) -> Self {
+        // Debug-only, because a misnamed field is a hole in a sentence rather than a wrong sentence,
+        // and the release build should show the hole rather than stop a run over it.
+        if let Some(got) = params.as_object() {
+            let want: std::collections::BTreeSet<String> = key
+                .params()
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect();
+            let named: std::collections::BTreeSet<String> = got.keys().cloned().collect();
+            debug_assert_eq!(
+                named,
+                want,
+                "{} is sent {named:?} and its sentence has blanks for {want:?}",
+                key.i18n_key()
+            );
+        }
+        Self {
+            key: Some(key),
+            params,
+            text: text.into(),
+        }
+    }
+
+    /// A line that is data the tool found, not a statement about it.
+    pub fn verbatim(text: impl Into<String>) -> Self {
+        Self {
+            key: None,
+            params: Value::Null,
+            text: text.into(),
+        }
+    }
+}
+
 /// What one call produced: a clause for the transcript row and the text the model is handed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Executed {
     /// The one line under the row's label — "307 of 5000 lines, capped here", "37 matches in 12 files".
-    pub summary: String,
+    pub summary: Summary,
     /// The tool result, as the model sees it. Never longer than [`MAX_RESULT_BYTES`] plus the sentence
     /// that says what was left out.
     pub content: String,
@@ -161,7 +343,7 @@ fn read_file(
     let total = lines.len();
     if total == 0 {
         return Ok(Executed {
-            summary: "empty".to_string(),
+            summary: Summary::said(SummaryKey::Empty, json!({}), "empty"),
             content: format!("{label} is empty."),
             edit: None,
         });
@@ -170,7 +352,11 @@ fn read_file(
     let from = number_arg(arguments, "start_line").unwrap_or(1).max(1);
     if from > total {
         return Ok(Executed {
-            summary: format!("{total} lines"),
+            summary: Summary::said(
+                SummaryKey::Lines,
+                json!({ "count": total }),
+                format!("{total} lines"),
+            ),
             content: format!(
                 "Nothing to show: {label} ends at line {total} and the range asked for starts past line \
                  {total}."
@@ -183,7 +369,11 @@ fn read_file(
         .min(total);
     if to < from {
         return Ok(Executed {
-            summary: format!("nothing between {from} and {to}"),
+            summary: Summary::said(
+                SummaryKey::NoRange,
+                json!({ "from": from, "to": to }),
+                format!("nothing between {from} and {to}"),
+            ),
             content: format!(
                 "Nothing to show: the range ends at line {to}, before it starts at line {from}."
             ),
@@ -209,7 +399,11 @@ fn read_file(
 
     if kept.is_empty() {
         return Ok(Executed {
-            summary: format!("line {from} alone passes the output cap"),
+            summary: Summary::said(
+                SummaryKey::LineTooLong,
+                json!({ "line": from }),
+                format!("line {from} alone passes the output cap"),
+            ),
             content: format!(
                 "Line {from} of {label} is longer than the {} bytes this build sends back, so nothing of \
                  it is shown. Search for the words instead of reading the line.",
@@ -222,16 +416,28 @@ fn read_file(
     let Some(stopped) = next else {
         return Ok(Executed {
             summary: if whole {
-                format!("{total} lines")
+                Summary::said(
+                    SummaryKey::Lines,
+                    json!({ "count": total }),
+                    format!("{total} lines"),
+                )
             } else {
-                format!("lines {from}–{last} of {total}")
+                Summary::said(
+                    SummaryKey::LineRange,
+                    json!({ "from": from, "to": last, "total": total }),
+                    format!("lines {from}–{last} of {total}"),
+                )
             },
             content: kept.join("\n"),
             edit: None,
         });
     };
     Ok(Executed {
-        summary: format!("lines {from}–{last} of {total}, capped here"),
+        summary: Summary::said(
+            SummaryKey::LineRangeCapped,
+            json!({ "from": from, "to": last, "total": total }),
+            format!("lines {from}–{last} of {total}, capped here"),
+        ),
         content: format!(
             "{}\n…output capped at {} bytes: line {stopped} of {total} and everything after it are not \
              shown. Ask again with start_line={stopped} to continue.",
@@ -298,7 +504,11 @@ fn list_dir(tool: &str, arguments: &Value, policy: &SandboxPolicy) -> Result<Exe
         ));
     }
     Ok(Executed {
-        summary: format!("{listed} of {} shown", entries.len() + held_back),
+        summary: Summary::said(
+            SummaryKey::EntriesShown,
+            json!({ "listed": listed, "total": entries.len() + held_back }),
+            format!("{listed} of {} shown", entries.len() + held_back),
+        ),
         content: if lines.is_empty() {
             format!("{label} holds nothing that may be listed.")
         } else {
@@ -350,9 +560,17 @@ fn find_files(
     }
     Ok(Executed {
         summary: if count == 1 {
-            format!("1 file matches {pattern}")
+            Summary::said(
+                SummaryKey::FileMatches,
+                json!({ "pattern": pattern }),
+                format!("1 file matches {pattern}"),
+            )
         } else {
-            format!("{count} files match {pattern}")
+            Summary::said(
+                SummaryKey::FilesMatch,
+                json!({ "count": count, "pattern": pattern }),
+                format!("{count} files match {pattern}"),
+            )
         },
         content: if content.is_empty() {
             format!("No file in the workspace matches {pattern}.")
@@ -432,13 +650,28 @@ fn search_content(
         ));
     }
     Ok(Executed {
-        summary: match matches {
-            0 => format!("nothing matches {pattern}"),
-            1 => format!(
-                "1 match in {hit_files} file{}",
-                if hit_files == 1 { "" } else { "s" }
+        summary: match (matches, hit_files) {
+            (0, _) => Summary::said(
+                SummaryKey::NoMatches,
+                json!({ "pattern": pattern }),
+                format!("nothing matches {pattern}"),
             ),
-            n => format!("{n} matches in {hit_files} files"),
+            (1, 1) => Summary::said(SummaryKey::MatchInFile, json!({}), "1 match in 1 file"),
+            (1, files) => Summary::said(
+                SummaryKey::MatchInFiles,
+                json!({ "files": files }),
+                format!("1 match in {files} files"),
+            ),
+            (n, 1) => Summary::said(
+                SummaryKey::MatchesInFile,
+                json!({ "count": n }),
+                format!("{n} matches in 1 file"),
+            ),
+            (n, files) => Summary::said(
+                SummaryKey::MatchesInFiles,
+                json!({ "count": n, "files": files }),
+                format!("{n} matches in {files} files"),
+            ),
         },
         content: if content.is_empty() {
             format!("No line in the workspace matches {pattern}.")
@@ -517,14 +750,18 @@ fn edit_file(
         hunk_at: at as u32,
     };
     let summary = if times > 1 {
-        format!("{times} copies replaced")
+        Summary::said(
+            SummaryKey::CopiesReplaced,
+            json!({ "count": times }),
+            format!("{times} copies replaced"),
+        )
     } else {
-        "1 copy replaced".to_string()
+        Summary::said(SummaryKey::CopyReplaced, json!({}), "1 copy replaced")
     };
     Ok(Executed {
         content: format!(
-            "Edited {} (+{} −{}): {summary}\n{label}, at line {at}:\n{hunk}",
-            edit.path, edit.added, edit.removed,
+            "Edited {} (+{} −{}): {}\n{label}, at line {at}:\n{hunk}",
+            edit.path, edit.added, edit.removed, summary.text,
         ),
         summary,
         edit: Some(edit),
@@ -546,7 +783,11 @@ fn web_search(tool: &str, arguments: &Value) -> Result<Executed, ToolsError> {
     let hits = web::search(&query, limit)?;
     if hits.is_empty() {
         return Ok(Executed {
-            summary: format!("nothing for {query}"),
+            summary: Summary::said(
+                SummaryKey::NoResults,
+                json!({ "query": query }),
+                format!("nothing for {query}"),
+            ),
             content: format!(
                 "Nothing was found for “{query}”. Fewer, plainer words find more: an article is titled \
                  for one thing, not for a whole question."
@@ -566,7 +807,11 @@ fn web_search(tool: &str, arguments: &Value) -> Result<Executed, ToolsError> {
     let n = hits.len();
     let plural = if n == 1 { "" } else { "s" };
     Ok(Executed {
-        summary: format!("{n} result{plural}"),
+        summary: if n == 1 {
+            Summary::said(SummaryKey::Result, json!({}), "1 result")
+        } else {
+            Summary::said(SummaryKey::Results, json!({ "count": n }), format!("{n} results"))
+        },
         content: format!(
             "{n} result{plural} for “{query}”:\n\n{list}\n\nRead one in full with fetch_url and the \
              address under it, and name that address in the answer.",
@@ -600,9 +845,14 @@ fn fetch_url(tool: &str, arguments: &Value) -> Result<Executed, ToolsError> {
     }
     Ok(Executed {
         summary: if truncated {
-            format!("{title}, cut short")
+            Summary::said(
+                SummaryKey::PageCut,
+                json!({ "title": title }),
+                format!("{title}, cut short"),
+            )
         } else {
-            title.clone()
+            // The page's own title, which is data the site wrote rather than a sentence the app does.
+            Summary::verbatim(title.clone())
         },
         content: format!("{title} — {url}\n\n{text}"),
         edit: None,
@@ -671,13 +921,13 @@ fn write_file(
     };
     if added == 0 {
         return Ok(Executed {
-            summary: "1 file created".to_string(),
+            summary: Summary::said(SummaryKey::FileCreated, json!({}), "1 file created"),
             content: format!("Created {}: an empty file.", edit.path),
             edit: Some(edit),
         });
     }
     Ok(Executed {
-        summary: "1 file created".to_string(),
+        summary: Summary::said(SummaryKey::FileCreated, json!({}), "1 file created"),
         content: format!(
             "Created {} (+{} −{}): new file\n{label}:\n{}",
             edit.path, edit.added, edit.removed, edit.hunk
@@ -1028,7 +1278,7 @@ mod tests {
         let got =
             ran("read_file", &json!({ "path": "src/lib.rs" }), &p).expect("a workspace read runs");
         assert_eq!(got.content, "one\ntwo\nthree");
-        assert_eq!(got.summary, "3 lines");
+        assert_eq!(got.summary.text, "3 lines");
     }
 
     #[test]
@@ -1041,7 +1291,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(got.content, "two\nthree");
-        assert_eq!(got.summary, "lines 2–3 of 3");
+        assert_eq!(got.summary.text, "lines 2–3 of 3");
         // A range that starts past the end is an answer, not a failure: the model needs to learn the
         // file is shorter than it thought.
         let past = ran(
@@ -1076,15 +1326,15 @@ mod tests {
             "{} bytes of answer",
             got.content.len()
         );
-        assert!(got.summary.contains("capped"), "{}", got.summary);
+        assert!(got.summary.text.contains("capped"), "{}", got.summary.text);
         assert!(
             got.content.contains("Ask again with start_line="),
             "a cut is only useful if it names where to continue: {}",
-            got.summary
+            got.summary.text
         );
         // And the count it quotes is the file's real length, not the number of lines it happened to
         // hold in the answer.
-        assert!(got.summary.contains("of 5000"), "{}", got.summary);
+        assert!(got.summary.text.contains("of 5000"), "{}", got.summary.text);
         assert!(!got.content.ends_with('\n'), "the cut stays on a line");
     }
 
@@ -1100,7 +1350,7 @@ mod tests {
         )
         .unwrap();
         assert!(got.content.starts_with("line 1900"), "{}", got.content);
-        assert!(got.summary.contains("of 2000"), "{}", got.summary);
+        assert!(got.summary.text.contains("of 2000"), "{}", got.summary.text);
     }
 
     /// The line number a capped answer told the model to ask for next.
@@ -1147,7 +1397,11 @@ mod tests {
             "{}",
             second.content
         );
-        assert!(second.summary.contains("of 2000"), "{}", second.summary);
+        assert!(
+            second.summary.text.contains("of 2000"),
+            "{}",
+            second.summary.text
+        );
     }
 
     #[test]
@@ -1204,11 +1458,15 @@ mod tests {
         let (_d, p) = plain();
         let got = ran("grep_search", &json!({ "pattern": "^two" }), &p).unwrap();
         assert_eq!(got.content, "src/lib.rs:2: two");
-        assert_eq!(got.summary, "1 match in 1 file");
+        assert_eq!(got.summary.text, "1 match in 1 file");
         // Nothing found is an answer too, and says what it looked for.
         let none = ran("grep_search", &json!({ "pattern": "zzzz" }), &p).unwrap();
         assert!(none.content.starts_with("No line"), "{}", none.content);
-        assert!(none.summary.contains("nothing matches"), "{}", none.summary);
+        assert!(
+            none.summary.text.contains("nothing matches"),
+            "{}",
+            none.summary.text
+        );
     }
 
     #[test]
@@ -1420,7 +1678,7 @@ mod tests {
         assert_eq!((edit.added, edit.removed, edit.occurrences), (2, 1, 1));
         // The path is the spelling a follow-up `read_file` takes back.
         assert_eq!(edit.path, "src/lib.rs");
-        assert_eq!(got.summary, "1 copy replaced");
+        assert_eq!(got.summary.text, "1 copy replaced");
     }
 
     #[test]
@@ -1509,7 +1767,7 @@ mod tests {
         assert_eq!(on_disk(d.path(), "src/lib.rs"), "new\nnew\nnew\n");
         let edit = got.edit.unwrap();
         assert_eq!((edit.added, edit.removed, edit.occurrences), (3, 3, 3));
-        assert_eq!(got.summary, "3 copies replaced");
+        assert_eq!(got.summary.text, "3 copies replaced");
         // One hunk rather than three: the copies are the same change said three times.
         assert_eq!(got.content.matches("at line").count(), 1, "{}", got.content);
     }
@@ -1617,7 +1875,7 @@ mod tests {
         assert_eq!((edit.added, edit.removed, edit.occurrences), (2, 0, 1));
         assert_eq!(edit.hunk, "+<!doctype html>\n+<title>hi</title>");
         assert_eq!(edit.hunk_at, 1);
-        assert_eq!(got.summary, "1 file created");
+        assert_eq!(got.summary.text, "1 file created");
     }
 
     #[test]

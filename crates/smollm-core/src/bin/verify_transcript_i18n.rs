@@ -13,15 +13,21 @@
 //! different name leaves a hole in the middle of the line. A refusal contributes a headline, an
 //! instruction and a button, so all three are checked.
 //!
+//! A tool's one-line result sits between the two: the executor still writes the English, because that
+//! same sentence goes back into the model's prompt, and it names the catalog entry beside it. So each
+//! [`SummaryKey`] has to hold in every locale too, with exactly the blanks the key measures.
+//!
 //! Usage: `cargo run -p smollm-core --bin verify-transcript-i18n [i18n-dir]`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use smollm_core::{all_i18n_keys, BlockerCode, CtaCode, NoticeCode};
+use smollm_tools::SummaryKey;
 
 const LOCALES: [&str; 2] = ["en", "ru"];
 const STEP_PREFIX: &str = "transcript.step.";
+const SUMMARY_PREFIX: &str = "transcript.summary.";
 const NOTICE_PREFIX: &str = "notice.";
 const BLOCKER_PREFIX: &str = "blocker.";
 const CTA_PREFIX: &str = "cta.";
@@ -34,8 +40,9 @@ fn main() {
     let failures = check(&dir);
     if failures.is_empty() {
         println!(
-            "verify-transcript-i18n: OK — {} step keys, {} notice keys and {} refusal keys present in {:?}",
+            "verify-transcript-i18n: OK — {} step keys, {} summary keys, {} notice keys and {} refusal keys present in {:?}",
             all_i18n_keys().len(),
+            SummaryKey::ALL.len(),
             NoticeCode::ALL.len(),
             BlockerCode::ALL.len() * 2 + CtaCode::ALL.len(),
             LOCALES
@@ -116,6 +123,18 @@ fn check(dir: &Path) -> Vec<String> {
         }
     }
 
+    // A tool's line is the row's own sentence, so it goes through the same door as a notice's: each key
+    // an executor can answer with needs one entry per locale, holding exactly the fields it measures.
+    for key in SummaryKey::ALL {
+        require_sentence(
+            &catalogs,
+            key.i18n_key(),
+            key.params(),
+            "SummaryKey",
+            &mut failures,
+        );
+    }
+
     // A notice's sentence belongs to the catalog alone, so this is the only place the two halves of
     // that contract meet: each code the host can emit needs one entry per locale, interpolating
     // exactly the fields the host measures.
@@ -162,6 +181,15 @@ fn check(dir: &Path) -> Vec<String> {
             }
         }
     };
+    orphan(
+        SUMMARY_PREFIX,
+        &owned_keys(
+            SUMMARY_PREFIX,
+            SummaryKey::ALL.iter().map(|key| key.i18n_key()),
+        ),
+        "no executor",
+        &mut failures,
+    );
     orphan(
         NOTICE_PREFIX,
         &owned_keys(
@@ -292,9 +320,9 @@ mod tests {
         dir
     }
 
-    /// A catalog that satisfies every vocabulary: each step row, each notice's sentence, and each
-    /// refusal's headline, instruction and button — all interpolating exactly the fields their codes
-    /// send. Tests that probe one drift start from this.
+    /// A catalog that satisfies every vocabulary: each step row, each tool's one-line result, each
+    /// notice's sentence, and each refusal's headline, instruction and button — all interpolating
+    /// exactly the fields their codes send. Tests that probe one drift start from this.
     fn complete() -> BTreeMap<String, String> {
         let mut map: BTreeMap<String, String> = BTreeMap::new();
         for key in all_i18n_keys() {
@@ -302,6 +330,9 @@ mod tests {
         }
         for code in NoticeCode::ALL {
             map.insert(code.i18n_key().to_string(), body(code.params()));
+        }
+        for key in SummaryKey::ALL {
+            map.insert(key.i18n_key().to_string(), body(key.params()));
         }
         for code in BlockerCode::ALL {
             map.insert(code.title_key().to_string(), "x".into());
@@ -346,6 +377,44 @@ mod tests {
             failures
                 .iter()
                 .all(|f| f.contains("notice.budget-exhausted")),
+            "{failures:?}"
+        );
+    }
+
+    #[test]
+    fn a_tool_line_with_no_sentence_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut map = complete();
+        map.remove("transcript.summary.copiesReplaced").unwrap();
+        write_both(dir.path(), &map);
+        let failures = check(dir.path());
+        assert_eq!(failures.len(), 2, "{failures:?}");
+        assert!(
+            failures
+                .iter()
+                .all(|f| f.contains("transcript.summary.copiesReplaced")),
+            "{failures:?}"
+        );
+    }
+
+    #[test]
+    fn a_tool_line_that_drops_the_count_it_reports_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        // A replace_all that says only "copies replaced" cannot tell the reader whether the run renamed
+        // a symbol or fixed a line, which is the whole reason the row carries the number.
+        let mut map = complete();
+        map.insert(
+            "transcript.summary.copiesReplaced".to_string(),
+            "copies".into(),
+        );
+        write_both(dir.path(), &map);
+        let failures = check(dir.path());
+        assert_eq!(failures.len(), 2, "{failures:?}");
+        assert!(
+            failures
+                .iter()
+                .all(|f| f.contains("transcript.summary.copiesReplaced")
+                    && f.contains("interpolates")),
             "{failures:?}"
         );
     }

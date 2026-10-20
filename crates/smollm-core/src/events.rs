@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use smollm_config::agent::PermissionClass;
 use smollm_llama::load_guard::{Blocker, BlockerCode, CtaCode};
 use smollm_models::EngineLock;
+use smollm_tools::Summary;
 
 use crate::transcript::{DiffStat, TranscriptStep};
 
@@ -76,6 +77,16 @@ pub struct ToolOutcome {
     pub ok: bool,
     /// One-line result text under the row label.
     pub summary: String,
+    /// Which catalog sentence [`Self::summary`] is, and the fields it names. `None` for a line that is
+    /// data rather than wording — a page's title — and for a refusal, whose sentence the approval layer
+    /// has already written.
+    ///
+    /// The English stays because the row is not the only reader: a run's rows are what the filed
+    /// conversation replays, and a window in another language should still show what was measured.
+    #[serde(default)]
+    pub summary_key: Option<String>,
+    #[serde(default)]
+    pub summary_params: serde_json::Value,
     #[serde(default)]
     pub exit_code: Option<i32>,
     #[serde(default)]
@@ -85,10 +96,12 @@ pub struct ToolOutcome {
 }
 
 impl ToolOutcome {
-    pub fn ok(summary: String) -> Self {
+    pub fn ok(summary: Summary) -> Self {
         Self {
             ok: true,
-            summary,
+            summary_key: summary.key.map(|key| key.i18n_key().to_string()),
+            summary_params: summary.params,
+            summary: summary.text,
             exit_code: None,
             diff: None,
             artifacts: Vec::new(),
@@ -99,6 +112,8 @@ impl ToolOutcome {
         Self {
             ok: false,
             summary: reason.to_string(),
+            summary_key: None,
+            summary_params: serde_json::Value::Null,
             exit_code: None,
             diff: None,
             artifacts: Vec::new(),
@@ -497,7 +512,11 @@ mod tests {
                 lines_removed: 4,
                 files_changed: 1,
             }),
-            ..ToolOutcome::ok("1 file edited".into())
+            ..ToolOutcome::ok(Summary::said(
+                smollm_tools::SummaryKey::CopyReplaced,
+                json!({}),
+                "1 copy replaced",
+            ))
         };
         let event = AgentEvent::ToolFinished {
             step: step.clone(),

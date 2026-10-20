@@ -21,7 +21,7 @@ pub mod web;
 
 use std::path::Path;
 
-pub use exec::{execute, Edit, Executed, MAX_RESULT_BYTES};
+pub use exec::{execute, Edit, Executed, Summary, SummaryKey, MAX_RESULT_BYTES};
 pub use registry::{
     executable_specs, find, is_executable, registry, summary, tool_specs, ToolCall, ToolDescriptor,
     EXECUTABLE,

@@ -150,7 +150,7 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
                 (
                     ToolOutcome {
                         diff: staged.as_ref().map(|(_, diff, _)| *diff),
-                        ..ToolOutcome::ok(done.summary.clone())
+                        ..ToolOutcome::ok(done.summary)
                     },
                     done.content,
                     staged,

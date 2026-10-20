@@ -9,8 +9,8 @@
 // than two lists the UI would have to guess between.
 import { create } from "zustand";
 
-import { translate, type Locale } from "../i18n";
-import type { AgentEvent, HostStep, HostStepStatus, RunReport } from "../lib/ipc";
+import { has, translate, type Locale } from "../i18n";
+import type { AgentEvent, HostStep, HostStepStatus, HostToolOutcome, RunReport } from "../lib/ipc";
 
 export type StepKind =
   | "processed"
@@ -98,6 +98,13 @@ export type Step = {
   kind: StepKind;
   /** The command, path or snippet the row ran against, truncated by the UI. */
   detail?: string;
+  /**
+   * For a tool row: which catalog sentence [`detail`] is, and the fields it names. The host sends both
+   * beside its own English, because the same sentence goes back into the model's prompt and a prompt is
+   * not in the interface's language.
+   */
+  detailKey?: string;
+  detailParams?: Record<string, string | number>;
   /** Shown as a monospace chip after the label, e.g. the file an edit touched. */
   subject?: string;
   status?: StepStatus;
@@ -207,6 +214,11 @@ export function stepText(locale: Locale, step: Step): string {
   if (step.notice) return translate(locale, `notice.${step.notice.code}`, step.notice.params);
   if (step.refusal)
     return translate(locale, `blocker.${step.refusal.code}.detail`, step.refusal.params);
+  // A tool's line is the app's own sentence about a measurement, so the catalog words it — unless the
+  // host named a key this build's catalogs do not hold, which is the one case where its English is the
+  // truer line. Printing the key there would be a raw identifier mid-transcript.
+  if (step.detailKey && has(step.detailKey))
+    return translate(locale, step.detailKey, step.detailParams ?? {});
   return step.detail ?? "";
 }
 
@@ -291,17 +303,38 @@ function hostStatus(status: HostStepStatus): StepStatus {
 }
 
 /**
+ * A tool's one-line result, as the host sent it: the catalog sentence and its fields when the line is
+ * the app's own wording, and the English it was written in either way.
+ */
+type ToolSummary = {
+  text: string;
+  key?: string;
+  params?: Record<string, string | number>;
+};
+
+function toolSummary(outcome: HostToolOutcome): ToolSummary {
+  return {
+    text: outcome.summary,
+    key: outcome.summaryKey ?? undefined,
+    params: outcome.summaryParams ?? undefined,
+  };
+}
+
+/**
  * A host step as a row. `detail` is the path or pattern the call acted on — for an edit, the file it
  * wrote as the sandbox resolved it — which the reference draws as the chip beside the label, and the
- * outcome's one-line summary is the sentence under it. Both are measurements: "Read file" and "3 lines"
- * are the catalog's words, and `verify-transcript-i18n` is what keeps the kind's key on both sides.
+ * outcome's one-line summary is the sentence under it. Neither is the app's own wording by accident:
+ * "Read file" and "3 lines" both come out of the catalog, which is why the summary arrives as a key and
+ * its fields rather than as a sentence, and why `verify-transcript-i18n` holds both sides to each other.
  */
-function hostRow(step: HostStep, summary?: string): Step {
+function hostRow(step: HostStep, summary?: ToolSummary): Step {
   return {
     id: step.id,
     kind: step.kind,
     subject: step.detail || undefined,
-    detail: summary,
+    detail: summary?.text,
+    detailKey: summary?.key,
+    detailParams: summary?.params,
     diff: step.diff ? { added: step.diff.linesAdded, removed: step.diff.linesRemoved } : undefined,
     hunk: step.hunk ?? undefined,
     collapsed: step.collapsedByDefault || undefined,
@@ -367,7 +400,7 @@ function closeBatch(rows: Row[], header: Step): Row[] {
 /** The row a finished call leaves: replaced in place, so its position in the run does not move when
  * its outcome arrives. A step that never opened a row (a window that re-rendered mid-round) is appended
  * rather than dropped, because a call that ran and shows nothing is the worse failure. */
-function finishStep(rows: Row[], step: HostStep, summary: string): Row[] {
+function finishStep(rows: Row[], step: HostStep, summary: ToolSummary): Row[] {
   if (!rows.some((row) => row.id === step.id)) return pushStep(rows, hostRow(step, summary));
   return rows.map((row) => (row.id === step.id ? hostRow(step, summary) : row));
 }
@@ -529,7 +562,7 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
     case "toolStarted":
       return pushStep(rows, hostRow(event.step));
     case "toolFinished":
-      return finishStep(rows, event.step, event.outcome.summary);
+      return finishStep(rows, event.step, toolSummary(event.outcome));
     case "toolBatchClosed":
       // The header arrives when the round is over, so it never renders the live dot its own rows had
       // while they ran — the host's step is still in its opening state, and the batch is not.
@@ -840,6 +873,7 @@ export const FIXTURE_ROWS: Row[] = [
         kind: "editFile",
         subject: "crates/smollm-core/src/events.rs",
         detail: "1 copy replaced",
+        detailKey: "transcript.summary.copyReplaced",
         diff: { added: 7, removed: 2 },
         hunk: {
           at: 41,
@@ -865,6 +899,7 @@ export const FIXTURE_ROWS: Row[] = [
         kind: "editFile",
         subject: "apps/desktop/src-tauri/src/agent.rs",
         detail: "1 copy replaced",
+        detailKey: "transcript.summary.copyReplaced",
         // The same file written a second time in one run, as shot 06's batch does: one section with two
         // hunks, and the stretch of the file between them named — the number a reader checks the
         // gutter against.
@@ -887,6 +922,7 @@ export const FIXTURE_ROWS: Row[] = [
         kind: "editFile",
         subject: "crates/smollm-core/src/transcript.rs",
         detail: "1 copy replaced",
+        detailKey: "transcript.summary.copyReplaced",
         // The third file of the round, and the one that gives the panel a section below the section a
         // jump lands on: a diff with two short sections cannot show a scroll arriving anywhere, because
         // there is nothing under it to scroll past.

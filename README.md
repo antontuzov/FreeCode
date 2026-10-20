@@ -130,9 +130,11 @@ when `HF_VERIFY_REMOTE=1`), `verify-tauri-ui.sh` and `verify-desktop-native.sh` 
 Four of the checks exist because a claim that is not enforced rots within a commit:
 
 - `check-i18n.mjs` — every key defined in both catalogs, and every literal lookup defined. The Rust side
-  of the same promise is `verify-transcript-i18n`, which fails when the host's `StepKind` list and the
-  TypeScript one stop matching, because a row that renders a raw key mid-sentence is a bug in every
-  language.
+  of the same promise is `verify-transcript-i18n`, which fails when a vocabulary the host can emit and
+  the catalogs stop matching: a row's label (`StepKind`), a tool's one-line result (`SummaryKey`), a
+  notice, a refusal's three sentences. Each also has to interpolate exactly the fields its code measures,
+  because a row that renders a raw key — or a number that went out under a name the sentence never uses —
+  is a bug in every language.
 - `check-contrast.mjs` — every grey and every style ink at 4.5:1 on every surface each of the eight styles
   paints, in both modes.
 - `check-shortcuts.mjs` — every binding in `lib/shortcuts.ts` answered by a handler, and every hint that
