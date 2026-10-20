@@ -35,12 +35,12 @@ const PATHS = {
   sites: "M3 5h18v14H3zM3 10h18M8 5v5",
   automations:
     "M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
-  // A jigsaw piece with a knob on its top edge and another on its right, off the reference crop. Each
-  // knob is one arc of radius 2 over a chord of 2.6: because the chord is shorter than the diameter,
-  // the major arc closes more than half the circle and the two ends pinch in, which is the neck — so
-  // the ball-on-stem look costs one command rather than the six points a stem would be drawn with.
+  // Four rounded squares, from the reference crop: the row opens a grid of things the app can gain,
+  // which is what a 2×2 of identical cells says. It used to be a jigsaw piece — a single missing part
+  // snapping into the app, i.e. one thing that is not there yet. Each square is 7 units on a 3.5 gap,
+  // the gap holding one stroke's width of clear air so the four stay four at the 14px the sidebar draws.
   extensions:
-    "M7 9.3h1.7a2 2 0 1 1 2.6 0H13a1.5 1.5 0 0 1 1.5 1.5v1.7a2 2 0 1 1 0 2.6v1.7a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5V10.8A1.5 1.5 0 0 1 7 9.3z",
+    "M5.5 3.5h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2zM15.5 3.5h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2zM5.5 13.5h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2zM15.5 13.5h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2z",
   // Eight lobes on a polar profile (radius 6.6→8.6, flattened tops), sampled every 7.5° rather than
   // hand-plotted: the reference's cog has rounded teeth in narrow notches, which no short arc chain
   // draws without a dozen magic numbers. Edit the profile by changing the generator's constants, not
