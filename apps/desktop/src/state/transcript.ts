@@ -999,12 +999,12 @@ export const FIXTURE_ROWS: Row[] = [
     status: "error",
     refusal: { code: "engine-not-installed", params: {} },
     technical:
-      "engine prism-b10772-e8fd209 is not installed (expected " +
+      "engine prism-b10787-73bfe6c is not installed (expected " +
       "~/Library/Application Support/studio.smollm.desktop/engines/llama-server from " +
       "llama-server-aarch64-apple-darwin-metal.tar.gz)",
     cta: {
       code: "install-engine",
-      url: "https://github.com/PrismML-Eng/llama.cpp/releases/tag/prism-b10772-e8fd209",
+      url: "https://github.com/PrismML-Eng/llama.cpp/releases/tag/prism-b10787-73bfe6c",
     },
   },
 ];

@@ -123,7 +123,8 @@ notes = "Faster prefill on every backend; the pack benchmarked on Apple M5 Pro/M
 # guard can evaluate (`crates/smollm-llama/src/load_guard.rs::caveat_matches`), so the row fires only
 # on the hosts it is about instead of landing on every card as "may or may not apply". The version
 # scope therefore lives in the prose: the crash is what releases BEFORE llama.cpp#245 did, and the
-# pinned tag already contains #245 (0324c665, checked 2026-10-20 to be an ancestor of e8fd209). This
+# pinned tag contains #245 (0324c665, re-checked 2026-10-20 against the current pin 73bfe6c and
+# found an ancestor of it, as of its predecessor e8fd209 too). This
 # row is inert for the engine this app installs and live only for an SMOLLM_ENGINE_TAG override or a
 # user-supplied older binary.
 condition = "backend == cpu and host_has_avx512"
@@ -183,9 +184,13 @@ marketing_ratio_vs_fp16 = 9.0
 # Unpacking dense trits costs arithmetic.
 # Vulkan is the one backend that takes PTQ1_0 by rule rather than by measurement: PQ2_0's Vulkan
 # kernels are device-dependent (llama.cpp#238, in the pinned build) and no run here has settled them.
-# SYCL is not listed at all: #235 merged ternary SYCL loading on 2026-09-24 and is in this release,
-# but upstream's measurement of that path (#360, a verbatim Arc B390 run) postdates the pin, and no
-# SYCL asset is pinned in engines/lock.toml. Intel GPUs are therefore served by Vulkan.
+# SYCL is not listed at all, and its reason changed on 2026-10-20. #235 merged ternary SYCL loading
+# on 2026-09-24 and #356 brought the TernSYCL XMX path, both inside the current pin, and upstream now
+# publishes docs/backend/SYCL-bonsai.md with a measured Arc B390 run of this very pack (15.8 tok/s
+# tg128). It is still not offered here: no SYCL asset is pinned in engines/lock.toml, the archive needs
+# oneAPI runtime libraries this app does not ship, BACKEND-SUPPORT.md still marks the SYCL ternary
+# cells ✅* (partial / needs validation), and the demo's scripts "do not automatically select or
+# install SYCL yet". Intel GPUs are therefore served by Vulkan.
 preferred_for_backends = ["vulkan"]
 fallback_for_backends = ["metal", "cpu", "cuda", "rocm", "hip"]
 notes = "The '1-bit / ~9x smaller than FP16' pack. Cheapest on disk and RAM."
@@ -466,7 +471,7 @@ severity = "fatal"
 [[model.packs]]
 # The file the card still recommends — the reason this entry exists. It is the DEPRECATED legacy
 # layout: a group-128 body stored under ggml type id 42, which prism-v7 reads as group-64. Proved
-# natively on the pinned prism-b10772 binary, whose loader refuses it:
+# natively on prism-b10772, the tag this app pinned when the message below was captured:
 #   E gguf_init_from_reader: this file matches the legacy Prism Q2_0 layout (group size 128 stored
 #     as ggml type id 42), but this build reads Q2_0 as the official group-64 format
 #   E gguf_init_from_reader: you are probably using the wrong GGUF: use the PQ2_0 version of this
@@ -684,10 +689,10 @@ fork_repo = "PrismML-Eng/llama.cpp"
 # BACKEND-SUPPORT.md's per-row audit baselines: CPU/Metal/CUDA/ROCm-HIP retain the prism-b10709
 # audit, Vulkan was audited at prism-b10743, and PQ2_0's Vulkan kernels "shipped in
 # prism-b10735-842b188". b10743 is the newest of those floors over the backends this app actually
-# selects, so it is the claim made here. The demo's current release baseline is
-# prism-b10777-e3de715 — newer than the engine this app pins (b10772, engines/lock.toml), and
-# `EngineLock::satisfies` would refuse to launch the model on our own binary if the floor were
-# written as the demo's pin. That drift belongs to the engine bump, not to this entry.
+# selects, so it is the claim made here — and it is deliberately the audit floor rather than the
+# demo's own release pin (prism-b10787-73bfe6c as of 2026-10-20, the tag engines/lock.toml now also
+# carries). Writing the demo's pin here would make `EngineLock::satisfies` refuse to launch this
+# model on a build that upstream's own table says is supported at b10743.
 min_release_tag = "prism-b10743-adfffbe"
 # Proves the checkpoint went through Prism's Hadamard export. Verified present: 14 `prism.hadamard.*`
 # keys in the PQ2_0 header. Without them a ternary file loads silently and emits nonsense
@@ -953,8 +958,9 @@ recommended_generation_budget_tokens = 16384
 recommended_context = 32768
 # kv_cache_types is a property of the runtime, not of this checkpoint (27B KNOWN_ISSUES.md: q5_0 is
 # several times slower, #191). One model-specific fact sits beside it: quantized KV with the MTP
-# drafter on CUDA needs prism-b10776-d00e252 or newer (card + USAGE.md), and this app pins b10772 —
-# which is another reason the drafters below stay switched off.
+# drafter on CUDA needs prism-b10776-d00e252 or newer (card + USAGE.md). The pin satisfies that floor
+# as of prism-b10787-73bfe6c, so it is no longer a reason to hold the drafters back — they stay off
+# because nothing in this app passes `--spec-type` and SMALL-MODELS.md declines to automate it.
 kv_cache_types = ["f16", "q8_0", "q4_0"]
 kv_cache_forbidden_types = ["q5_0"]
 

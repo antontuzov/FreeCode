@@ -21,7 +21,9 @@ question directly —
 `status: "behind"` when the fix is already an ancestor of the pinned build. Re-run for the fixes the
 pin is asserted to carry on 2026-10-20: #245 `0324c665`, #238 `3ae4f510`, #235 `ccbf5a75`, #252
 `c53526a0`, #291 `46d25326`, #206 `01ae597e`, #196 `922be44a`, #317 `8b0c19c8`, and the tag
-`prism-b10735-842b188` — all behind, so all present. **An entry in this file therefore cannot argue
+`prism-b10735-842b188` — all behind, so all present. The list was run again against
+`73bfe6cc485554822f80c473a3c0c4f25e80f41b` when `engines/lock.toml` moved to `prism-b10787-73bfe6c`
+the same day, and every one is still behind. **An entry in this file therefore cannot argue
 for a from-source build on the grounds that the fix is unreleased**; if it needs one now, it is
 because upstream's tracker still shows the item open, and that is what the wording says.
 
@@ -45,10 +47,19 @@ _Enforced_: `GenerationBudget::default` is 16 384 tokens with a 32 768 window, a
 least 1 024 tokens above the reply budget — `crates/smollm-config/src/sampling.rs`.
 _Not the card's exact numbers_: upstream pairs `-n 16384` with `-c 65536`; this app's default window
 is 32 768, because the window is sized from the machine below.
+_New in the 2026-10-20 pin, not yet used_: `73bfe6cc` adds `--reasoning-max-tokens-floor N`, which
+raises a client `max_tokens` below `N` up to `N` server-side when thinking is on — the same job as
+`MIN_MAX_TOKENS`, done where the launch is owned. The client-side clamp stays because it also covers
+a shared server this app did not start; adopting the switch is filed as its own change rather than
+smuggled into the bump.
 
 **`reasoning_effort: "high"` is an HTTP 500.** The template knows `low`, `medium`, `xhigh`, `none`.
 _Enforced_: the catalog declares `never_send = ["high"]` and `wire_effort` rejects it before a
 request is built — `crates/smollm-llama/src/client.rs`. Test: `high_is_never_sent_and_low_goes_out_as_xhigh`.
+_New in the 2026-10-20 pin, not yet used_: the same release adds `--reasoning-effort-allow` and
+`--reasoning-effort-fallback`, so a server can substitute a safe level for a rejected one instead of
+raising. `never_send` stays: rejecting on the client is what lets the control say what it will
+actually send, and the switch only protects a server this app started.
 
 **`low` does not shorten reasoning.** Upstream measured it at about the same cost as `xhigh`, so
 offering it as "brief" would promise something untrue.
@@ -120,9 +131,16 @@ source build: `-DCMAKE_CUDA_ARCHITECTURES=120a-real`. Nothing in the pin address
 as a caveat on the 27B's two runtime packs, plus `engines/lock.toml`'s `[from_source]` table.
 
 **SYCL has no binary for this app to run.** Upstream used to report "unsupport data type" for both
-ternary types there; llama.cpp#235 merged ternary SYCL loading on 2026-09-24, so the pinned build is
-not missing the kernels — but upstream still marks that row unvalidated, no SYCL asset is pinned
-in `engines/lock.toml`, and even the demo's own scripts never select it.
+ternary types there; llama.cpp#235 merged ternary SYCL loading on 2026-09-24 and llama.cpp#356 added
+the TernSYCL XMX int2×int8 path, decode attention and fusions, both inside the pin — and the release
+ships `win-sycl-x64` / `ubuntu-sycl-*` archives, with docs/backend/SYCL-bonsai.md publishing a
+measured Arc B390 run of PTQ1_0 on SYCL. So this is no longer a gap in the kernels. It is still declined, on three facts that are about
+this app rather than about Intel hardware: `engines/lock.toml` pins no SYCL asset and the archives
+need oneAPI runtime libraries the app does not ship; SYCL-RELEASE.md says flatly that "compilation
+does not validate model correctness or performance on an Intel GPU", BACKEND-SUPPORT.md keeps the
+ternary cells at ✅* (partial / needs validation) on a source audit baseline older than the release,
+and SYCL-bonsai.md's own measurement ends with "other Intel GPUs have not been measured with these
+defaults; please report numbers"; and even the demo's own scripts never select it.
 _Enforced_: the lock marks SYCL unsupported with that reason, and `EngineBinary::resolve_for` returns
 `UnsupportedBackend` rather than launching it — `crates/smollm-llama/src/engine.rs`. Test:
 `sycl_is_refused_with_the_reason_from_the_lock_file`.
@@ -135,7 +153,7 @@ picks it — Windows/CUDA resolves to 12.4. Test:
 **`PQ2_0` segfaults while loading on AVX-512 CPUs** (Zen 4/5, Strix Halo) — **on releases before
 llama.cpp#245**, merged 2026-09-23 and an ancestor of this app's pin, so the pinned build carries the
 fix. The warning `score_pack` emits on such a host is therefore about what has never been *measured
-here*, not about a crash the user is about to hit. This app ships `prism-b10772-e8fd209`, newer than
+here*, not about a crash the user is about to hit. This app ships `prism-b10787-73bfe6c`, newer than
 the release upstream names as the workaround, and the pin is asserted to be `>= prism-b10709` because
 the launch-day `prism-b10687` shipped no binaries at all. **What this app cannot check**: whether this
 machine is an affected CPU, and whether the fixed kernel path actually decodes on GPU there. The
@@ -166,7 +184,8 @@ the log still claimed every layer was offloaded (llama.cpp#238, merged 2026-09-2
 says "not in a release at the time of writing"; `#238` is an ancestor of this app's pin, so on the
 build this app installs the fallback this row describes is not the risk — what is left is
 BACKEND-SUPPORT.md marking that cell partial (kernel selection depends on the device and driver,
-no direct coopmat2 decoder, "no new hardware tests were run for this table"), plus #192 and #270,
+no direct coopmat2 decoder, and the row's audit baseline is `prism-b10743-adfffbe` rather than the
+release it describes), plus #192 and #270,
 which stay open on Intel parts. _Enforced_ before the packing is ever chosen: `score_pack` penalises
 `PQ2_0` on a Vulkan host so `PTQ1_0` is selected, and the warning says plainly that this is this app's
 unmeasured caution rather than a known failure

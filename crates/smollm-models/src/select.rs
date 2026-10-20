@@ -104,13 +104,15 @@ fn score_pack(pack: &Pack, host: &HostHardware, headroom: u64, installed: bool) 
     }
 
     // Rule: SYCL is declined. Not because the kernels are missing — llama.cpp#235 merged ternary SYCL
-    // support into the pinned release — but because no SYCL asset is pinned in engines/lock.toml and
-    // upstream's own matrix marks that row partial with no end-to-end Intel validation.
+    // support and #356 the TernSYCL XMX path, both in the pinned release, and upstream now documents
+    // a measured Arc B390 run — but because no SYCL asset is pinned in engines/lock.toml, the archives
+    // need oneAPI runtime libraries this app does not ship, and upstream's matrix still marks the
+    // ternary cells partial.
     if host.backend == Backend::Sycl && pack.is_ternary_quant() {
         s.viable = false;
         s.value -= 1000;
         s.warnings
-            .push("No SYCL engine is pinned for this app (llama.cpp#235 put the ternary kernels in the pinned build, but upstream leaves that row unvalidated). Use the Vulkan build instead.".into());
+            .push("No SYCL engine is pinned for this app (llama.cpp#235 and #356 put the ternary kernels in the pinned build, but upstream still marks that cell partial and the demo's scripts do not install SYCL). Use the Vulkan build instead.".into());
     }
 
     // Rule: model card throughput table — PTQ1_0 decodes faster on Ada-generation GPUs and L4,

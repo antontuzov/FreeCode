@@ -443,12 +443,12 @@ mod tests {
         let l = lock();
         let t = target(&l, "darwin", "aarch64", Backend::Metal);
         let p = plan_for(&l, Path::new("/work"), &t);
-        assert_eq!(p.url, "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10772-e8fd209/llama-prism-b10772-e8fd209-bin-macos-arm64.tar.gz");
+        assert_eq!(p.url, "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10787-73bfe6c/llama-prism-b10787-73bfe6c-bin-macos-arm64.tar.gz");
         assert_eq!(p.expected_sha256, t.sha256);
         assert_eq!(p.expected_size_bytes, t.size_bytes);
         assert_eq!(
             p.dest,
-            PathBuf::from("/work/engines/prism-b10772-e8fd209/.parts/llama-prism-b10772-e8fd209-bin-macos-arm64.tar.gz")
+            PathBuf::from("/work/engines/prism-b10787-73bfe6c/.parts/llama-prism-b10787-73bfe6c-bin-macos-arm64.tar.gz")
         );
         // A public release asset must never be fetched with the model token attached.
         assert_eq!(p.token_env, None);
@@ -458,8 +458,8 @@ mod tests {
     /// API because `tar::Builder` refuses the `..` paths the archive-slip test has to plant. The
     /// layout mirrors the pinned `…-bin-macos-arm64.tar.gz`, which wraps everything in one
     /// `llama-prism-<tag>/` directory.
-    const FAKE_BANNER: &[u8] = b"#!/bin/sh\necho 'version: 10772 (e8fd209)'\n";
-    const WRAPPED_SERVER: &str = "llama-prism-b10772-e8fd209/llama-server";
+    const FAKE_BANNER: &[u8] = b"#!/bin/sh\necho 'version: 10787 (73bfe6c)'\n";
+    const WRAPPED_SERVER: &str = "llama-prism-b10787-73bfe6c/llama-server";
 
     fn write_tar_gz(into: &Path, asset: &str, entries: &[(&str, &[u8])]) -> PathBuf {
         std::fs::create_dir_all(into).unwrap();
@@ -557,7 +557,7 @@ mod tests {
         let archive = write_tar_gz(
             &tag_dir(root, &l).join(PARTS_DIR),
             &t.asset,
-            &[("llama-prism-b10772-e8fd209/llama-cli", FAKE_BANNER)],
+            &[("llama-prism-b10787-73bfe6c/llama-cli", FAKE_BANNER)],
         );
 
         let err = unpack(&l, root, &t, &archive).expect_err("no llama-server means no install");
@@ -664,7 +664,7 @@ mod tests {
     /// `#[ignore]`d: CI never downloads, and the asset has to be fetched out of band first.
     ///
     ///   curl -sSL -o /tmp/asset.tar.gz \
-    ///     https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10772-e8fd209/llama-prism-b10772-e8fd209-bin-macos-arm64.tar.gz
+    ///     https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10787-73bfe6c/llama-prism-b10787-73bfe6c-bin-macos-arm64.tar.gz
     ///   SMOLLM_ENGINE_ARCHIVE=/tmp/asset.tar.gz cargo test -p smollm-llama -- --ignored
     #[test]
     #[ignore]

@@ -29,8 +29,11 @@ impl Backend {
     /// The two exclusions are that script's policy, not a statement about what the pinned build can
     /// do. Vulkan is left out even though its PQ2_0 kernels shipped in `prism-b10735-842b188`
     /// (llama.cpp#238, so they are in this pin), and SYCL is left out although llama.cpp#235 merged
-    /// ternary SYCL kernels — also in this pin. Both rows are still marked partial in
-    /// BACKEND-SUPPORT.md with "no new hardware tests were run for this table", which is why this app
+    /// ternary SYCL kernels and #356 added the TernSYCL XMX path — both in this pin too. Both rows
+    /// are still ✅* (partial / needs validation) in BACKEND-SUPPORT.md, whose cells keep audit
+    /// baselines older than the release they describe (Vulkan audited at `prism-b10743-adfffbe`,
+    /// SYCL at `prism-b10770-6684606`, the rest at `prism-b10709-9a9394a`) under the rule that
+    /// "pending PRs and newer branch code do not count as released support". That is why this app
     /// keeps the demo's conservative list rather than the capability matrix.
     pub fn pq2_0_kernels_ready(self) -> bool {
         matches!(
@@ -105,8 +108,9 @@ pub enum GpuArch {
     AmdGfx1151,
     AmdOther,
     /// Intel Arc: this app's Intel path is Vulkan, because no SYCL engine is pinned and upstream
-    /// leaves that row unvalidated (#235 put the kernels in the pinned build); and PTQ1_0 can still
-    /// hang after ~1900 tokens on Vulkan (#192, open).
+    /// still marks the SYCL ternary cells partial (#235 and #356 put the kernels in the pinned build,
+    /// and docs/backend/SYCL-bonsai.md measures one Arc card); and PTQ1_0 can still hang after ~1900
+    /// tokens on Vulkan (#192, open).
     IntelArc,
     Unknown,
     None,

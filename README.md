@@ -47,7 +47,7 @@ reason on hover:
 
 ## How a model runs
 
-`engines/lock.toml` pins one release of the PrismML fork of llama.cpp (`prism-b10772-e8fd209` today) and
+`engines/lock.toml` pins one release of the PrismML fork of llama.cpp (`prism-b10787-73bfe6c` today) and
 records the sha256 of every release asset the app can install. The install refuses to unpack an archive
 whose digest does not match, so a substituted asset cannot reach the loader. The engine is downloaded, not
 vendored.

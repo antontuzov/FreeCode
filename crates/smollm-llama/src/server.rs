@@ -944,10 +944,10 @@ mod tests {
         let lock = EngineLock::load_default(&root).expect("lock parses");
         // The fake banner is what a stock build prints: the fork's build number with upstream's
         // commit, which `banner_matches_pin` must refuse.
-        let fake = "version: 10772 (0a1b2c3)\nbuilt with AppleClang 17 for arm64".to_string();
+        let fake = "version: 10787 (0a1b2c3)\nbuilt with AppleClang 17 for arm64".to_string();
         assert!(!banner_matches_pin(&fake, &lock));
         assert!(banner_matches_pin(
-            &format!("version: 10772 ({})", lock.pinned_commit),
+            &format!("version: 10787 ({})", lock.pinned_commit),
             &lock
         ));
     }

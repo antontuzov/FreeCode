@@ -228,11 +228,11 @@ mod tests {
         let t = l.target_for("darwin", "aarch64", Backend::Metal).unwrap();
         assert_eq!(
             l.download_url(t),
-            "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10772-e8fd209/llama-prism-b10772-e8fd209-bin-macos-arm64.tar.gz"
+            "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10787-73bfe6c/llama-prism-b10787-73bfe6c-bin-macos-arm64.tar.gz"
         );
         assert_eq!(
             l.install_dir(Path::new("engines"), t),
-            PathBuf::from("engines/prism-b10772-e8fd209/macos-arm64")
+            PathBuf::from("engines/prism-b10787-73bfe6c/macos-arm64")
         );
         assert_eq!(l.server_binary(), "llama-server");
     }

@@ -49,9 +49,9 @@ impl EngineBinary {
     }
 
     /// Resolve for an explicit triple. `UnsupportedBackend` carries the reason copied verbatim out of
-    /// `engines/lock.toml`: SYCL has ternary kernels in the pinned build (llama.cpp#235 merged them),
-    /// but no SYCL asset is pinned here and upstream leaves that row unvalidated, so it is never
-    /// chosen.
+    /// `engines/lock.toml`: SYCL has ternary kernels in the pinned build (llama.cpp#235 and #356
+    /// merged them), but no SYCL asset is pinned here and upstream still marks those cells partial,
+    /// so it is never chosen.
     pub fn resolve_for(
         root: &Path,
         lock: &EngineLock,
@@ -200,10 +200,10 @@ fn binary_names(binary: &str) -> Vec<String> {
 ///
 /// Two shapes occur, and both must parse. The pinned PrismML build prints
 /// ```text
-/// version: 0.2.0-dev (build 10772, commit e8fd209c9)
+/// version: 0.2.0-dev (build 10787, commit 73bfe6cc4)
 /// built with AppleClang 21.0.0.21000101 for Darwin arm64
 /// ```
-/// while upstream llama.cpp prints `version: 10772 (e8fd209)`. Anything we cannot parse is reported
+/// while upstream llama.cpp prints `version: 10787 (73bfe6c)`. Anything we cannot parse is reported
 /// as absent rather than guessed, so an unrecognisable banner can never be mistaken for a verified
 /// fork build — and the `AppleClang 21.0.0.21000101` token is why the build number is taken from the
 /// word `build` when that word is present, not from "the first long number in the text".
@@ -265,8 +265,8 @@ pub fn banner_matches_pin(banner: &str, lock: &EngineLock) -> bool {
         .is_some_and(|c| same_commit(c, &lock.pinned_commit))
 }
 
-/// `engines/lock.toml` records the short sha from the release tag (`e8fd209`) and the binary prints
-/// a longer one (`e8fd209c9`), so equality has to be a prefix test in whichever direction is longer —
+/// `engines/lock.toml` records the short sha from the release tag (`73bfe6c`) and the binary prints
+/// a longer one (`73bfe6cc4`), so equality has to be a prefix test in whichever direction is longer —
 /// the way `git` compares abbreviated object names. Requiring 7 characters keeps a one-letter
 /// difference from ever matching.
 fn same_commit(a: &str, b: &str) -> bool {
@@ -366,43 +366,43 @@ mod tests {
 
     #[test]
     fn version_banners_are_parsed_conservatively() {
-        let v = parse_version("version: 10772 (e8fd209)\nbuilt with AppleClang 17 for arm64");
-        assert_eq!(v.build, Some(10772));
-        assert_eq!(v.commit.as_deref(), Some("e8fd209"));
+        let v = parse_version("version: 10787 (73bfe6c)\nbuilt with AppleClang 17 for arm64");
+        assert_eq!(v.build, Some(10787));
+        assert_eq!(v.commit.as_deref(), Some("73bfe6c"));
 
         let lock = lock();
         assert!(banner_matches_pin(
-            &format!("version: 10772 ({})", lock.pinned_commit),
+            &format!("version: 10787 ({})", lock.pinned_commit),
             &lock
         ));
         // Stock llama.cpp reports an upstream commit, so the pin check rejects it.
-        assert!(!banner_matches_pin("version: 10772 (0a1b2c3)", &lock));
+        assert!(!banner_matches_pin("version: 10787 (0a1b2c3)", &lock));
         assert!(!banner_matches_pin("llama-server", &lock));
         assert_eq!(parse_version("llama-server").build, None);
     }
 
     /// What the pinned PrismML macOS build actually prints — captured from
-    /// `engines/prism-b10772-e8fd209/macos-arm64/llama-server --version` on 2026-10-13. The fork's
+    /// `engines/prism-b10787-73bfe6c/macos-arm64/llama-server --version` on 2026-10-20. The fork's
     /// shape carries a `0.2.0-dev` semver and puts both numbers in one parenthesis, which the
     /// upstream-only parser read as "no commit at all".
     #[test]
     fn the_fork_banner_shape_is_parsed_and_matches_the_pin() {
-        let banner = "version: 0.2.0-dev (build 10772, commit e8fd209c9)\n\
+        let banner = "version: 0.2.0-dev (build 10787, commit 73bfe6cc4)\n\
                       built with AppleClang 21.0.0.21000101 for Darwin arm64";
         let v = parse_version(banner);
         assert_eq!(
             v.build,
-            Some(10772),
+            Some(10787),
             "the build number, not the compiler version"
         );
-        assert_eq!(v.commit.as_deref(), Some("e8fd209c9"));
+        assert_eq!(v.commit.as_deref(), Some("73bfe6cc4"));
         assert!(
             banner_matches_pin(banner, &lock()),
             "the lock pins the 7-char short sha and the binary prints 9"
         );
-        // A different commit that shares the first 7 characters must still be refused.
+        // A near miss on the last character of the pinned sha is still a different build.
         assert!(!banner_matches_pin(
-            "version: 0.2.0-dev (build 10772, commit e8fd2ffaa)",
+            "version: 0.2.0-dev (build 10787, commit 73bfe0cc4)",
             &lock()
         ));
         assert!(!banner_matches_pin(
@@ -414,7 +414,7 @@ mod tests {
     #[test]
     fn a_commit_is_matched_only_from_seven_characters() {
         assert!(same_commit("abcdef1", "abcdef123"));
-        assert!(same_commit("E8FD209C9", "e8fd209"));
+        assert!(same_commit("73BFE6CC4", "73bfe6c"));
         // Six shared characters is not enough to call it the same build.
         assert!(!same_commit("abcdef", "abcdef123"));
     }
