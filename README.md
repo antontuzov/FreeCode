@@ -167,6 +167,7 @@ crates/smollm-tools     the tool registry, the sandbox, the two web calls
 crates/smollm-core      the transcript model, the agent loop, approvals
 apps/desktop            the Tauri v2 host and the React interface
 docs/reference-ui       the screenshots the interface is matched against
+docs/KNOWN_ISSUES.md    every model limit the code defends against, and where the defence is
 ```
 
 ## Third-party

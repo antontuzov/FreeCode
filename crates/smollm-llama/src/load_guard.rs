@@ -1,7 +1,8 @@
 //! The load-guard: the check that runs before any weight file is handed to any binary.
 //!
 //! It exists because of a failure mode documented in
-//! <https://github.com/PrismML-Eng/Bonsai-demo/blob/main/KNOWN_ISSUES.md> and llama.cpp#242:
+//! <https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/raw/main/KNOWN_ISSUES.md> and
+//! llama.cpp#242:
 //! `PQ2_0`/`PTQ1_0` are *new quant types that exist only in the PrismML fork*, and the F16
 //! reference is in a rotated basis whose activation transform only the fork applies. Point stock
 //! llama.cpp at these files and it does not fail loudly — the ternary types are rejected as

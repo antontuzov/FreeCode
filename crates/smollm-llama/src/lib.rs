@@ -150,8 +150,11 @@ pub enum LlamaError {
     },
     #[error("the llama.cpp server could not be reached: {0}")]
     Http(#[from] reqwest::Error),
+    /// A request the server answered by refusing it. Every way this happens is recorded in
+    /// `docs/KNOWN_ISSUES.md`, and the app defends against each one before the request is built —
+    /// so reaching this variant at all means a limit the catalog does not yet name.
     #[error(
-        "the llama.cpp server answered {status}:\n{body}\nThis is the template's own refusal — see the model's KNOWN_ISSUES.md."
+        "the llama.cpp server answered {status}:\n{body}\nThe model's chat template refused the request, which is a limit of the template rather than a lost connection."
     )]
     ServerError { status: u16, body: String },
     #[error(transparent)]

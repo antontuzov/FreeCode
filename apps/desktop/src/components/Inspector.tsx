@@ -30,8 +30,9 @@ type Group = {
   counted?: boolean;
 };
 
-// The groups the reference inspector shows, in order: first what the run changed, then the five it
-// draws under it.
+// The groups the reference inspector shows, in order: first what the run changed, then the ones it
+// draws under it. `subagents` is the scripted set's own, so a real answer never lists it — see
+// FIXTURE_ONLY.
 const GROUPS: Group[] = [
   { key: "files", icon: "editFile" },
   { key: "subagents", icon: "user", round: true },
@@ -93,15 +94,20 @@ const SEEDED_FOLDED = new Set(
 );
 
 /**
- * `?fixture=1` only, for the two groups no loop in this build writes rows for yet — see the note in
+ * `?fixture=1` only, for the one group no loop in this build writes rows for yet — see the note in
  * state/transcript.ts about invented run output. The four a run *can* produce — `files`, `source`,
- * `webReading` and `skills` — are read off the transcript in every mode, so what the panel lists and
- * what the rows above it report stay one answer rather than two.
+ * `webReading` and `skills` — and the page it leaves behind (`artifact`) are read off the transcript in
+ * every mode, so what the panel lists and what the rows above it report stay one answer rather than
+ * two.
  */
 const FIXTURE_ITEMS: Record<string, Item[]> = {
   subagents: [{ label: "Explore · llama.cpp", meta: "stopped" }, { label: "Audit engine claims" }],
-  artifact: [{ label: "README.md" }],
 };
+
+/** The groups only the script can fill. A real run has no loop that writes rows for them, because
+ * there is no subagent concept in this build — so a heading for them advertises a capability the app
+ * does not have, which a folded empty row cannot unsay. */
+const FIXTURE_ONLY = new Set(Object.keys(FIXTURE_ITEMS));
 
 function SectionHeader({
   open,
@@ -336,13 +342,21 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
   // are the host's answer to one `Edit`, so listing them from the rows keeps this group and the pill
   // above the composer reading the same run. The rows are read from the last prompt down for the same
   // reason — this column reports one run, and a conversation's earlier turns are not part of it.
+  const touched = useMemo(() => changedFiles(reviewRows(rows, "lastTurn")), [rows]);
   const files = useMemo<Item[]>(
     () =>
-      changedFiles(reviewRows(rows, "lastTurn")).map(({ path, added, removed }) => ({
+      touched.map(({ path, added, removed }) => ({
         label: path,
         diff: { added, removed },
       })),
-    [rows],
+    [touched],
+  );
+  // The artifact is what the run left behind rather than what it touched: a create is the only step
+  // that produces a file which was not there, and the page a run builds is the thing a reader comes to
+  // this column to open. Same span, same rows, so the two lists cannot disagree about the run.
+  const artifacts = useMemo<Item[]>(
+    () => touched.filter((f) => f.created).map(({ path }) => ({ label: path, path: true })),
+    [touched],
   );
   // The two read groups come off the same span of rows as the files, for the same reason: `fetch_url`
   // writes the address it opened into the row it leaves, and `read_file` the path it brought into the
@@ -377,8 +391,8 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
       })),
     [rows, locale],
   );
-  // The scripted groups fill in under the row-derived ones, which a fixture window therefore still
-  // sees — and a real run does not, because it has no scripted rows to fill them from.
+  // The scripted group fills in under the row-derived ones, which a real run never sees — it has no
+  // scripted rows to fill it from, and no heading either.
   const groups = useMemo<Record<string, Item[]>>(
     () => ({
       ...(fixture ? FIXTURE_ITEMS : {}),
@@ -386,8 +400,9 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
       skills: capabilities,
       source: sources,
       webReading: pages,
+      artifact: artifacts,
     }),
-    [fixture, files, capabilities, sources, pages],
+    [fixture, files, capabilities, sources, pages, artifacts],
   );
 
   return (
@@ -396,7 +411,7 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
       className="flex min-h-0 flex-1 flex-col overflow-y-auto border-l border-line bg-bg"
     >
       {run ? <RunSection locale={locale} run={run} /> : <UnmeasuredSection locale={locale} />}
-      {GROUPS.map((group) => (
+      {GROUPS.filter((group) => fixture || !FIXTURE_ONLY.has(group.key)).map((group) => (
         <Section key={group.key} group={group} items={groups[group.key] ?? []} locale={locale} />
       ))}
     </aside>
