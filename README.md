@@ -12,7 +12,9 @@ engine or the host actually measured.
 
 - **Chats with a local model.** Streams tokens and reasoning, renders the answer as markdown with real
   math (KaTeX) and code fences with a copy control, and keeps the reasoning of past turns visible while
-  replaying only the answers, so the fork's prompt cache keeps hitting.
+  replaying only the answers, so the fork's prompt cache keeps hitting. A remote OpenAI-compatible
+  provider can answer instead, behind an explicit source choice, the Privacy switch and a key held in the
+  macOS Keychain.
 - **Runs a coding loop.** The composer's Coding control turns the same model into an agent that reads,
   searches, creates files, edits them and applies a multi-file patch; with the Privacy switch on it looks
   things up on the web, with Terminal access on it runs one command, and with Subagents on it may hand
@@ -65,6 +67,30 @@ Hugging Face tree API and the repos' own `SHA256SUMS`, context lengths read from
 known issues quoted per pack. Three models are catalogued today — Bonsai 2 27B, Bonsai 2 4B and Ternary
 Bonsai 1.7B — and the download happens in the app.
 
+### Remote providers
+
+Settings → Model → Remote provider can send prompts to an OpenAI-compatible endpoint instead of the local
+engine. This is opt-in twice: the Privacy switch *Allow remote providers* must be on, and the source must
+be set to Remote. With either missing, a prompt is refused with the setting named — it is never answered by
+the local engine as a fallback, so "Remote" cannot silently mean "local anyway".
+
+- **The key never enters the settings document.** It is stored in the macOS Keychain (service
+  `studio.smollm.desktop.remote-provider`, account `api-key`), read only when a request is built, held in
+  memory for that turn, and sent as `Authorization: Bearer`. The settings file, IPC answers, logs and the
+  process arguments never contain it; the UI can only ask whether one is saved.
+- **HTTPS, or loopback.** The base URL must be `https://…`; plain `http://` is accepted only for a
+  loopback address, which is what makes a local provider testable without a certificate. Credentials
+  pasted inside the URL are refused, so they cannot end up saved as part of the address.
+- **What is sent.** The messages (including an attached image, if the provider's model accepts one), the
+  model id, the reply budget, the tool schemas, and `stream_options.include_usage`. The app appends
+  `/v1/chat/completions` to the base URL.
+- **What is not sent.** No sampler values and no reasoning-effort field: those belong to the pinned fork's
+  template, and an arbitrary endpoint has neither. The provider's own defaults apply.
+- **What is not supported.** Non-OpenAI auth schemes (an `api-key` header, signed requests), provider-
+  specific request fields, and counting a prompt's tokens before sending it. The meter reads the usage the
+  provider returns; a prompt too large for the declared window is reported by the provider, not predicted
+  here. The declared context window also caps the reply budget at half its size.
+
 ## What the agent may reach
 
 - **The workspace.** Reads (`read_file`, `list_dir`, `glob`, `grep_search`) and the two writes
@@ -88,6 +114,7 @@ Bonsai 1.7B — and the download happens in the app.
 | What | Where |
 | --- | --- |
 | Settings | `~/Library/Application Support/smollm-studio/settings.json` (platform standard elsewhere) |
+| Remote provider key | macOS Keychain, service `studio.smollm.desktop.remote-provider`, account `api-key` |
 | Filed conversations | `sessions/` beside it, one JSON file each |
 | Deleted conversations | `sessions/trash/`, until Settings → Storage erases one for good |
 | Server pid registry | `servers.pid` beside it |

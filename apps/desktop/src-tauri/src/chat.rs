@@ -35,12 +35,12 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-use smollm_config::{PackingChoice, ReasoningEffort, Settings};
+use smollm_config::{ModelSource, PackingChoice, ReasoningEffort, Settings};
 use smollm_core::events::{AgentEvent, NoticeCode, RunReport, ToolOutcome};
 use smollm_core::transcript::{DiffStat, StepStatus, TranscriptStep};
 use smollm_llama::{
-    prompt_tokens, start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message, Reply,
-    ReplyDelta, ServerHandle, StreamControl, IMAGE_TOKEN_CAP,
+    prompt_tokens, start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message,
+    RemoteAccess, Reply, ReplyDelta, ServerHandle, StreamControl, IMAGE_TOKEN_CAP,
 };
 use smollm_models::{gguf, IntegrityStatus, ModelEntry};
 use smollm_tools::{SandboxPolicy, Summary, SummaryKey};
@@ -153,6 +153,79 @@ struct Turn {
     /// downgrade, so this host does not pre-apply the same rule twice.
     effort: String,
     max_tokens: u32,
+}
+
+/// A turn answered by a remote provider instead of the supervised local server.
+///
+/// The key is held for the life of the run and goes on its requests only. It is never filed with the
+/// conversation, written to settings, printed in a notice, or returned over IPC — the settings page
+/// can ask whether one is saved, never read it back.
+#[derive(Clone)]
+struct RemoteTurn {
+    base_url: String,
+    model: String,
+    context_tokens: u32,
+    max_tokens: u32,
+    key: String,
+}
+
+/// Where one turn is answered.
+///
+/// There is deliberately no fallback between the two: a remote selection whose consent switch is
+/// off, whose address is incomplete or whose key is missing is a refusal, not a quiet return to the
+/// local engine. Falling back would send a prompt somewhere the user did not choose, or pay a model
+/// load they did not ask for, and the refusal names the setting to change instead.
+#[derive(Clone)]
+enum Answer {
+    // Boxed because the local turn carries the resolved model entry and the server view, and an enum
+    // is as large as its widest variant: a provider turn would otherwise copy that whole struct on
+    // every move, for a run that never reads it.
+    Local(Box<Turn>),
+    Remote(RemoteTurn),
+}
+
+impl Answer {
+    fn is_local(&self) -> bool {
+        matches!(self, Self::Local(_))
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Self::Local(turn) => format!("{} ({})", turn.model.name, turn.view.packing),
+            Self::Remote(turn) => format!("{} (remote)", turn.model),
+        }
+    }
+
+    fn window_tokens(&self) -> u32 {
+        match self {
+            Self::Local(turn) => turn.view.context_tokens,
+            Self::Remote(turn) => turn.context_tokens,
+        }
+    }
+
+    fn max_tokens(&self) -> u32 {
+        match self {
+            Self::Local(turn) => turn.max_tokens,
+            Self::Remote(turn) => turn.max_tokens,
+        }
+    }
+
+    fn effort(&self) -> Option<&str> {
+        match self {
+            Self::Local(turn) => Some(&turn.effort),
+            // The local template's effort vocabulary was measured. A remote endpoint's is not, so
+            // the field stays off rather than sending a word the provider may reject.
+            Self::Remote(_) => None,
+        }
+    }
+}
+
+fn remote_access(turn: &RemoteTurn) -> RemoteAccess {
+    RemoteAccess {
+        base_url: turn.base_url.clone(),
+        model: turn.model.clone(),
+        key: turn.key.clone(),
+    }
 }
 
 /// A launched server plus the settings it was launched under.
@@ -778,6 +851,81 @@ async fn ensure_running(app: &AppHandle, needs: Needs) -> Result<Turn, String> {
     Ok(turn)
 }
 
+/// Resolve where this run is answered before anything is launched.
+///
+/// Checking the remote source first is what makes "remote selected" mean remote: a missing key or a
+/// consent switch that is off refuses here, and the local engine is never started as a substitute.
+async fn ensure_answer(app: &AppHandle, needs: Needs) -> Result<Answer, String> {
+    let settings = appearance::load_settings()?;
+    if settings.remote_provider.source == ModelSource::Remote {
+        return remote_turn(&settings).await.map(Answer::Remote);
+    }
+    ensure_running(app, needs)
+        .await
+        .map(|turn| Answer::Local(Box::new(turn)))
+}
+
+/// Everything a provider turn needs except the credential: consent, address, model and budgets.
+///
+/// Split from [`remote_turn`] so the refusals can be tested without reading or writing a Keychain
+/// item. Every refusal names the place to change, and none of them falls back to the local engine.
+fn remote_plan(settings: &Settings) -> Result<(String, String, u32, u32), String> {
+    let provider = &settings.remote_provider;
+    if !settings.privacy.allow_remote_providers {
+        return Err(
+            "Remote providers are off in Settings → Privacy, so this prompt was not sent anywhere. \
+             Turn that switch on to use the address saved under Settings → Model → Remote provider."
+                .into(),
+        );
+    }
+    if !provider.configured() {
+        return Err(
+            "the remote provider has no base URL or model id; set both under Settings → Model → \
+             Remote provider"
+                .into(),
+        );
+    }
+    let base_url = crate::provider::normalize_base_url(&provider.base_url)?;
+    if provider.context_tokens == 0 {
+        return Err(
+            "the remote provider's context window is 0; set the window the provider reports".into(),
+        );
+    }
+    // The run's configured budget, capped by half the declared window for the same reason the local
+    // clamp uses half: the prompt and the answer share one slot.
+    let max_tokens = settings
+        .sampling
+        .budget
+        .clamped()
+        .max_tokens
+        .min(provider.context_tokens / 2)
+        .max(1);
+    Ok((
+        base_url,
+        provider.model.trim().to_string(),
+        provider.context_tokens,
+        max_tokens,
+    ))
+}
+
+/// The provider turn, admitted only after consent, address and credential all check out.
+///
+/// The key is read from the Keychain on the blocking pool and lives in this struct and the request
+/// it makes; nothing here logs or echoes it.
+async fn remote_turn(settings: &Settings) -> Result<RemoteTurn, String> {
+    let (base_url, model, context_tokens, max_tokens) = remote_plan(settings)?;
+    let key = tauri::async_runtime::spawn_blocking(crate::provider::load_key)
+        .await
+        .map_err(|e| format!("reading the saved key stopped: {e}"))??;
+    Ok(RemoteTurn {
+        base_url,
+        model,
+        context_tokens,
+        max_tokens,
+        key,
+    })
+}
+
 /// The request for one turn: the system prompt as it is configured now, then the stored history.
 fn conversation(state: &ChatState, system_prompt: &str) -> Vec<Message> {
     let history = lock(&state.history);
@@ -833,9 +981,32 @@ struct Stops<'a> {
     stopped: &'a AtomicBool,
 }
 
+async fn stream_round(
+    answer: &Answer,
+    request: &ChatRequest,
+    on_delta: impl FnMut(&[ReplyDelta]) -> StreamControl,
+) -> Result<Reply, String> {
+    match answer {
+        Answer::Local(turn) => {
+            smollm_llama::stream_chat(
+                &turn.view.base_url,
+                request,
+                &turn.model,
+                turn.view.context_tokens,
+                on_delta,
+            )
+            .await
+        }
+        Answer::Remote(turn) => {
+            smollm_llama::stream_remote_chat(&remote_access(turn), request, on_delta).await
+        }
+    }
+    .map_err(|e| e.to_string())
+}
+
 async fn stream_turn(
     app: &AppHandle,
-    turn: &Turn,
+    answer: &Answer,
     request: &ChatRequest,
     offered: bool,
     stops: &Stops<'_>,
@@ -865,15 +1036,7 @@ async fn stream_turn(
         stops.stopped.store(true, Ordering::Relaxed);
         StreamControl::Stop
     };
-    smollm_llama::stream_chat(
-        &turn.view.base_url,
-        request,
-        &turn.model,
-        turn.view.context_tokens,
-        on_delta,
-    )
-    .await
-    .map_err(|e| e.to_string())
+    stream_round(answer, request, on_delta).await
 }
 
 /// The request for one round: the history as the host holds it now, with the run's own budget and the
@@ -881,10 +1044,15 @@ async fn stream_turn(
 ///
 /// Rebuilt per round rather than extended, because the only thing a round adds is in the history — and
 /// the system prompt is read fresh, so a Settings change made mid-run is in the next request.
-fn request_for(state: &ChatState, settings: &Settings, turn: &Turn, tools: bool) -> ChatRequest {
+fn request_for(
+    state: &ChatState,
+    settings: &Settings,
+    answer: &Answer,
+    tools: bool,
+) -> ChatRequest {
     let mut request = ChatRequest::new(conversation(state, &settings.sampling.system_prompt));
-    request.max_tokens = turn.max_tokens;
-    request.reasoning_effort = Some(turn.effort.clone());
+    request.max_tokens = answer.max_tokens();
+    request.reasoning_effort = answer.effort().map(str::to_string);
     if tools {
         // Only the calls this build has runners for — the four reads, the three workspace writes, the
         // two web calls when the Privacy switch is on, the shell when Terminal access is on, and
@@ -941,7 +1109,7 @@ struct Delegated {
 /// user's dial would refuse is refused here too. Nothing is emitted to the transcript from this loop:
 /// the one row the user sees is the delegation, and the report is what the parent gets back.
 async fn delegate(
-    turn: &Turn,
+    answer: &Answer,
     settings: &Settings,
     policy: &SandboxPolicy,
     task: &str,
@@ -952,23 +1120,28 @@ async fn delegate(
         Message::user(task),
     ];
     let mut request = ChatRequest::new(history.clone());
-    request.max_tokens = turn.max_tokens;
-    request.reasoning_effort = Some(turn.effort.clone());
+    request.max_tokens = answer.max_tokens();
+    request.reasoning_effort = answer.effort().map(str::to_string);
     request.tools = smollm_tools::subagent_specs();
 
-    if let Ok(sent) = prompt_tokens(
-        &turn.view.base_url,
-        &request,
-        &turn.model,
-        turn.view.context_tokens,
-    )
-    .await
-    {
-        if leaves_no_room(sent, turn.view.context_tokens) {
-            return Err(
-                "the delegated question does not leave room in the model's window for an answer"
-                    .into(),
-            );
+    // Only a local server can count a prompt before it answers: `/apply-template` and `/tokenize`
+    // are the fork's endpoints, not the OpenAI contract. A remote provider reports the oversize
+    // refusal itself, which then names its own limit instead of a guessed one.
+    if let Answer::Local(turn) = answer {
+        if let Ok(sent) = prompt_tokens(
+            &turn.view.base_url,
+            &request,
+            &turn.model,
+            turn.view.context_tokens,
+        )
+        .await
+        {
+            if leaves_no_room(sent, answer.window_tokens()) {
+                return Err(
+                    "the delegated question does not leave room in the model's window for an answer"
+                        .into(),
+                );
+            }
         }
     }
 
@@ -983,20 +1156,14 @@ async fn delegate(
             });
         }
         rounds += 1;
-        let reply = smollm_llama::stream_chat(
-            &turn.view.base_url,
-            &request,
-            &turn.model,
-            turn.view.context_tokens,
-            |_| {
-                if stops.requested.load(Ordering::Relaxed) {
-                    stops.stopped.store(true, Ordering::Relaxed);
-                    StreamControl::Stop
-                } else {
-                    StreamControl::Continue
-                }
-            },
-        )
+        let reply = stream_round(answer, &request, |_| {
+            if stops.requested.load(Ordering::Relaxed) {
+                stops.stopped.store(true, Ordering::Relaxed);
+                StreamControl::Stop
+            } else {
+                StreamControl::Continue
+            }
+        })
         .await
         .map_err(|e| format!("the delegated request failed: {e}"))?;
 
@@ -1065,22 +1232,24 @@ async fn delegate(
             history.push(Message::tool_result(&id, &result));
         }
         request = ChatRequest::new(history.clone());
-        request.max_tokens = turn.max_tokens;
-        request.reasoning_effort = Some(turn.effort.clone());
+        request.max_tokens = answer.max_tokens();
+        request.reasoning_effort = answer.effort().map(str::to_string);
         request.tools = smollm_tools::subagent_specs();
-        if let Ok(sent) = prompt_tokens(
-            &turn.view.base_url,
-            &request,
-            &turn.model,
-            turn.view.context_tokens,
-        )
-        .await
-        {
-            if leaves_no_room(sent, turn.view.context_tokens) {
-                return Err(
-                    "the subagent's reading did not leave room in the model's window for an answer"
-                        .into(),
-                );
+        if let Answer::Local(turn) = answer {
+            if let Ok(sent) = prompt_tokens(
+                &turn.view.base_url,
+                &request,
+                &turn.model,
+                turn.view.context_tokens,
+            )
+            .await
+            {
+                if leaves_no_room(sent, answer.window_tokens()) {
+                    return Err(
+                        "the subagent's reading did not leave room in the model's window for an answer"
+                            .into(),
+                    );
+                }
             }
         }
     }
@@ -1107,7 +1276,7 @@ fn refuse_delegation(
 /// into the parent's history as one tool result.
 async fn run_delegation(
     app: &AppHandle,
-    turn: &Turn,
+    answer: &Answer,
     settings: &Settings,
     policy: &SandboxPolicy,
     call: &smollm_llama::ToolCall,
@@ -1152,7 +1321,7 @@ async fn run_delegation(
     }
 
     let mut row = row;
-    match delegate(turn, settings, policy, &task, stops).await {
+    match delegate(answer, settings, policy, &task, stops).await {
         Ok(done) => {
             row.finish(StepStatus::Done);
             let summary = Summary::said(
@@ -1197,13 +1366,13 @@ async fn run_delegation(
 async fn run_rounds(
     app: &AppHandle,
     state: &ChatState,
-    turn: &Turn,
+    answer: &Answer,
     settings: &Settings,
     mut request: ChatRequest,
     tools: bool,
     stops: &Stops<'_>,
 ) -> Result<Reply, String> {
-    let mut reply = stream_turn(app, turn, &request, tools, stops).await?;
+    let mut reply = stream_turn(app, answer, &request, tools, stops).await?;
     if !tools {
         return Ok(reply);
     }
@@ -1237,7 +1406,9 @@ async fn run_rounds(
                 if allowed {
                     delegations += 1;
                 }
-                ran.push(run_delegation(app, turn, settings, &policy, call, stops, allowed).await);
+                ran.push(
+                    run_delegation(app, answer, settings, &policy, call, stops, allowed).await,
+                );
                 continue;
             }
             let (host, batch_settings, batch_policy, one) =
@@ -1270,32 +1441,35 @@ async fn run_rounds(
         if stops.stopped.load(Ordering::Relaxed) {
             break;
         }
-        request = request_for(state, settings, turn, tools);
+        request = request_for(state, settings, answer, tools);
         // Measured again for the same reason the first prompt is: a conversation that filled the window
         // during this run cannot be replayed, and the server would answer from its tail without saying
-        // it dropped the task.
-        if let Ok(sent) = prompt_tokens(
-            &turn.view.base_url,
-            &request,
-            &turn.model,
-            turn.view.context_tokens,
-        )
-        .await
-        {
-            if leaves_no_room(sent + picture_tokens(&request), turn.view.context_tokens) {
-                let tokens = sent.to_string();
-                let window = turn.view.context_tokens.to_string();
-                emit(
-                    app,
-                    AgentEvent::notice(
-                        NoticeCode::PromptTooLong,
-                        &[("tokens", tokens.as_str()), ("window", window.as_str())],
-                    ),
-                );
-                break;
+        // it dropped the task. Only the local server can be asked to count it; a remote provider keeps
+        // its own limit and reports it on the request.
+        if let Answer::Local(turn) = answer {
+            if let Ok(sent) = prompt_tokens(
+                &turn.view.base_url,
+                &request,
+                &turn.model,
+                turn.view.context_tokens,
+            )
+            .await
+            {
+                if leaves_no_room(sent + picture_tokens(&request), answer.window_tokens()) {
+                    let tokens = sent.to_string();
+                    let window = answer.window_tokens().to_string();
+                    emit(
+                        app,
+                        AgentEvent::notice(
+                            NoticeCode::PromptTooLong,
+                            &[("tokens", tokens.as_str()), ("window", window.as_str())],
+                        ),
+                    );
+                    break;
+                }
             }
         }
-        reply = stream_turn(app, turn, &request, tools, stops).await?;
+        reply = stream_turn(app, answer, &request, tools, stops).await?;
     }
     Ok(reply)
 }
@@ -1475,7 +1649,7 @@ pub async fn chat_send(
         let held = lock(&state.history);
         held.iter().any(|m| !m.images.is_empty())
     };
-    let turn = ensure_running(&app, Needs::from_request(carries_picture)).await?;
+    let answer = ensure_answer(&app, Needs::from_request(carries_picture)).await?;
     let state = app.state::<ChatState>();
     {
         let mut slot = lock(&state.slot);
@@ -1493,15 +1667,16 @@ pub async fn chat_send(
     // This run's own tally, opened before its first request: the pill reads it, and a run that
     // changes nothing has to be able to say nothing.
     state.begin_run();
-    let model_label = format!("{} ({})", turn.model.name, turn.view.packing);
+    let model_label = answer.label();
     emit(
         &app,
         AgentEvent::RunStarted {
             run_id: run_id.clone(),
             model_label: model_label.clone(),
-            // The answer is coming from the supervised loopback server, so the only thing that can
-            // make this run not-local is a configured remote provider.
-            local: status::local_badge(true, settings.privacy.allow_remote_providers),
+            // The source was resolved above, so this is a fact rather than a possibility: a local
+            // turn talks only to the supervised loopback server, and a remote one only to the
+            // address the user configured.
+            local: answer.is_local(),
             // Zero says this run has no rounds to spend, which is what the step pill reads as "do not
             // draw me" — a plain chat does not have a budget, and a pill saying `Step 0 / 0` over it
             // would be a counter of something that cannot happen.
@@ -1524,40 +1699,48 @@ pub async fn chat_send(
     // Read before the request goes out and acted on after it lands: the replay this turn is about to
     // do is already too big for the window, but what the run did with that is only known once the
     // server reports its own count.
-    let outgrew = outgrew_window(*lock(&state.last_fill), turn.view.context_tokens);
-    let request = request_for(&state, &settings, &turn, tools);
+    let outgrew = outgrew_window(*lock(&state.last_fill), answer.window_tokens());
+    let request = request_for(&state, &settings, &answer, tools);
 
     // Asked of the server, because the size that decides whether the prompt fits is the size the
     // server counts it at — and asked before the run, because the notice above can only reach a
     // conversation that has already filled the window once. A prompt that is oversized on its own
     // first turn has no previous run to be inferred from. A measurement that fails is silent: the
     // run still goes out, since a server that will not count a prompt may well still answer one.
-    let warned_before = match prompt_tokens(
-        &turn.view.base_url,
-        &request,
-        &turn.model,
-        turn.view.context_tokens,
-    )
-    .await
-    {
-        // Counted with the pictures charged on top, because the server's tokenize pass never sees
-        // them; see [`picture_tokens`].
-        Ok(sent) if leaves_no_room(sent + picture_tokens(&request), turn.view.context_tokens) => {
-            let tokens = sent.to_string();
-            let window = turn.view.context_tokens.to_string();
-            emit(
-                &app,
-                AgentEvent::notice(
-                    NoticeCode::PromptTooLong,
-                    &[("tokens", tokens.as_str()), ("window", window.as_str())],
-                ),
-            );
-            true
+    // Only the local fork has the counting endpoints; a remote provider answers with its own limit.
+    let warned_before = match &answer {
+        Answer::Local(turn) => {
+            match prompt_tokens(
+                &turn.view.base_url,
+                &request,
+                &turn.model,
+                turn.view.context_tokens,
+            )
+            .await
+            {
+                // Counted with the pictures charged on top, because the server's tokenize pass never
+                // sees them; see [`picture_tokens`].
+                Ok(sent)
+                    if leaves_no_room(sent + picture_tokens(&request), answer.window_tokens()) =>
+                {
+                    let tokens = sent.to_string();
+                    let window = answer.window_tokens().to_string();
+                    emit(
+                        &app,
+                        AgentEvent::notice(
+                            NoticeCode::PromptTooLong,
+                            &[("tokens", tokens.as_str()), ("window", window.as_str())],
+                        ),
+                    );
+                    true
+                }
+                Ok(_) => false,
+                // No logger in this crate, and nothing to do about it either way: the run goes out and
+                // the server's own answer is the remaining evidence of how big the prompt was.
+                Err(_) => false,
+            }
         }
-        Ok(_) => false,
-        // No logger in this crate, and nothing to do about it either way: the run goes out and the
-        // server's own answer is the remaining evidence of how big the prompt was.
-        Err(_) => false,
+        Answer::Remote(_) => false,
     };
 
     let started = Instant::now();
@@ -1565,7 +1748,7 @@ pub async fn chat_send(
         requested: &state.stop_requested,
         stopped: &stopped,
     };
-    let outcome = run_rounds(&app, &state, &turn, &settings, request, tools, &stops).await;
+    let outcome = run_rounds(&app, &state, &answer, &settings, request, tools, &stops).await;
     lock(&state.slot).streaming = false;
 
     match outcome {
@@ -1583,7 +1766,7 @@ pub async fn chat_send(
                 );
             }
             if let Some(total) = reply.total_tokens {
-                *lock(&state.last_fill) = Some((turn.view.context_tokens, total));
+                *lock(&state.last_fill) = Some((answer.window_tokens(), total));
             }
             // The same news twice in one run's transcript reads as two problems. The count before the
             // run is the better-measured of the two sentences, so it is the one that stands.
@@ -1591,7 +1774,7 @@ pub async fn chat_send(
                 emit(&app, AgentEvent::notice(NoticeCode::ContextTrimmed, &[]));
             }
             if reply.ran_out_of_budget() {
-                let max_tokens = turn.max_tokens.to_string();
+                let max_tokens = answer.max_tokens().to_string();
                 emit(
                     &app,
                     AgentEvent::notice(
@@ -1607,7 +1790,7 @@ pub async fn chat_send(
                     // The transcript's "stopped" row is what tells the user the answer they see is
                     // the one they cut short, so the flag has to come from the run itself.
                     stopped: stopped.load(Ordering::Relaxed),
-                    context_used: context_percent(reply.total_tokens, turn.view.context_tokens),
+                    context_used: context_percent(reply.total_tokens, answer.window_tokens()),
                     // What the run's accepted edits cost, or nothing at all for a run that only read
                     // the workspace. `None` is the honest answer there, not a zero.
                     total_diff: state.staged_diff(),
@@ -2530,6 +2713,59 @@ mod tests {
         assert_eq!(clipped.chars().count(), 10 + "\n… (cut)".chars().count());
         // A non-ASCII text just past the cap is cut and marked, not passed through whole.
         assert!(clip_chars(&"я".repeat(11), 10).ends_with("\n… (cut)"));
+    }
+
+    /// Remote is a choice, not a preference: every missing precondition is a refusal that names the
+    /// setting, because the alternative — quietly asking the local engine — would send the prompt
+    /// somewhere the user did not select and spend a model load they did not ask for.
+    #[test]
+    fn a_provider_turn_is_refused_before_it_could_fall_back() {
+        let mut settings = Settings::default();
+        settings.remote_provider.base_url = "https://api.example.com/v1".into();
+        settings.remote_provider.model = "model-id".into();
+
+        let refused = remote_plan(&settings).unwrap_err();
+        assert!(refused.contains("Settings → Privacy"), "{refused}");
+
+        settings.privacy.allow_remote_providers = true;
+        settings.remote_provider.model.clear();
+        let refused = remote_plan(&settings).unwrap_err();
+        assert!(refused.contains("Settings → Model"), "{refused}");
+
+        settings.remote_provider.model = "model-id".into();
+        settings.remote_provider.base_url = "http://api.example.com/v1".into();
+        let refused = remote_plan(&settings).unwrap_err();
+        assert!(refused.contains("HTTPS"), "{refused}");
+
+        settings.remote_provider.base_url = "http://127.0.0.1:8080/v1".into();
+        let (base, model, window, _) = remote_plan(&settings).expect("loopback provider");
+        assert_eq!(base, "http://127.0.0.1:8080/v1");
+        assert_eq!(model, "model-id");
+        assert_eq!(window, 32_768);
+
+        settings.remote_provider.context_tokens = 0;
+        let refused = remote_plan(&settings).unwrap_err();
+        assert!(refused.contains("context window is 0"), "{refused}");
+    }
+
+    /// The provider declares its own window and the app cannot measure it the way it measures its
+    /// server's, so the answer budget is capped by half of what the provider says it accepts — and by
+    /// the configured budget, whichever is smaller.
+    #[test]
+    fn a_provider_reply_budget_is_capped_by_half_the_declared_window() {
+        let mut settings = Settings::default();
+        settings.privacy.allow_remote_providers = true;
+        settings.remote_provider.base_url = "https://api.example.com/v1".into();
+        settings.remote_provider.model = "model-id".into();
+
+        settings.remote_provider.context_tokens = 10_000;
+        assert_eq!(remote_plan(&settings).unwrap().3, 5_000);
+
+        settings.remote_provider.context_tokens = 2_000_000;
+        assert_eq!(remote_plan(&settings).unwrap().3, 16_384);
+
+        settings.remote_provider.context_tokens = 3;
+        assert_eq!(remote_plan(&settings).unwrap().3, 1);
     }
 
     /// The subagent is the same assistant with narrower hands, not a stranger: it gets the user's own

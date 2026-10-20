@@ -38,6 +38,9 @@ export function ModelPicker({
   onOpenSettings: () => void;
 }) {
   const status = useModel((s) => s.status);
+  // A remote provider has no pack, no download and no catalog row here: its model id is free text in
+  // Settings, so this panel can only say which provider answers and offer the page that changes it.
+  const remote = status?.remote ?? null;
   const [open, setOpen] = useState(SEEDED);
   const [center, setCenter] = useState<KnowledgeCenter | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,14 +48,15 @@ export function ModelPicker({
     translate(locale, `modelPicker.${key}`, params);
 
   // Read the first time the panel opens rather than at every launch: the pill names its own model
-  // without the catalog, and the center's answer walks the weights directory to be got.
+  // without the catalog, and the center's answer walks the weights directory to be got. A selected
+  // provider never reads it at all — walking this machine for packs cannot answer a remote prompt.
   useEffect(() => {
-    if (!open || center || error) return;
+    if (!open || remote || center || error) return;
     void ipc
       .knowledgeCenter()
       .then(setCenter)
       .catch((e: unknown) => setError(String(e)));
-  }, [open, center, error]);
+  }, [open, remote, center, error]);
 
   const choose = async (id: string) => {
     setOpen(false);
@@ -70,6 +74,10 @@ export function ModelPicker({
     await useModel.getState().refresh();
   };
 
+  const providerHost = remote
+    ? remote.baseUrl.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/\/.*$/, "") || "—"
+    : "";
+
   return (
     <span className="relative">
       <button
@@ -78,10 +86,13 @@ export function ModelPicker({
         aria-expanded={open}
         className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-fine text-muted hover:bg-hover hover:text-fg"
       >
-        <Icon name="cube" size={13} />
+        <Icon name={remote ? "globe" : "cube"} size={13} />
         {/* The pill carries the model's name rather than the word "Model": which weights answer is the
-            fact a user reads off it, and the label only matters once the panel is open. */}
-        <span className="max-w-[16ch] truncate">{status?.displayName ?? t("title")}</span>
+            fact a user reads off it, and the label only matters once the panel is open. A remote
+            provider may have no model id yet, and then the pill names the source instead. */}
+        <span className="max-w-[16ch] truncate">
+          {remote ? remote.model || t("remote") : (status?.displayName ?? t("title"))}
+        </span>
         <Icon name="chevronDown" size={12} />
       </button>
 
@@ -103,7 +114,21 @@ export function ModelPicker({
             }}
           >
             <p className="section-label px-[var(--space-3)] pt-[var(--space-2)]">{t("title")}</p>
-            {!center && (
+            {remote && (
+              <>
+                <div className="flex items-start gap-[var(--space-3)] px-[var(--space-3)] py-[var(--space-2)]">
+                  <span className="row-copy min-w-0">
+                    <span className="row-title truncate">{remote.model || t("remote")}</span>
+                    <span className="row-desc truncate">{providerHost}</span>
+                  </span>
+                  <span className="pill shrink-0">{t("remote")}</span>
+                </div>
+                <p className="px-[var(--space-3)] pb-[var(--space-2)] text-fine text-muted">
+                  {t("remoteNote")}
+                </p>
+              </>
+            )}
+            {!remote && !center && (
               <p
                 role={error ? "alert" : undefined}
                 className="px-[var(--space-3)] py-[var(--space-2)] text-fine text-muted"
@@ -111,32 +136,35 @@ export function ModelPicker({
                 {error ?? t("loading")}
               </p>
             )}
-            {center?.models.map((model) => {
-              const held = model.packs.filter((pack) => pack.onDisk).length;
-              const current = model.id === status?.catalogId;
-              return (
-                <button
-                  key={model.id}
-                  type="button"
-                  data-current={current || undefined}
-                  className="picker-row"
-                  onClick={() => void choose(model.id)}
-                >
-                  <span className="row-copy min-w-0">
-                    <span className="row-title truncate">{model.name}</span>
-                    <span className="row-desc truncate">
-                      {`${t("packs", { held, total: model.packs.length })} · ${spanOf(model)}`}
+            {!remote &&
+              center?.models.map((model) => {
+                const held = model.packs.filter((pack) => pack.onDisk).length;
+                const current = model.id === status?.catalogId;
+                return (
+                  <button
+                    key={model.id}
+                    type="button"
+                    data-current={current || undefined}
+                    className="picker-row"
+                    onClick={() => void choose(model.id)}
+                  >
+                    <span className="row-copy min-w-0">
+                      <span className="row-title truncate">{model.name}</span>
+                      <span className="row-desc truncate">
+                        {`${t("packs", { held, total: model.packs.length })} · ${spanOf(model)}`}
+                      </span>
                     </span>
-                  </span>
-                  {/* The two chips a choice between models actually turns on: can it see the picture
+                    {/* The two chips a choice between models actually turns on: can it see the picture
                       in the composer, and is it already the one answering. */}
-                  {model.vision.length > 0 && <span className="pill shrink-0">{t("vision")}</span>}
-                  {current && <span className="pill shrink-0">{t("current")}</span>}
-                </button>
-              );
-            })}
+                    {model.vision.length > 0 && (
+                      <span className="pill shrink-0">{t("vision")}</span>
+                    )}
+                    {current && <span className="pill shrink-0">{t("current")}</span>}
+                  </button>
+                );
+              })}
             <div className="border-t border-line px-[var(--space-3)] py-[var(--space-2)]">
-              <p className="text-fine text-faint">{t("note")}</p>
+              {!remote && <p className="text-fine text-faint">{t("note")}</p>}
               <button
                 type="button"
                 className="nav-item mt-[var(--space-1)]"

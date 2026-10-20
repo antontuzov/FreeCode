@@ -28,9 +28,9 @@ pub mod server;
 use std::path::PathBuf;
 
 pub use client::{
-    chat_body, clamp_budget, normalize, prompt_tokens, stream_chat, wire_effort, ChatRequest,
-    Message, Reply, ReplyDelta, RequestError, Role, SseDecoder, SseEvent, StreamControl, Timings,
-    ToolCall,
+    chat_body, clamp_budget, normalize, prompt_tokens, remote_body, remote_chat_url, stream_chat,
+    stream_remote_chat, wire_effort, ChatRequest, Message, RemoteAccess, Reply, ReplyDelta,
+    RequestError, Role, SseDecoder, SseEvent, StreamControl, Timings, ToolCall,
 };
 pub use engine::{
     banner_matches_pin, engines_root, models_root, parse_version, EngineBinary, EngineVersion,
@@ -153,10 +153,18 @@ pub enum LlamaError {
     /// A request the server answered by refusing it. Every way this happens is recorded in
     /// `docs/KNOWN_ISSUES.md`, and the app defends against each one before the request is built —
     /// so reaching this variant at all means a limit the catalog does not yet name.
-    #[error(
-        "the llama.cpp server answered {status}:\n{body}\nThe model's chat template refused the request, which is a limit of the template rather than a lost connection."
-    )]
+    #[error("the llama.cpp server answered {status}:\n{body}\nThe model's chat template refused the request, which is a limit of the template rather than a lost connection.")]
     ServerError { status: u16, body: String },
+    #[error("could not reach the remote provider at {base_url}: {source}")]
+    RemoteUnreachable {
+        base_url: String,
+        #[source]
+        source: reqwest::Error,
+    },
+    #[error(
+        "the remote provider answered {status}:\n{body}\nCheck the base URL, the model id and the saved API key."
+    )]
+    RemoteProviderError { status: u16, body: String },
     #[error(transparent)]
     Request(#[from] client::RequestError),
 }

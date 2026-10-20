@@ -34,6 +34,7 @@ const STATUS: ModelStatus = {
   engineInstalled: true,
   weightsPresent: true,
   local: true,
+  remote: null,
   packing: "PQ2_0",
   sizeGb: 0.46,
   warnings: [],

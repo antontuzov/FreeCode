@@ -176,6 +176,38 @@ export function TextField({
   );
 }
 
+/**
+ * A secret being pasted. The browser never offers it back and the DOM keeps it as a password until
+ * the caller clears it, which is what a key typed once should look like; the field's own value is
+ * never written into the settings document — it goes to the Keychain and the box is emptied.
+ */
+export function SecretField({
+  value,
+  label,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  label: string;
+  placeholder?: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <label className="field w-[280px]">
+      <input
+        aria-label={label}
+        autoComplete="off"
+        className="field-input field-mono"
+        placeholder={placeholder}
+        spellCheck={false}
+        type="password"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
+}
+
 /** `⌘ ⇧ L` as chips rather than one string, so each modifier reads as a key. */
 export function ShortcutChips({
   shortcut,

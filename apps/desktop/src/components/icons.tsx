@@ -101,6 +101,11 @@ const PATHS = {
   wand: "M15 4V2M15 10V8M12.5 6h-2M18.5 6h-2M5 20l9-9M13.5 7.5 16.5 10.5",
   shield: "M12 3 4 6v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V6z",
   cube: "M12 2 3 7v10l9 5 9-5V7zM3 7l9 5 9-5M12 12v10",
+  // The provider on the other side of the network: a ring with a meridian, not a filled planet, so it
+  // stays one weight with the rest of the rail at 13px. `cube` is the model this machine loads; this
+  // is the one it does not.
+  globe:
+    "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.4 2.4 3.7 5.4 3.7 9S14.4 18.6 12 21M12 3C9.6 5.4 8.3 8.4 8.3 12S9.6 18.6 12 21",
   // Three stacked sheets with the top one closed: the disk the page counts the app's own directories
   // on. Kept off `cube`, which is the model this app loads, because the two are one row apart in the
   // nav and a glyph that repeats another's meaning is how a 13px rail turns into a puzzle.

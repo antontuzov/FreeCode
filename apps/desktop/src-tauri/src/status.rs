@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use smollm_config::{PackingChoice, Settings};
+use smollm_config::{ModelSource, PackingChoice, Settings};
 use smollm_llama::load_guard::{self, Blocker, FileState, GuardReport, GuardRequest};
 use smollm_llama::{models_root, EngineBinary};
 use smollm_models::catalog::CatalogDefaults;
@@ -109,6 +109,15 @@ impl Assembly {
             downloadable: self.weights_absent && matches!(b, Blocker::IntegrityFailed { .. }),
         });
 
+        let remote_selected = settings.remote_provider.source == ModelSource::Remote;
+        let remote = remote_selected.then(|| RemoteView {
+            base_url: settings.remote_provider.base_url.clone(),
+            model: settings.remote_provider.model.clone(),
+            context_tokens: settings.remote_provider.context_tokens,
+            allowed: settings.privacy.allow_remote_providers,
+            configured: settings.remote_provider.configured(),
+        });
+
         ModelStatusView {
             catalog_id: self.model.id.clone(),
             display_name: self.model.name.clone(),
@@ -117,10 +126,8 @@ impl Assembly {
             engine_tag: self.lock.pinned_tag.clone(),
             engine_installed: self.engine_installed(),
             weights_present: self.weights_present(),
-            local: local_badge(
-                self.report.is_allowed(),
-                settings.privacy.allow_remote_providers,
-            ),
+            local: local_badge(self.report.is_allowed(), remote_selected),
+            remote,
             packing: self.pack.key.clone(),
             size_gb: self.pack.size_gb,
             warnings,
@@ -275,11 +282,13 @@ pub(crate) fn file_state(
     }
 }
 
-/// The "Local" badge reflects reality: generation is local only if the guard actually permits this
-/// machine to run it, and only while no remote provider is enabled. `chat` uses the same rule for the
-/// badge on a live run, so the transcript and the status card cannot disagree.
-pub(crate) fn local_badge(guard_allows: bool, allow_remote_providers: bool) -> bool {
-    guard_allows && !allow_remote_providers
+/// The "Local" badge reflects reality: generation is local only if the guard permits this machine to
+/// run it, and only while the local source is the one selected. Consent alone does not take the badge
+/// away — a local turn never falls back to the provider, so with Local selected it is still local —
+/// but choosing the provider does. `chat` uses the same fact for a live run by asking where the run
+/// was actually resolved, so the transcript and the status card cannot disagree.
+pub(crate) fn local_badge(guard_allows: bool, remote_selected: bool) -> bool {
+    guard_allows && !remote_selected
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -310,6 +319,19 @@ pub struct BlockedView {
     pub downloadable: bool,
 }
 
+/// The provider the card shows when Remote is the selected source.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteView {
+    pub base_url: String,
+    pub model: String,
+    pub context_tokens: u32,
+    /// Whether the user's consent switch is on. Off means a remote turn is refused, not rerouted.
+    pub allowed: bool,
+    /// Whether the address and model are both present. A turn also needs consent and a saved key.
+    pub configured: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStatusView {
@@ -323,6 +345,10 @@ pub struct ModelStatusView {
     pub engine_installed: bool,
     pub weights_present: bool,
     pub local: bool,
+    /// The provider this turn goes to instead of the local engine, when Remote is the selected
+    /// source. No secret is here: the Settings page asks the Keychain separately whether a key is
+    /// saved, and this status poll never reads one.
+    pub remote: Option<RemoteView>,
     pub packing: String,
     pub size_gb: f32,
     pub warnings: Vec<String>,
@@ -514,15 +540,38 @@ mod tests {
     }
 
     #[test]
-    fn the_local_badge_needs_both_a_permitted_run_and_no_remote_provider() {
+    fn the_local_badge_needs_a_permitted_run_and_the_local_source() {
         assert!(local_badge(true, false));
         assert!(
             !local_badge(true, true),
-            "a remote provider takes the badge off"
+            "selecting the remote provider takes the badge off"
         );
         assert!(
             !local_badge(false, false),
             "a refused load is not local, it is not running"
         );
+    }
+
+    #[test]
+    fn selecting_the_remote_provider_moves_the_card_off_the_local_engine() {
+        let mut settings = Settings::default();
+        settings.remote_provider.source = ModelSource::Remote;
+        settings.remote_provider.base_url = "https://api.example.com/v1".into();
+        settings.remote_provider.model = "gpt-test".into();
+
+        let assembly = assemble(&repo_root(), &settings).unwrap();
+        let view = assembly.view(&settings);
+        assert!(!view.local);
+        let remote = view.remote.expect("a remote view");
+        assert!(remote.configured);
+        assert!(
+            !remote.allowed,
+            "the consent switch starts off and is reported honestly"
+        );
+        assert_eq!(remote.model, "gpt-test");
+        assert_eq!(remote.context_tokens, 32_768);
+
+        let local = Settings::default();
+        assert!(assembly.view(&local).remote.is_none());
     }
 }

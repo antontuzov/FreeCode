@@ -44,6 +44,10 @@ tokio = { workspace = true }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
 objc2-foundation = { version = "0.3", features = ["NSData"] }
+# A remote API key is a credential, so it belongs in the login keychain rather than in the settings
+# document the Settings surface hands back and forth. The crate talks to Security.framework directly,
+# which keeps the secret out of a subprocess's argv as well as out of the JSON file.
+keyring = { version = "3", features = ["apple-native"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

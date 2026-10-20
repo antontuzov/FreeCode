@@ -37,20 +37,35 @@ export function StatusBar({ locale }: { locale: Locale }) {
   const engine = useChat((s) => s.engine);
   const contextUsed = useTranscript((s) => s.contextUsed);
 
-  const badge = status?.blocked
-    ? translate(locale, "model.badge.notRunning")
-    : status?.local
-      ? translate(locale, "model.badge.local")
-      : translate(locale, "model.badge.remote");
+  // A selected provider makes the local engine's packing and backend beside the point, and a badge
+  // reading "Remote" would hide the two refusals that can stop a prompt before it leaves: consent and
+  // an unconfigured address. Those are named here, and the key is the card's to report.
+  const remote = status?.remote ?? null;
+
+  const badge = remote
+    ? !remote.allowed
+      ? translate(locale, "model.badge.needsConsent")
+      : !remote.configured
+        ? translate(locale, "model.badge.notSetUp")
+        : translate(locale, "model.badge.remote")
+    : status?.blocked
+      ? translate(locale, "model.badge.notRunning")
+      : status?.local
+        ? translate(locale, "model.badge.local")
+        : translate(locale, "model.badge.remote");
 
   // While a server is up, this pair describes the run rather than the machine. The status' backend is
   // what this host *could* decode on, so it goes on saying "Metal" after layer offload is switched
   // off and every layer is being decoded on the CPU.
-  const runLine = engine
-    ? `${engine.packing} · ${engine.backend}`
-    : status
-      ? `${status.packing} · ${status.backend}`
-      : null;
+  const runLine = remote
+    ? `${remote.model || translate(locale, "model.remote.untitled")} · ${
+        remote.baseUrl.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/\/.*$/, "") || "—"
+      }`
+    : engine
+      ? `${engine.packing} · ${engine.backend}`
+      : status
+        ? `${status.packing} · ${status.backend}`
+        : null;
 
   // The meter shows what the last finished run measured and nothing before that. A real run reports
   // its own token count, so the figure is the server's, not an estimate made from the text.

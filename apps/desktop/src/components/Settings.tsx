@@ -8,6 +8,7 @@ import {
   NumberField,
   Row,
   Section,
+  SecretField,
   Select,
   ShortcutChips,
   StyleCard,
@@ -121,6 +122,11 @@ const CONTROLS: Record<Page, string[]> = {
     "telemetry",
   ],
   model: [
+    "remoteSource",
+    "remoteBaseUrl",
+    "remoteModel",
+    "remoteContext",
+    "remoteKey",
     "packing",
     "modelDir",
     "hfTokenEnv",
@@ -883,8 +889,109 @@ function Shortcuts({ t }: { t: T }) {
   );
 }
 
+/**
+ * The remote key row: paste, save, remove, and say whether the Keychain holds one.
+ *
+ * The value in the box goes to the host once and is then cleared; nothing here puts the key into the
+ * settings document or keeps it in the store, and the host never sends it back. "Saved in the macOS
+ * Keychain" is the only thing this control can learn, which is also all it needs to draw.
+ */
+function RemoteKey({ t }: { t: T }) {
+  const [key, setKey] = useState("");
+  const [saved, setSaved] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void ipc
+      .remoteKeyPresent()
+      .then((present) => {
+        if (live) setSaved(present);
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setSaved(false);
+        setError(String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const act = async (run: () => Promise<boolean>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setSaved(await run());
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-end gap-1.5">
+      <div className="flex items-center gap-1.5">
+        <SecretField
+          label={t("row.remoteKey")}
+          placeholder={t("row.remoteKey.placeholder")}
+          value={key}
+          onChange={setKey}
+        />
+        <button
+          type="button"
+          disabled={busy || key.trim() === ""}
+          onClick={() =>
+            void act(async () => {
+              const now = await ipc.saveRemoteKey(key);
+              // Only on success: a refused paste stays in the box to be corrected.
+              setKey("");
+              return now;
+            })
+          }
+          className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-accent px-2.5 py-1 text-fine font-medium text-accent-contrast disabled:opacity-60"
+        >
+          {t("row.remoteKey.save")}
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-fine text-faint">
+          {saved === null
+            ? t("row.remoteKey.checking")
+            : saved
+              ? t("row.remoteKey.saved")
+              : t("row.remoteKey.absent")}
+        </span>
+        {saved && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void act(async () => {
+                await ipc.clearRemoteKey();
+                return false;
+              })
+            }
+            className="text-fine text-muted underline hover:text-fg disabled:opacity-60"
+          >
+            {t("row.remoteKey.remove")}
+          </button>
+        )}
+      </div>
+      {error && (
+        <span role="alert" className="max-w-[320px] text-right text-fine text-danger">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function Model({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
   const m = doc.localModel;
+  const remote = doc.remoteProvider;
   const status = useModel((s) => s.status);
   const packing = typeof m.packing === "string" ? "auto" : m.packing.forced;
   const packOptions = [
@@ -896,6 +1003,55 @@ function Model({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
   ];
   return (
     <>
+      <Section label={t("section.remote")} description={t("section.remote.desc")}>
+        <Row title={t("row.remoteSource")} description={t("row.remoteSource.desc")}>
+          <Select
+            label={t("row.remoteSource")}
+            value={remote.source}
+            options={[
+              { value: "local", label: t("opt.local") },
+              { value: "remote", label: t("opt.remote") },
+            ]}
+            onChange={(v) => set((d) => void (d.remoteProvider.source = v))}
+          />
+        </Row>
+        {remote.source === "remote" && (
+          <>
+            <Row title={t("row.remoteBaseUrl")} description={t("row.remoteBaseUrl.desc")}>
+              <TextField
+                mono
+                label={t("row.remoteBaseUrl")}
+                placeholder={t("row.remoteBaseUrl.placeholder")}
+                value={remote.baseUrl}
+                onChange={(v) => set((d) => void (d.remoteProvider.baseUrl = v))}
+              />
+            </Row>
+            <Row title={t("row.remoteModel")} description={t("row.remoteModel.desc")}>
+              <TextField
+                mono
+                label={t("row.remoteModel")}
+                placeholder={t("row.remoteModel.placeholder")}
+                value={remote.model}
+                onChange={(v) => set((d) => void (d.remoteProvider.model = v))}
+              />
+            </Row>
+            <Row title={t("row.remoteContext")} description={t("row.remoteContext.desc")}>
+              <NumberField
+                label={t("row.remoteContext")}
+                value={remote.contextTokens}
+                min={1024}
+                max={2_000_000}
+                step={1024}
+                onChange={(v) => set((d) => void (d.remoteProvider.contextTokens = v))}
+              />
+            </Row>
+            <Row title={t("row.remoteKey")} description={t("row.remoteKey.desc")}>
+              <RemoteKey t={t} />
+            </Row>
+          </>
+        )}
+      </Section>
+
       <Section label={t("section.packing")}>
         <Row title={t("row.packing")} description={t("row.packing.desc")}>
           <Select

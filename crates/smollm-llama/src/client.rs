@@ -247,7 +247,11 @@ pub fn clamp_budget(max_tokens: u32, context_tokens: u32, constraints: &AgentCon
 }
 
 /// The wire form of one message.
-fn message_json(m: &Message, constraints: &AgentConstraints) -> Value {
+///
+/// `constraints` is the local model's card. `None` is the remote path, where an unfinished call is
+/// still replayed as the empty object — every OpenAI-compatible endpoint refuses malformed JSON the
+/// same way — but there is no local template whose effort vocabulary or limits could apply.
+fn message_json(m: &Message, constraints: Option<&AgentConstraints>) -> Value {
     let mut obj = serde_json::Map::new();
     obj.insert("role".into(), json!(m.role));
     // A turn with pictures goes out as OpenAI's content *array*, with the text part first: the fork
@@ -277,12 +281,12 @@ fn message_json(m: &Message, constraints: &AgentConstraints) -> Value {
             .map(|c| {
                 // #112: the fork 500s on empty or non-JSON arguments, so an unfinished call is
                 // replayed as the empty object it was meant to be.
-                let arguments =
-                    if !valid_object(&c.arguments) && constraints.empty_tool_arguments_as_object {
-                        "{}".to_string()
-                    } else {
-                        c.arguments.clone()
-                    };
+                let repair = constraints.is_none_or(|c| c.empty_tool_arguments_as_object);
+                let arguments = if !valid_object(&c.arguments) && repair {
+                    "{}".to_string()
+                } else {
+                    c.arguments.clone()
+                };
                 json!({
                     "id": c.id,
                     "type": "function",
@@ -308,7 +312,7 @@ pub fn chat_body(
     let mut body = json!({
         "messages": normalize(&req.messages)
             .iter()
-            .map(|m| message_json(m, &model.agent_constraints))
+            .map(|m| message_json(m, Some(&model.agent_constraints)))
             .collect::<Vec<_>>(),
         "max_tokens": clamp_budget(req.max_tokens, context_tokens, &model.agent_constraints),
         "stream": true,
@@ -319,6 +323,45 @@ pub fn chat_body(
     if let Some(effort) = effort {
         body["reasoning_effort"] = json!(effort);
     }
+    if !req.tools.is_empty() {
+        body["tools"] = Value::Array(req.tools.clone());
+    }
+    Ok(body)
+}
+
+/// An OpenAI-compatible endpoint on the other side of the network, plus the key it expects.
+///
+/// Held only for the turn that uses it: the key is read from the keychain when the request is built,
+/// never stored beside the address in the settings document.
+#[derive(Clone)]
+pub struct RemoteAccess {
+    pub base_url: String,
+    pub model: String,
+    pub key: String,
+}
+
+/// The request body for an arbitrary OpenAI-compatible provider.
+///
+/// Deliberately not [`chat_body`]: that function carries the pinned fork's repairs and its template's
+/// reasoning vocabulary, and an endpoint the app did not start has neither. What travels is the part
+/// every provider agrees on — the messages, the answer budget, tool schemas and a streaming request
+/// for usage — and the endpoint's own error is reported as its own, not as a failed local launch.
+pub fn remote_body(req: &ChatRequest, model: &str) -> Result<Value, RequestError> {
+    if req.messages.is_empty() {
+        return Err(RequestError::Empty);
+    }
+    let mut body = json!({
+        "model": model,
+        "messages": normalize(&req.messages)
+            .iter()
+            .map(|m| message_json(m, None))
+            .collect::<Vec<_>>(),
+        "max_tokens": req.max_tokens,
+        "stream": true,
+        // Not every provider sends this frame; the ones that do give the meter a measured count
+        // instead of leaving it blank for the rest of the conversation.
+        "stream_options": { "include_usage": true },
+    });
     if !req.tools.is_empty() {
         body["tools"] = Value::Array(req.tools.clone());
     }
@@ -620,14 +663,66 @@ pub async fn stream_chat(
             body: text,
         });
     }
+    read_reply(response, &mut on_delta).await
+}
 
+/// POST one chat completion to a remote provider and stream it the same way.
+///
+/// The key goes on this request and no other: the local supervised server has no authentication
+/// because it is reachable only on loopback, and this path is the one that crosses the network. The
+/// response body is passed through the same SSE decoder, so a provider that streams tool calls or
+/// pictures is read exactly as the fork's stream is.
+pub async fn stream_remote_chat(
+    access: &RemoteAccess,
+    req: &ChatRequest,
+    mut on_delta: impl FnMut(&[ReplyDelta]) -> StreamControl,
+) -> Result<Reply, LlamaError> {
+    let body = remote_body(req, &access.model)?;
+    let response = reqwest::Client::new()
+        .post(remote_chat_url(&access.base_url))
+        .bearer_auth(&access.key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|source| LlamaError::RemoteUnreachable {
+            // The address is not a secret; the key is, and it is never part of this string.
+            base_url: access.base_url.clone(),
+            source,
+        })?;
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(LlamaError::RemoteProviderError {
+            status: status.as_u16(),
+            body: text,
+        });
+    }
+    read_reply(response, &mut on_delta).await
+}
+
+/// The chat-completions URL for a remote base. Kept here rather than in the host so the transport
+/// owns every part of the wire path.
+pub fn remote_chat_url(base_url: &str) -> String {
+    let base = base_url.trim_end_matches('/');
+    if base.ends_with("/v1") {
+        format!("{base}/chat/completions")
+    } else {
+        format!("{base}/v1/chat/completions")
+    }
+}
+
+/// Fold one streaming response, local or remote, into a [`Reply`].
+async fn read_reply(
+    response: reqwest::Response,
+    on_delta: &mut impl FnMut(&[ReplyDelta]) -> StreamControl,
+) -> Result<Reply, LlamaError> {
     let mut reply = Reply::default();
     let mut decoder = SseDecoder::default();
     let mut stream = response.bytes_stream();
     let mut flush_tail = true;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-        if !fold_events(decoder.push(&chunk), &mut reply, &mut on_delta) || decoder.is_finished() {
+        if !fold_events(decoder.push(&chunk), &mut reply, &mut *on_delta) || decoder.is_finished() {
             flush_tail = false;
             break;
         }
@@ -635,7 +730,7 @@ pub async fn stream_chat(
     // Only a stream that ran to its end can be holding a frame the caller still wants: after a Stop
     // press the buffer has the line that was refused, and after `[DONE]` it has nothing.
     if flush_tail {
-        fold_events(decoder.finish(), &mut reply, &mut on_delta);
+        fold_events(decoder.finish(), &mut reply, on_delta);
     }
     Ok(reply)
 }
@@ -682,7 +777,11 @@ where
         return !done;
     }
     apply_deltas(reply, &deltas);
-    !done && on_delta(&deltas) != StreamControl::Stop
+    // A batch that also carried `[DONE]` still holds answer text the watcher has not seen: a fast
+    // provider can fit the whole stream into one network read, and skipping the callback would show
+    // the reply only when the run finished.
+    let wanted = on_delta(&deltas) != StreamControl::Stop;
+    !done && wanted
 }
 
 #[cfg(test)]
@@ -1225,5 +1324,184 @@ mod tests {
     fn a_local_refusal_travels_through_the_crate_error_type() {
         let err: LlamaError = RequestError::Empty.into();
         assert!(err.to_string().contains("at least one message"), "{err}");
+    }
+
+    #[test]
+    fn a_remote_body_keeps_what_every_provider_shares_and_drops_the_local_vocabulary() {
+        let mut req = ChatRequest::new(vec![
+            Message::system("first"),
+            Message::user("hello"),
+            Message::system("second"),
+            Message {
+                tool_calls: vec![ToolCall {
+                    id: "c1".into(),
+                    name: "read_file".into(),
+                    // Left half-written by a stopped stream; only the local card decides whether to
+                    // repair it, and the remote path always does because every provider rejects it.
+                    arguments: "{\"path\":".into(),
+                }],
+                ..Message::assistant("")
+            },
+        ]);
+        req.max_tokens = 777;
+        req.reasoning_effort = Some("high".into());
+        req.tools = vec![json!({"type":"function","function":{"name":"read_file"}})];
+
+        let body = remote_body(&req, "gpt-test").expect("body");
+        assert_eq!(body["model"], "gpt-test");
+        assert_eq!(body["max_tokens"], 777, "the local clamp is not applied");
+        assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["stream_options"]["include_usage"], true);
+        assert_eq!(body["tools"][0]["function"]["name"], "read_file");
+        let messages = body["messages"].as_array().expect("array");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "first\n\nsecond");
+        assert_eq!(messages[2]["tool_calls"][0]["function"]["arguments"], "{}");
+        assert!(matches!(
+            remote_body(&ChatRequest::new(Vec::new()), "gpt-test"),
+            Err(RequestError::Empty)
+        ));
+    }
+
+    #[test]
+    fn a_remote_base_is_completed_into_one_chat_endpoint() {
+        assert_eq!(
+            remote_chat_url("https://api.example.com"),
+            "https://api.example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            remote_chat_url("https://api.example.com/v1/"),
+            "https://api.example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            remote_chat_url("http://127.0.0.1:8080/v1"),
+            "http://127.0.0.1:8080/v1/chat/completions"
+        );
+    }
+
+    /// Answer one request on loopback and hand back what the client actually sent. A real socket is
+    /// the only way to see the wire form the provider receives — header casing included.
+    async fn serve_once(status: &str, body: &str) -> (String, tokio::task::JoinHandle<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("address");
+        let status = status.to_string();
+        let body = body.to_string();
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept");
+            let mut request = Vec::new();
+            let mut buf = [0u8; 2048];
+            loop {
+                let n = socket.read(&mut buf).await.expect("read");
+                request.extend_from_slice(&buf[..n]);
+                if n == 0 {
+                    break;
+                }
+                let text = String::from_utf8_lossy(&request).into_owned();
+                if let Some(head) = text.find("\r\n\r\n") {
+                    let length = text[..head]
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            if name.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= head + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 {status}\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.expect("write");
+            socket.shutdown().await.ok();
+            String::from_utf8_lossy(&request).into_owned()
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    #[tokio::test]
+    async fn a_remote_turn_streams_with_the_saved_key_and_reports_measured_usage() {
+        let stream = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\" there\"}}],",
+            "\"usage\":{\"prompt_tokens\":12,\"total_tokens\":15}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let (base, server) = serve_once("200 OK", stream).await;
+        let access = RemoteAccess {
+            base_url: format!("{base}/v1"),
+            model: "gpt-test".into(),
+            // A fake value written here on purpose: this assertion is that it reaches the wire, and
+            // that no other layer ever has to hold it.
+            key: "sk-test-not-a-real-key".into(),
+        };
+        let mut req = ChatRequest::new(vec![Message::user("hello")]);
+        req.max_tokens = 321;
+        let mut saw = String::new();
+        let reply = stream_remote_chat(&access, &req, |deltas| {
+            for delta in deltas {
+                if let ReplyDelta::Answer(text) = delta {
+                    saw.push_str(text);
+                }
+            }
+            StreamControl::Continue
+        })
+        .await
+        .expect("reply");
+
+        assert_eq!(reply.text, "Hi there");
+        assert_eq!(saw, "Hi there");
+        assert_eq!(reply.prompt_tokens, Some(12));
+        assert_eq!(reply.total_tokens, Some(15));
+
+        let request = server.await.expect("server");
+        let lower = request.to_lowercase();
+        assert!(
+            request.starts_with("POST /v1/chat/completions HTTP/1.1"),
+            "{request}"
+        );
+        assert!(
+            lower.contains("\r\nauthorization: bearer sk-test-not-a-real-key"),
+            "{request}"
+        );
+        assert!(request.contains("\"model\":\"gpt-test\""), "{request}");
+        assert!(request.contains("\"max_tokens\":321"), "{request}");
+    }
+
+    #[tokio::test]
+    async fn a_provider_refusal_is_reported_as_the_provider_answer_not_a_failed_local_launch() {
+        let (base, server) = serve_once(
+            "401 Unauthorized",
+            "{\"error\":{\"message\":\"invalid api key\"}}",
+        )
+        .await;
+        let access = RemoteAccess {
+            base_url: base,
+            model: "gpt-test".into(),
+            key: "sk-test-not-a-real-key".into(),
+        };
+        let err = stream_remote_chat(
+            &access,
+            &ChatRequest::new(vec![Message::user("hello")]),
+            |_| StreamControl::Continue,
+        )
+        .await
+        .expect_err("refused");
+        let text = err.to_string();
+        assert!(text.contains("401"), "{text}");
+        assert!(text.contains("invalid api key"), "{text}");
+        assert!(!text.contains("sk-test"), "the key must never be echoed");
+        server.await.expect("server");
     }
 }

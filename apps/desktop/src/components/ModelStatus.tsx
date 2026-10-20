@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
-import type { EngineInstallProgress, WeightsProgress } from "../lib/ipc";
+import { ipc, type EngineInstallProgress, type WeightsProgress } from "../lib/ipc";
 import { useChat } from "../state/chat";
 import { useModel } from "../state/model";
 import { ctaLabel, useTranscript } from "../state/transcript";
@@ -143,10 +143,33 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   const start = useChat((s) => s.start);
   const starting = useChat((s) => s.starting);
   const running = useTranscript((s) => s.running);
+  const remote = status?.remote ?? null;
+  // The card cannot say whether a remote turn is possible without this bit, and it is the only thing
+  // the Keychain will tell anyone. Read once per status answer; `null` while the answer is in flight.
+  const [keySaved, setKeySaved] = useState<boolean | null>(null);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!remote) {
+      setKeySaved(null);
+      return;
+    }
+    let live = true;
+    void ipc
+      .remoteKeyPresent()
+      .then((present) => {
+        if (live) setKeySaved(present);
+      })
+      .catch(() => {
+        if (live) setKeySaved(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [remote]);
 
   // `?install-engine=1` runs the Install action and `?download-weights=1` the Download one on mount.
   // `?start-server=1` presses the card's own Start. The native window takes no injected clicks, so
@@ -178,6 +201,80 @@ export function ModelStatus({ locale }: { locale: Locale }) {
     );
   }
   if (!status) return null;
+
+  // A remote source answers without the local engine, so the card shows the provider instead of
+  // packing, engine and server rows that describe a run this one will never make. The local controls
+  // are absent rather than disabled: starting a 6 GB server would not change where the prompt goes.
+  if (remote) {
+    const providerHost =
+      remote.baseUrl.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/\/.*$/, "") || "—";
+    const ready = remote.allowed && remote.configured && keySaved === true;
+    const badge = !remote.allowed
+      ? translate(locale, "model.badge.needsConsent")
+      : !remote.configured
+        ? translate(locale, "model.badge.notSetUp")
+        : keySaved === false
+          ? translate(locale, "model.badge.noKey")
+          : translate(locale, "model.badge.remote");
+    const note = !remote.allowed
+      ? translate(locale, "model.remote.noConsent")
+      : !remote.configured
+        ? translate(locale, "model.remote.notConfigured")
+        : keySaved === false
+          ? translate(locale, "model.remote.noKey")
+          : keySaved === null
+            ? translate(locale, "model.remote.keyChecking")
+            : translate(locale, "model.remote.ready");
+    return (
+      <section
+        aria-label={translate(locale, "model.remote.title")}
+        className="w-full shrink-0 border-b border-line bg-elevated p-[var(--space-4)] shadow-raised"
+      >
+        <div className="flex items-center gap-2">
+          <Icon name="globe" size={15} className="text-accent-ink" />
+          <h2 className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">
+            {remote.model || translate(locale, "model.remote.untitled")}
+          </h2>
+          <span
+            className={`shrink-0 rounded-[var(--radius-pill)] px-2 py-0.5 text-fine ${
+              ready ? "bg-accent-soft text-fg-strong" : "bg-sunken text-muted"
+            }`}
+          >
+            {badge}
+          </span>
+        </div>
+        <dl className="mt-3 flex flex-col gap-1 text-fine text-muted">
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="shrink-0">{translate(locale, "model.remote.provider")}</dt>
+            <dd className="truncate font-mono text-fg">{providerHost}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="shrink-0">{translate(locale, "model.remote.window")}</dt>
+            <dd className="truncate font-mono tabular-nums text-fg">{remote.contextTokens}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="shrink-0">{translate(locale, "model.remote.consent")}</dt>
+            <dd className="truncate text-fg">
+              {remote.allowed
+                ? translate(locale, "model.remote.consentOn")
+                : translate(locale, "model.remote.consentOff")}
+            </dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="shrink-0">{translate(locale, "model.remote.key")}</dt>
+            <dd className="truncate text-fg">
+              {keySaved === null
+                ? translate(locale, "model.remote.keyCheckingShort")
+                : keySaved
+                  ? translate(locale, "model.remote.keySaved")
+                  : translate(locale, "model.remote.keyAbsent")}
+            </dd>
+          </div>
+        </dl>
+        <p className="mt-3 text-fine text-muted">{note}</p>
+      </section>
+    );
+  }
 
   // `local` is false both when a remote provider answers and when the guard refuses to run at all,
   // so the badge cannot be derived from that one bit: a refused load is not "Remote", it is

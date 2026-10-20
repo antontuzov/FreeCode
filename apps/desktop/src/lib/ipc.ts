@@ -41,6 +41,16 @@ export type ModelStatus = {
   engineInstalled: boolean;
   weightsPresent: boolean;
   local: boolean;
+  /** Set when Remote is the selected source; the local engine rows are then not what answers. */
+  remote: {
+    baseUrl: string;
+    model: string;
+    contextTokens: number;
+    /** The Privacy consent switch. Off means a remote turn is refused, not rerouted. */
+    allowed: boolean;
+    /** Whether the address and model are present. A turn also needs consent and a saved key. */
+    configured: boolean;
+  } | null;
   packing: string;
   sizeGb: number;
   warnings: string[];
@@ -453,6 +463,18 @@ export type ApprovalsDoc = {
   shellTimeoutMs: number;
 };
 
+/**
+ * Where prompts are answered: this machine's supervised engine, or an OpenAI-compatible provider the
+ * user configured. No key is here — the key lives in the macOS Keychain and this document never holds
+ * it. `allowRemoteProviders` under Privacy is the consent that lets the Remote source be used at all.
+ */
+export type RemoteProviderDoc = {
+  source: "local" | "remote";
+  baseUrl: string;
+  model: string;
+  contextTokens: number;
+};
+
 export type SettingsDoc = {
   schemaVersion: number;
   appearance: AppearanceDoc;
@@ -460,6 +482,7 @@ export type SettingsDoc = {
   voice: VoiceDoc;
   approvals: ApprovalsDoc;
   privacy: { telemetry: boolean; allowRemoteProviders: boolean };
+  remoteProvider: RemoteProviderDoc;
   context: { compressAtRatio: number; keepRecentTurns: number };
   localModel: {
     catalogId: string;
@@ -720,6 +743,15 @@ export const ipc = {
   loadSettings: () => invoke<SettingsDoc>("load_settings"),
   /** Validated by deserialising on the host side; the answer is what actually landed on disk. */
   saveSettings: (settings: SettingsDoc) => invoke<SettingsDoc>("save_settings", { settings }),
+  /**
+   * Whether the Keychain holds a remote-provider key. The key itself is never returned: the page can
+   * write one, remove it, and learn whether one is saved, which is the whole IPC surface of the secret.
+   */
+  remoteKeyPresent: () => invoke<boolean>("remote_key_present"),
+  /** Write a pasted key to the login Keychain; answers whether one is saved now. */
+  saveRemoteKey: (key: string) => invoke<boolean>("save_remote_key", { key }),
+  /** Remove the saved key; answers whether one is saved now, which is always `false` on success. */
+  clearRemoteKey: () => invoke<boolean>("clear_remote_key"),
   /**
    * Put a fence's text on the system pasteboard. The host does the writing because the webview is not
    * a place the web Clipboard API can be counted on, and its promise settles only once the pasteboard

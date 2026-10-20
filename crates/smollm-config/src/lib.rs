@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub use agent::{
-    ApprovalMode, Approvals, Context, LocalModel, PackingChoice, PermissionClass, Privacy,
+    ApprovalMode, Approvals, Context, LocalModel, ModelSource, PackingChoice, PermissionClass,
+    Privacy, RemoteProvider,
 };
 pub use appearance::{
     Appearance, ContentWidth, FileIconSet, FontStyle, InterfaceStyle, Language, TerminalTheme,
@@ -77,6 +78,7 @@ pub struct Settings {
     pub privacy: Privacy,
     pub context: Context,
     pub local_model: LocalModel,
+    pub remote_provider: RemoteProvider,
 }
 
 impl Default for Settings {
@@ -90,6 +92,7 @@ impl Default for Settings {
             privacy: Privacy::default(),
             context: Context::default(),
             local_model: LocalModel::default(),
+            remote_provider: RemoteProvider::default(),
         }
     }
 }

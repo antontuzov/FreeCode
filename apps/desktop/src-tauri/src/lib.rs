@@ -15,6 +15,7 @@ mod engine;
 mod extensions;
 mod knowledge;
 mod paths;
+mod provider;
 mod reveal;
 mod sessions;
 mod status;
@@ -148,10 +149,46 @@ async fn load_settings() -> Result<Settings, String> {
 /// not render still round-trips untouched. The host answers with what it stored.
 #[tauri::command]
 async fn save_settings(app: AppHandle, mut settings: Settings) -> Result<Settings, String> {
+    // The page saves on every keystroke, so the address and model are stored as typed; the full
+    // HTTPS/loopback rule is applied when a turn is resolved, before a request exists. The one check
+    // that cannot wait is embedded credentials: a key pasted into the address field must never reach
+    // `settings.json`. `remote_turn` re-checks everything, so a hand-edited file gets no further.
+    let remote = &mut settings.remote_provider;
+    remote.base_url = remote.base_url.trim().to_string();
+    remote.model = remote.model.trim().to_string();
+    provider::reject_embedded_credentials(&remote.base_url)?;
     settings.schema_version = smollm_config::SETTINGS_SCHEMA_VERSION;
     appearance::save_settings(&settings)?;
     wear_icon(&app, settings.appearance.app_icon);
     Ok(settings)
+}
+
+/// Whether the Keychain holds a remote-provider key. The key itself never crosses this boundary.
+#[tauri::command]
+async fn remote_key_present() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(provider::key_saved)
+        .await
+        .map_err(|e| format!("the keychain check stopped: {e}"))
+}
+
+/// Store a pasted key in the login Keychain. The answer is the new "a key is saved" state; the
+/// value that was handed over is not echoed back and is not written to the settings document.
+#[tauri::command]
+async fn save_remote_key(key: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || provider::save_key(&key))
+        .await
+        .map_err(|e| format!("the keychain write stopped: {e}"))??;
+    Ok(true)
+}
+
+/// Remove the saved key. Answering `false` is the state the UI draws, not an error: there was
+/// nothing to remove, or the credential is gone now either way.
+#[tauri::command]
+async fn clear_remote_key() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(provider::clear_key)
+        .await
+        .map_err(|e| format!("the keychain write stopped: {e}"))??;
+    Ok(false)
 }
 
 /// Move the app's face to the tile the document names. The pin is host state because the Dock is
@@ -257,6 +294,12 @@ pub fn run() {
             save_appearance,
             load_settings,
             save_settings,
+            // The remote provider's one secret, held by the macOS Keychain rather than the settings
+            // document. The page can ask whether a key is there, replace it, or remove it — never
+            // read it back.
+            remote_key_present,
+            save_remote_key,
+            clear_remote_key,
             // The one write the UI may make to the machine it runs on: the text of a code fence, onto
             // the pasteboard. See `clipboard`.
             clipboard::copy_text,

@@ -81,6 +81,12 @@ function document_(): SettingsDoc {
       shellTimeoutMs: 30_000,
     },
     privacy: { telemetry: false, allowRemoteProviders: false },
+    remoteProvider: {
+      source: "local",
+      baseUrl: "",
+      model: "",
+      contextTokens: 32_768,
+    },
     context: { compressAtRatio: 0.8, keepRecentTurns: 4 },
     localModel: {
       catalogId: "ternary-bonsai-1-7b",

@@ -128,6 +128,55 @@ pub struct Privacy {
     pub allow_remote_providers: bool,
 }
 
+/// Which side of the wire answers the next prompt.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelSource {
+    /// The supervised fork server on this machine.
+    #[default]
+    Local,
+    /// The OpenAI-compatible endpoint named below, with the key held in the OS keychain.
+    Remote,
+}
+
+/// Where a remote prompt goes, and how much room it has there.
+///
+/// The key is deliberately absent: it belongs in the platform keychain, never in a document this app
+/// saves to disk and hands across the IPC boundary. `base_url` and `model` are kept even while the
+/// source is Local so switching back to Remote does not lose what was typed; nothing is sent while
+/// `source` is Local or [`Privacy::allow_remote_providers`] is off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RemoteProvider {
+    pub source: ModelSource,
+    /// An OpenAI-compatible base URL, e.g. `https://api.openai.com/v1`. Plain HTTP is only accepted
+    /// for a loopback host, where there is no network to protect.
+    pub base_url: String,
+    /// The model id the provider expects, e.g. `gpt-4o-mini`.
+    pub model: String,
+    /// The provider's documented context window. It drives the context meter and the answer budget;
+    /// the app cannot ask an arbitrary provider for this the way it asks its own server.
+    pub context_tokens: u32,
+}
+
+impl Default for RemoteProvider {
+    fn default() -> Self {
+        Self {
+            source: ModelSource::Local,
+            base_url: String::new(),
+            model: String::new(),
+            context_tokens: 32_768,
+        }
+    }
+}
+
+impl RemoteProvider {
+    /// Both halves needed before a request can be addressed to a provider.
+    pub fn configured(&self) -> bool {
+        !self.base_url.trim().is_empty() && !self.model.trim().is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Context {
@@ -303,6 +352,26 @@ mod tests {
     fn telemetry_is_off_by_default() {
         assert!(!Privacy::default().telemetry);
         assert!(!Privacy::default().allow_remote_providers);
+    }
+
+    #[test]
+    fn the_remote_provider_starts_local_unaddressed_and_with_the_key_absent() {
+        let p = RemoteProvider::default();
+        assert_eq!(p.source, ModelSource::Local);
+        assert!(!p.configured());
+        assert_eq!(p.context_tokens, 32_768);
+        let configured = RemoteProvider {
+            source: ModelSource::Remote,
+            base_url: "https://api.openai.com/v1".into(),
+            model: "gpt-4o-mini".into(),
+            ..RemoteProvider::default()
+        };
+        assert!(configured.configured());
+        assert!(!RemoteProvider {
+            model: "  ".into(),
+            ..configured
+        }
+        .configured());
     }
 
     #[test]
