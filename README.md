@@ -14,8 +14,9 @@ engine or the host actually measured.
   math (KaTeX) and code fences with a copy control, and keeps the reasoning of past turns visible while
   replaying only the answers, so the fork's prompt cache keeps hitting.
 - **Runs a coding loop.** The composer's Coding control turns the same model into an agent that reads,
-  searches, edits and — with the Privacy switch on — looks things up on the web. Each round narrates
-  itself in the transcript; each edit lands in a review panel with its diff, its line numbers and a find
+  searches, creates files, edits them and — with the Privacy switch on — looks things up on the web, which
+  is what lets it lay out a small app from nothing rather than only patch one. Each round narrates
+  itself in the transcript; each write lands in a review panel with its diff, its line numbers and a find
   control inside it.
 - **Files conversations on this machine.** The sidebar searches them, reopens them, and moves deleted
   ones to a Trash that Settings → Storage can put back.
@@ -31,7 +32,7 @@ engine or the host actually measured.
 Said plainly, because the interface says it too — a control that is not built is disabled and names the
 reason on hover:
 
-- Only seven of the thirty declared tools have executors. `write_file`, `apply_patch`, `terminal`,
+- Only eight of the thirty declared tools have executors. `delete_path`, `apply_patch`, `terminal`,
   `git_*` and the rest are declared so the model can ask, and a call to one is answered with a row that
   says it was not run.
 - Nothing spawns a subagent and nothing produces an artifact yet, so those inspector groups are the two
@@ -62,8 +63,9 @@ Bonsai 1.7B — and the download happens in the app.
 
 ## What the agent may reach
 
-- **The workspace.** Reads (`read_file`, `list_dir`, `glob`, `grep_search`) and the one write
-  (`edit_file`) are bounded to the workspace root the app reports on its Extensions page.
+- **The workspace.** Reads (`read_file`, `list_dir`, `glob`, `grep_search`) and the two writes
+  (`write_file`, which only ever creates a file that is not there, and `edit_file`) are bounded to the
+  workspace root the app reports on its Extensions page.
 - **The web, only when you say so.** `web_search` and `fetch_url` are blocked while
   Settings → Agent → Privacy is off, which is the default. When it is on, search goes to Wikipedia's
   keyless REST endpoint — one provider, named in the text the model reads — and `fetch_url` reads a

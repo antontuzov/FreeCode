@@ -4,7 +4,7 @@
 //! What lives here is the contract every executor obeys — a tool cannot exist unless it has an id, a
 //! schema, and a declared permission class, because both the approval engine and the sandbox make
 //! their decisions from those two facts alone. Only [`EXECUTABLE`] of them have an executor yet, in
-//! [`crate::exec`]; the rest wait on the write and shell halves of the loop.
+//! [`crate::exec`]; the rest wait on the shell, patch and git halves of the loop.
 //!
 //! One detail from `KNOWN_ISSUES.md` is baked into [`ToolCall::arguments_wire`]: this model emits tool
 //! calls whose `arguments` are empty or non-JSON, and the fork's server answers those with HTTP 500
@@ -142,8 +142,10 @@ pub fn registry() -> Vec<ToolDescriptor> {
         },
         ToolDescriptor {
             id: "write_file",
-            title: "Write file",
-            description: "Create or replace a file inside the workspace with the given contents.",
+            title: "Create file",
+            description: "Create a file inside the workspace with the given contents, making the \
+                directories its path names. It only creates: a path that already holds a file is \
+                refused, so an existing file is changed with edit_file and never overwritten whole.",
             permission: WorkspaceWrite,
             requires_network: false,
             input_schema: s(
@@ -463,19 +465,21 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
         .collect()
 }
 
-/// The tools this build can actually run: the four workspace reads, the one write, and the two calls
+/// The tools this build can actually run: the four workspace reads, the two writes, and the two calls
 /// that reach the internet, whose executors live in [`crate::exec`] and [`crate::web`].
 ///
 /// The rest of the registry is a declaration with no verb behind it — a schema, a permission class,
 /// and nothing that touches the disk. Offering one of those would invite the model to ask for a shell
 /// command or a delete that can only come back refused, so a run that carries tools hands over this
-/// list and nothing else. The write is on it because the sandbox bounds it to the workspace root;
-/// the shell is not, because nothing bounds it.
+/// list and nothing else. The two writes are on it because the sandbox bounds them to the workspace
+/// root — one makes a file that is not there, the other changes text it has to find first; the shell
+/// is not, because nothing bounds it.
 pub const EXECUTABLE: &[&str] = &[
     "read_file",
     "list_dir",
     "glob",
     "grep_search",
+    "write_file",
     "edit_file",
     "web_search",
     "fetch_url",
@@ -544,6 +548,15 @@ pub fn summary(tool_id: &str, arguments: &Value) -> String {
                 .get("query")
                 .and_then(Value::as_str)
                 .unwrap_or("<no words>")
+        ),
+        // A write is named by its path alone: the whole contents of a new file, or both sides of an
+        // edit, would be quoted back at the person being asked to approve it.
+        "write_file" | "edit_file" => format!(
+            "Write {}",
+            arguments
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("<no path>")
         ),
         other => format!("{other} {arguments}"),
     }
@@ -642,17 +655,26 @@ mod tests {
             summary("git_commit", &json!({ "message": "Add guard\n\nbody"}))
                 .starts_with("Commit: Add guard")
         );
+        // And a write is named by where it lands, never by the text it carries.
+        assert_eq!(
+            summary(
+                "write_file",
+                &json!({ "path": "my-app/index.html", "contents": "x".repeat(9_000) })
+            ),
+            "Write my-app/index.html"
+        );
     }
 
     /// A tool with no executor must not be offered: the model would ask for a command and every round
     /// of that is a refusal the run has to explain.
     ///
     /// The other half of the rule is what the loop promises a run: everything offered either is a
-    /// workspace read the sandbox bounds, or is the one write, or is a call that leaves the machine and
-    /// therefore only stands on the list while the Privacy switch is on. A shell or a delete appearing
-    /// here would mean nothing at all stands between a run and the machine.
+    /// workspace read the sandbox bounds, or is one of the two writes it bounds, or is a call that
+    /// leaves the machine and therefore only stands on the list while the Privacy switch is on. A
+    /// shell or a delete appearing here would mean nothing at all stands between a run and the
+    /// machine.
     #[test]
-    fn only_bounded_reads_the_one_write_and_the_web_calls_are_offered_to_a_run() {
+    fn only_bounded_reads_the_two_writes_and_the_web_calls_are_offered_to_a_run() {
         for id in EXECUTABLE {
             let tool = find(id).unwrap_or_else(|| panic!("{id} is offered but not declared"));
             assert!(
@@ -674,17 +696,20 @@ mod tests {
                 );
             }
         }
+        let writes: Vec<&str> = EXECUTABLE
+            .iter()
+            .filter(|id| find(id).is_some_and(|t| t.permission == PermissionClass::WorkspaceWrite))
+            .copied()
+            .collect();
         assert_eq!(
-            EXECUTABLE
-                .iter()
-                .filter(
-                    |id| find(id).is_some_and(|t| t.permission == PermissionClass::WorkspaceWrite)
-                )
-                .count(),
-            1,
-            "exactly one offered tool changes a file"
+            writes,
+            vec!["write_file", "edit_file"],
+            "the offered writes are a create that cannot overwrite, and an edit that has to match"
         );
-        assert!(!is_executable("write_file"));
+        assert!(
+            !is_executable("delete_path"),
+            "a run cannot take a file away"
+        );
         assert!(!is_executable("terminal"));
         // `codebase_search` is a declared read with no index behind it, so it stays out too.
         assert!(!is_executable("codebase_search"));

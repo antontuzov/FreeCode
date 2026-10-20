@@ -217,6 +217,7 @@ export type HostStepKind =
   | "thought"
   | "terminal"
   | "editFile"
+  | "createFile"
   | "readFile"
   | "searchContent"
   | "tool"

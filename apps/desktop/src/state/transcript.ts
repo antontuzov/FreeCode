@@ -19,6 +19,7 @@ export type StepKind =
   | "thought"
   | "terminal"
   | "editFile"
+  | "createFile"
   | "readFile"
   | "searchContent"
   | "tool"
@@ -37,6 +38,7 @@ const I18N_KEYS: Record<StepKind, string> = {
   thought: "transcript.step.thought",
   terminal: "transcript.step.terminal",
   editFile: "transcript.step.editFile",
+  createFile: "transcript.step.createFile",
   readFile: "transcript.step.readFile",
   searchContent: "transcript.step.searchContent",
   tool: "transcript.step.ranTool",
@@ -101,9 +103,10 @@ export type Step = {
   status?: StepStatus;
   diff?: DiffStat;
   /**
-   * On an `editFile` row: the change as diff lines, exactly as the host handed them to the model. The
-   * review panel draws the run's edits from these rather than from the `DiffStat`, which counts lines
-   * but cannot say which ones.
+   * On a row that wrote a file, whether it made one (`createFile`) or changed one (`editFile`): the
+   * change as diff lines, exactly as the host handed them to the model. The review panel draws the
+   * run's writes from these rather than from the `DiffStat`, which counts lines but cannot say which
+   * ones.
    */
   hunk?: Hunk;
   /** For `toolBatch` and `running`: the rows nested underneath the header. */
@@ -404,19 +407,27 @@ function everyStep(rows: Row[]): Step[] {
 }
 
 /**
- * The files this conversation's rows say were edited, newest edit folded into the file it touched.
+ * The files this conversation's rows say were written, newest write folded into the file it touched.
  *
  * Read off the rows rather than off the run's total because the inspector names *which* files, and a
  * `DiffStat` carries a count of them, not their paths. The two agree by construction: the host writes
- * the row's numbers and its ledger off the same `Edit`, one path at a time.
+ * the row's numbers and its ledger off the same `Edit`, one path at a time. A file the run made counts
+ * as one it touched, so a run that only created a page still shows up here.
  *
  * Each entry also carries the file's hunks, in the order the run wrote them: two edits to one file
- * make two blocks of diff lines under one path rather than a merge no diff tool could produce.
+ * make two blocks of diff lines under one path rather than a merge no diff tool could produce. And each
+ * says whether the run *made* the file, which a create row can only be reporting about a path that was
+ * free — the executor refuses one that already stands — so the mark is the host's fact, not a guess the
+ * panel makes from a hunk that happens to hold no removed lines.
  */
-export function changedFiles(rows: Row[]): (DiffStat & { path: string; hunks: Hunk[] })[] {
-  const byPath = new Map<string, { diff: DiffStat; hunks: Hunk[] }>();
+export function changedFiles(
+  rows: Row[],
+): (DiffStat & { path: string; hunks: Hunk[]; created: boolean })[] {
+  const byPath = new Map<string, { diff: DiffStat; hunks: Hunk[]; created: boolean }>();
   for (const row of everyStep(rows)) {
-    if (row.kind !== "editFile" || !row.diff || !row.subject) continue;
+    if ((row.kind !== "editFile" && row.kind !== "createFile") || !row.diff || !row.subject) {
+      continue;
+    }
     const path = row.subject;
     const seen = byPath.get(path);
     byPath.set(path, {
@@ -425,9 +436,15 @@ export function changedFiles(rows: Row[]): (DiffStat & { path: string; hunks: Hu
         removed: (seen?.diff.removed ?? 0) + row.diff.removed,
       },
       hunks: row.hunk ? [...(seen?.hunks ?? []), row.hunk] : (seen?.hunks ?? []),
+      created: (seen?.created ?? false) || row.kind === "createFile",
     });
   }
-  return [...byPath].map(([path, entry]) => ({ path, ...entry.diff, hunks: entry.hunks }));
+  return [...byPath].map(([path, entry]) => ({
+    path,
+    ...entry.diff,
+    hunks: entry.hunks,
+    created: entry.created,
+  }));
 }
 
 /**
@@ -461,6 +478,7 @@ const CAPABILITIES = new Set<StepKind>([
   "searchContent",
   "terminal",
   "editFile",
+  "createFile",
   "webSearch",
   "webReading",
   "tool",
@@ -793,6 +811,29 @@ export const FIXTURE_ROWS: Row[] = [
         subject: "crates/smollm-core/src/transcript.rs",
         status: "ok",
       },
+      // The round's one create, and the only hunk shape an edit cannot produce: every line of a new
+      // file is an addition, with no context above or below it. The review panel has to hold that
+      // without a removed line to anchor its gutter on.
+      {
+        id: "f4b3",
+        kind: "createFile",
+        subject: "demo/index.html",
+        diff: { added: 6, removed: 0 },
+        hunk: {
+          at: 1,
+          lines: [
+            "<!doctype html>",
+            "<meta charset=utf-8>",
+            "<title>What the run made</title>",
+            "<main>",
+            "  <h1>A page written from nothing</h1>",
+            "</main>",
+          ]
+            .map((line) => `+${line}`)
+            .join("\n"),
+        },
+        status: "ok",
+      },
       { id: "f4c", kind: "editFile", subject: "crates/smollm-core/src/lib.rs", status: "running" },
       {
         id: "f4d",
@@ -933,13 +974,14 @@ export const FIXTURE_ROWS: Row[] = [
 ];
 
 /**
- * The pill `?fixture=1` shows: the three edits the last turn's rows report, added up. It is written out
- * rather than derived, so the number here is the shape a real `DiffStaged` arrives with instead of a
- * second source of truth computed from the rows — and it is *that* shape the rows of one turn add up
- * to, so the pill, the review panel's last-turn scope and the transcript all describe one change. The
- * panel's other scope counts the earlier turn's edit as well, which is the point of having two.
+ * The pill `?fixture=1` shows: the writes the last turn's rows report — one file made, three changed —
+ * added up. It is written out rather than derived, so the number here is the shape a real `DiffStaged`
+ * arrives with instead of a second source of truth computed from the rows — and it is *that* shape the
+ * rows of one turn add up to, so the pill, the review panel's last-turn scope and the transcript all
+ * describe one change. The panel's other scope counts the earlier turn's edit as well, which is the
+ * point of having two.
  */
-export const FIXTURE_DIFF: RunDiff = { files: 3, added: 21, removed: 7 };
+export const FIXTURE_DIFF: RunDiff = { files: 4, added: 27, removed: 7 };
 
 /** The step pill `?fixture=1` shows beside it: one round closed of the four the host budgets. The
  * scripted rows carry one "Ran 3 tools" header, and this is the figure that header would have left

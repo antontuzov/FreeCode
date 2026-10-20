@@ -83,9 +83,13 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
   const [open, setOpen] = useState(!step.collapsed);
   const hasChildren = !!step.children?.length;
   const openReviewAt = useNav((s) => s.openReviewAt);
-  // Only an edit this window holds the diff for can be jumped to. A row whose hunk the result budget
-  // never carried would open a panel with nothing scrolled into view, which is a control that lies.
-  const jumpFile = step.kind === "editFile" && step.hunk ? step.subject : undefined;
+  // Only a write this window holds the diff for can be jumped to — the file it made or the file it
+  // changed, both of which the review draws the same way. A row whose hunk the result budget never
+  // carried would open a panel with nothing scrolled into view, which is a control that lies.
+  const jumpFile =
+    (step.kind === "editFile" || step.kind === "createFile") && step.hunk
+      ? step.subject
+      : undefined;
   // A notice's line is its catalog sentence with the run's own numbers in it; every other row's line
   // is the detail the host gave it.
   const text = stepText(locale, step);

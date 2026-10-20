@@ -361,7 +361,11 @@ export function Review({ locale }: { locale: Locale }) {
                     className={`disclosure-icon shrink-0 ${folded ? "" : "rotate-90"}`}
                   />
                   <span className="insp-chip">
-                    <Icon name="editFile" size={13} />
+                    {/* A file the run made is marked as one, because the create is the difference
+                        between "the agent changed my file" and "the agent wrote this" — and the two
+                        counts alone do not say it, since an edit that only added lines reads +N −0
+                        too. */}
+                    <Icon name={file.created ? "createFile" : "editFile"} size={13} />
                   </span>
                   {/* The name is what a changed-file row is scanned for, so the directories above it are
                       the part allowed to run out of room. */}

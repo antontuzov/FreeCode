@@ -113,27 +113,33 @@ mod tests {
         inv.tools.iter().find(|r| r.id == id).expect("tool")
     }
 
-    /// The four reads, the one workspace write and the two web calls are what the Coding control
-    /// actually offers today, and the page has to say so: a list that showed all eighteen as live
+    /// The four reads, the two workspace writes and the two web calls are what the Coding control
+    /// actually offers today, and the page has to say so: a list that showed all thirty as live
     /// would describe an agent this build does not have.
     #[test]
-    fn the_bounded_reads_the_write_and_the_web_calls_are_what_a_call_can_run_through() {
+    fn the_bounded_reads_the_writes_and_the_web_calls_are_what_a_call_can_run_through() {
         let inv = inventory(&Settings::default());
-        assert_eq!(inv.runnable, 7, "{:?}", inv.tools);
+        assert_eq!(inv.runnable, 8, "{:?}", inv.tools);
         for id in ["read_file", "list_dir", "glob", "grep_search"] {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "auto", "{id}");
         }
-        // The write is offered, and it is auto under the default dial because the sandbox bounds it to
-        // the workspace — which is the whole reason it can be.
-        assert!(row(&inv, "edit_file").runnable);
-        assert_eq!(row(&inv, "edit_file").decision, "auto");
-        assert!(!row(&inv, "write_file").runnable);
+        // The two writes are offered, and they are auto under the default dial because the sandbox
+        // bounds them to the workspace — which is the whole reason they can be. What they may not do is
+        // reach a name outside it, and the create cannot take a file that is already there.
+        for id in ["write_file", "edit_file"] {
+            assert!(row(&inv, id).runnable, "{id}");
+            assert_eq!(row(&inv, id).decision, "auto", "{id}");
+        }
         // The web tools have executors, so they are runnable in this build — but a local machine is
         // the default, and the page shows the gate closed rather than the plumbing.
         for id in ["web_search", "fetch_url"] {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "blocked", "{id}");
+        }
+        // And the calls that would take a file away, or run a command, are still declared only.
+        for id in ["delete_path", "apply_patch", "terminal"] {
+            assert!(!row(&inv, id).runnable, "{id}");
         }
     }
 

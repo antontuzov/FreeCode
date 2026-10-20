@@ -72,6 +72,10 @@ const PATHS = {
   terminal: "M4 17l6-6-6-6M12 19h8",
   thought: "M12 3a7 7 0 0 0-4 12.7V18a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.3A7 7 0 0 0 12 3zM9 21h6",
   readFile: "M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM9 13h7M9 17h5",
+  // `readFile`'s page with its text lines swapped for one plus: a row that made a file and a row that
+  // opened one are two different things the run did, and the two glyphs have to say so at 13px. The
+  // outline is deliberately the same sheet so the pair reads as "file", varied only by its mark.
+  createFile: "M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM12 9v6M9 12h6",
   editFile: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
   searchContent: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35M8 11h6",
   mic: "M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zM19 10a7 7 0 0 1-14 0M12 17v4",

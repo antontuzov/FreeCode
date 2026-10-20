@@ -75,6 +75,7 @@ function hostMark(host: string): IconName | undefined {
 const CAPABILITY_ICONS: Partial<Record<StepKind, IconName>> = {
   readFile: "readFile",
   editFile: "editFile",
+  createFile: "createFile",
   searchContent: "searchContent",
   terminal: "terminal",
   webSearch: "search",

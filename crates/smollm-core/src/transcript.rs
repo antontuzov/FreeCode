@@ -30,6 +30,8 @@ pub enum StepKind {
     Terminal,
     /// "Edit file" with a +N −M pill.
     EditFile,
+    /// "Create file" — a write that made a file that was not there, so every line is an addition.
+    CreateFile,
     /// "Read file".
     ReadFile,
     /// "Search content".
@@ -62,6 +64,7 @@ impl StepKind {
             StepKind::Thought => "transcript.step.thought",
             StepKind::Terminal => "transcript.step.terminal",
             StepKind::EditFile => "transcript.step.editFile",
+            StepKind::CreateFile => "transcript.step.createFile",
             StepKind::ReadFile => "transcript.step.readFile",
             StepKind::SearchContent => "transcript.step.searchContent",
             StepKind::Tool => "transcript.step.ranTool",
@@ -96,6 +99,7 @@ pub fn all_i18n_keys() -> Vec<&'static str> {
         Thought,
         Terminal,
         EditFile,
+        CreateFile,
         ReadFile,
         SearchContent,
         Tool,
@@ -184,10 +188,10 @@ pub struct TranscriptStep {
     pub detail: String,
     #[serde(default)]
     pub diff: Option<DiffStat>,
-    /// The change a write row made, as diff lines and the line they open on. Only an `edit_file` row
-    /// carries one, and its text is what the model was handed rather than a second rendering of it, so
-    /// the review the window draws cannot describe a different change than the answer that asked for
-    /// it.
+    /// The change a write row made, as diff lines and the line they open on. Only a row that wrote a
+    /// file carries one, and its text is what the model was handed rather than a second rendering of
+    /// it, so the review the window draws cannot describe a different change than the answer that asked
+    /// for it.
     #[serde(default)]
     pub hunk: Option<Hunk>,
     /// Set for tool rows: the registry id whose `title` the UI shows when there is no localized

@@ -1,4 +1,4 @@
-//! The executors: four calls that read the workspace, one that changes a file in it, and two that
+//! The executors: four calls that read the workspace, two that change files in it, and two that
 //! reach the internet.
 //!
 //! Every one of them takes `(arguments, policy)` and goes through [`authorize`] first, so a call
@@ -8,10 +8,11 @@
 //! pretending to try it. The two network calls stand behind the same switch that admits a remote
 //! provider, and [`crate::web`] is where their own rules live.
 //!
-//! The one write here is `edit_file`, and it is the reason the sandbox's `Access::Write` exists: a
-//! path outside the workspace root, or onto a protected name, is refused by [`authorize`] before this
-//! file opens anything. What is left to the executor is the part a sandbox cannot decide — whether the
-//! text the model quoted is actually in the file, and actually only once.
+//! The two writes here are `edit_file` and `write_file`, and they are the reason the sandbox's
+//! `Access::Write` exists: a path outside the workspace root, or onto a protected name, is refused by
+//! [`authorize`] before this file opens anything. What is left to the executors is the part a sandbox
+//! cannot decide — whether the text the model quoted is actually in the file and actually only once,
+//! and whether a path it wants to create is still free to create.
 //!
 //! Three budgets, and all three are about the *context window* rather than about safety:
 //!   * [`MAX_RESULT_BYTES`] caps what goes back into the prompt. A tool result is prefilled on every
@@ -24,8 +25,8 @@
 //! The sandbox is what refuses a path. These only decide how much of an allowed answer to send, and
 //! they say what was left out rather than cutting it quietly.
 
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -73,10 +74,11 @@ const SKIP_DIRS: &[&str] = &[
     "__pycache__",
 ];
 
-/// What one call changed on disk. Only `edit_file` produces one, and the counts are the replacement's
-/// own arithmetic rather than a diff engine's: the lines it took out and the lines it put back, with
-/// the lines it only passed over cancelled from both sides. For a call that swaps one block of text
-/// for another that is exactly what a diff reports for the hunk, not an approximation of one.
+/// What one call changed on disk. Only the two writes produce one, and the counts are the
+/// replacement's own arithmetic rather than a diff engine's: the lines it took out and the lines it
+/// put back, with the lines it only passed over cancelled from both sides. For a call that swaps one
+/// block of text for another that is exactly what a diff reports for the hunk, not an approximation of
+/// one — and for a file that was not there before, it is every line in it counted as added.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Edit {
     /// Workspace-relative, in forward slashes — the same spelling `glob` and `grep_search` answer
@@ -129,6 +131,7 @@ pub fn execute(
         "glob" => find_files(tool.id, arguments, policy),
         "grep_search" => search_content(tool.id, arguments, policy),
         "edit_file" => edit_file(tool.id, arguments, policy),
+        "write_file" => write_file(tool.id, arguments, policy),
         // The two that leave the machine. Neither takes the policy: `authorize` has already refused
         // them without the Privacy switch, and a URL is not a path the sandbox can resolve.
         "web_search" => web_search(tool.id, arguments),
@@ -606,6 +609,83 @@ fn fetch_url(tool: &str, arguments: &Value) -> Result<Executed, ToolsError> {
     })
 }
 
+/// Create one workspace file, with the directories its path names.
+///
+/// The write is a create and nothing else: `create_new` fails on a name that is already taken, so the
+/// call cannot replace a file the run never read. A run that wants an existing file rewritten has to
+/// say so with `edit_file`, whose text has to be found in that file first — one call that overwrites a
+/// whole file with unverified text is the failure this tool would otherwise be.
+///
+/// The directories come with it because a project is a tree rather than a file: "make a web app" names
+/// `my-app/index.html`, and a create that refuses the missing `my-app/` sends the run looking for a
+/// shell this build does not offer.
+fn write_file(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+) -> Result<Executed, ToolsError> {
+    let label = required(tool, arguments, "path")?.to_string();
+    let path = resolve(policy, &label, Access::Write)?;
+    let contents = required(tool, arguments, "contents")?;
+    let refuse = |reason: String| ToolsError::InvalidArguments {
+        tool: tool.to_string(),
+        reason,
+    };
+    if contents.len() as u64 > MAX_FILE_BYTES {
+        return Err(refuse(format!(
+            "{label} would be {}, past the {} this build reads, so it could not be read back.",
+            human_bytes(contents.len() as u64),
+            human_bytes(MAX_FILE_BYTES)
+        )));
+    }
+    // Named before the directories are made, so a refusal cannot leave an empty tree behind.
+    if path.exists() {
+        return Err(refuse(format!(
+            "{label} is already there, so nothing was written. Read it and change it with edit_file, \
+             or name a path that is free."
+        )));
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| io_error(tool, &label, &e))?;
+    }
+    let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(created) => created,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(refuse(format!(
+                "{label} is already there, so nothing was written."
+            )))
+        }
+        Err(e) => return Err(io_error(tool, &label, &e)),
+    };
+    file.write_all(contents.as_bytes())
+        .map_err(|e| io_error(tool, &label, &e))?;
+
+    let added = contents.lines().count();
+    let edit = Edit {
+        path: relative(policy, &path),
+        added: added as u32,
+        removed: 0,
+        occurrences: 1,
+        hunk: fit(contents.lines().map(|line| format!("+{line}")).collect()),
+        hunk_at: 1,
+    };
+    if added == 0 {
+        return Ok(Executed {
+            summary: "1 file created".to_string(),
+            content: format!("Created {}: an empty file.", edit.path),
+            edit: Some(edit),
+        });
+    }
+    Ok(Executed {
+        summary: "1 file created".to_string(),
+        content: format!(
+            "Created {} (+{} −{}): new file\n{label}:\n{}",
+            edit.path, edit.added, edit.removed, edit.hunk
+        ),
+        edit: Some(edit),
+    })
+}
+
 /// How many lines at each end of a replacement the replacement shares with what it replaced. The two
 /// are what makes "wrap this block in an `if`" read as two added lines rather than as the whole block
 /// rewritten: a line the call carried over unchanged is not one it changed.
@@ -672,6 +752,13 @@ fn hunk(text: &str, old: &str, new: &str) -> (usize, String) {
         body.push(format!(" {line}"));
     }
 
+    (start + 1, fit(body))
+}
+
+/// The lines a change may carry into the result, with the number it had to leave out named at the end
+/// rather than dropped quietly. Both writes report their hunk through here, so a change too big for
+/// the budget says how much of itself the cut left out the same way in either case.
+fn fit(body: Vec<String>) -> String {
     let mut kept: Vec<String> = Vec::new();
     let mut used = 0usize;
     let mut held = 0usize;
@@ -687,7 +774,7 @@ fn hunk(text: &str, old: &str, new: &str) -> (usize, String) {
     if held > 0 {
         kept.push(format!("…{held} lines of the change are not shown."));
     }
-    (start + 1, kept.join("\n"))
+    kept.join("\n")
 }
 
 /// One file's matches, printed with their context merged between neighbours: a hit's line carries
@@ -1218,14 +1305,17 @@ mod tests {
         // promise this file cannot keep.
         let err = ran("git_status", &json!({}), &p).expect_err("no executor exists");
         assert!(matches!(err, ToolsError::NoExecutor(_)), "{err:?}");
-        assert!(matches!(
-            ran(
-                "write_file",
-                &json!({ "path": "src/x", "contents": "y" }),
-                &p
-            ),
-            Err(ToolsError::NoExecutor(_))
-        ));
+        // And the two calls that could take a file away rather than add one stay unimplemented, so no
+        // argument shape can reach them.
+        for id in ["delete_path", "apply_patch"] {
+            assert!(
+                matches!(
+                    ran(id, &json!({ "path": "src/lib.rs" }), &p),
+                    Err(ToolsError::NoExecutor(_))
+                ),
+                "{id} has an executor now, and this test is the only thing saying so"
+            );
+        }
     }
 
     #[test]
@@ -1507,6 +1597,137 @@ mod tests {
         )
         .expect_err("an empty match is not an edit");
         assert!(why.to_string().contains("empty"), "{why}");
+    }
+
+    #[test]
+    fn a_create_writes_the_bytes_it_was_given_and_counts_every_line_as_added() {
+        let (d, p) = plain();
+        let got = ran(
+            "write_file",
+            &json!({ "path": "page.html", "contents": "<!doctype html>\n<title>hi</title>\n" }),
+            &p,
+        )
+        .expect("a new file in the workspace is created");
+        // The contents go down exactly as they came: no newline added, none taken away.
+        assert_eq!(
+            on_disk(d.path(), "page.html"),
+            "<!doctype html>\n<title>hi</title>\n"
+        );
+        let edit = got.edit.expect("a write reports what it wrote");
+        assert_eq!((edit.added, edit.removed, edit.occurrences), (2, 0, 1));
+        assert_eq!(edit.hunk, "+<!doctype html>\n+<title>hi</title>");
+        assert_eq!(edit.hunk_at, 1);
+        assert_eq!(got.summary, "1 file created");
+    }
+
+    #[test]
+    fn a_create_makes_the_directories_its_path_names() {
+        let (d, p) = plain();
+        ran(
+            "write_file",
+            &json!({ "path": "my-app/pages/index.html", "contents": "<p>hello</p>\n" }),
+            &p,
+        )
+        .expect("a project is a tree, not one file");
+        assert_eq!(
+            on_disk(d.path(), "my-app/pages/index.html"),
+            "<p>hello</p>\n"
+        );
+    }
+
+    #[test]
+    fn a_create_never_writes_over_a_file_that_is_already_there() {
+        let (d, p) = plain();
+        let why = ran(
+            "write_file",
+            &json!({ "path": "src/lib.rs", "contents": "everything replaced\n" }),
+            &p,
+        )
+        .expect_err("an existing file is not this call's to overwrite");
+        let reason = why.to_string();
+        assert!(reason.contains("already there"), "{reason}");
+        // The sentence names the tool that can do it, because the model is the reader that can.
+        assert!(reason.contains("edit_file"), "{reason}");
+        assert_eq!(on_disk(d.path(), "src/lib.rs"), "one\ntwo\nthree\n");
+    }
+
+    #[test]
+    fn a_refused_create_leaves_nothing_behind() {
+        let (d, p) = fixture();
+        // The directories are made after the name is known to be free, so a refusal cannot leave an
+        // empty tree the listing would then have to explain.
+        let why = ran(
+            "write_file",
+            &json!({ "path": "../escaped.html", "contents": "x\n" }),
+            &p,
+        )
+        .expect_err("the workspace root bounds a create");
+        assert!(matches!(why, ToolsError::Sandbox(_)), "{why}");
+        assert!(!d.path().parent().unwrap().join("escaped.html").exists());
+        let why = ran(
+            "write_file",
+            &json!({ "path": ".env", "contents": "TOKEN=x\n" }),
+            &p,
+        )
+        .expect_err("a protected name cannot be written through the sandbox either");
+        assert!(matches!(why, ToolsError::Sandbox(_)), "{why}");
+        assert_eq!(on_disk(d.path(), ".env"), "one TOKEN=secret\n");
+    }
+
+    #[test]
+    fn a_file_too_big_to_read_back_is_too_big_to_create() {
+        let (d, p) = plain();
+        let why = ran(
+            "write_file",
+            &json!({ "path": "big.txt", "contents": "x".repeat(MAX_FILE_BYTES as usize + 1) }),
+            &p,
+        )
+        .expect_err("a write has the same ceiling as a read");
+        assert!(why.to_string().contains("MB"), "{why}");
+        assert!(!d.path().join("big.txt").exists(), "the refusal wrote it");
+    }
+
+    #[test]
+    fn an_empty_create_makes_an_empty_file_and_says_so() {
+        let (d, p) = plain();
+        let got = ran(
+            "write_file",
+            &json!({ "path": "notes.md", "contents": "" }),
+            &p,
+        )
+        .expect("an empty file is a file");
+        assert_eq!(on_disk(d.path(), "notes.md"), "");
+        assert_eq!(got.edit.unwrap().added, 0);
+        assert!(got.content.contains("empty"), "{}", got.content);
+    }
+
+    #[test]
+    fn a_long_create_shows_its_opening_and_names_the_lines_it_left_out() {
+        let (d, p) = plain();
+        let body = "line of the new file, padded out to a sensible width\n".repeat(2_000);
+        let got = ran(
+            "write_file",
+            &json!({ "path": "long.txt", "contents": body }),
+            &p,
+        )
+        .unwrap();
+        assert!(
+            got.content.len() <= MAX_RESULT_BYTES + 200,
+            "{} bytes of answer",
+            got.content.len()
+        );
+        assert!(
+            got.content.contains("lines of the change are not shown"),
+            "the cut is named: {}",
+            &got.content[..120.min(got.content.len())]
+        );
+        // The counts stay the file's real ones even though the hunk is a window onto it.
+        assert_eq!(got.edit.unwrap().added, 2_000);
+        assert_eq!(
+            on_disk(d.path(), "long.txt").lines().count(),
+            2_000,
+            "the hunk is a window onto the file, not the file"
+        );
     }
 
     /// The switch is the whole gate: with it off, `authorize` refuses the call before [`crate::web`]

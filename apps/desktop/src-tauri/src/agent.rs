@@ -1,21 +1,22 @@
 //! The tool round: run what one answer asked for, and say in the transcript what each call did.
 //!
 //! This is the half of the agent loop that touches the machine. [`smollm_tools::EXECUTABLE`] names the
-//! calls that have executors — four reads of the workspace, one write inside it, and two that reach the
-//! internet; anything else the model asks for is answered with a notice that says so rather than run,
+//! calls that have executors — four reads of the workspace, two writes inside it, and two that reach
+//! the internet; anything else the model asks for is answered with a notice that says so rather than run,
 //! which is why the loop can keep the "Local" badge true and the composer's Coding control can stay an
 //! opt-in. The two web calls are only *offered* while the Privacy switch is on, so a run that can leave
 //! the machine is one the user asked for; the executors themselves are what bound the pair of them, the
-//! way the sandbox bounds the five that touch disk.
+//! way the sandbox bounds the six that touch disk.
 //!
 //! Every call takes the same road: [`smollm_core::approvals`] decides, [`smollm_tools::authorize`]
 //! resolves its paths against the workspace sandbox inside [`smollm_tools::execute`], and only then
 //! does anything touch the disk. The row opens before the call and closes after it, so a call that
 //! walks a large tree shows up as work in progress rather than as a window that stopped answering.
 //!
-//! A write also leaves a number behind: the lines its replacement cost go on the row, and into the
-//! run's ledger on [`ChatState`], which is what the "+N −M" pill above the composer reads. The ledger
-//! is per file, so a run that edits one file four times says "1 file, +9 −3" rather than "4 files".
+//! A write also leaves a number behind: the lines it cost go on the row, and into the run's ledger on
+//! [`ChatState`], which is what the "+N −M" pill above the composer reads. A create counts every line it
+//! wrote as added, since nothing stood there to remove. The ledger is per file, so a run that edits one
+//! file four times says "1 file, +9 −3" rather than "4 files".
 //!
 //! A refusal is said twice, on purpose: the row carries it for the user, and the tool result carries
 //! it for the model, which is the only reader that can act on it. A model handed an empty result
@@ -115,9 +116,9 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
             call_id: call.id.clone(),
             result: format!(
                 "{name} is not available in this build: it reads nothing and changes nothing. The \
-                 tools it has are read_file, list_dir, glob, grep_search and edit_file, which reach \
-                 nothing outside this workspace, plus web_search and fetch_url, which reach the \
-                 internet only while the Privacy switch is on."
+                 tools it has are read_file, list_dir, glob, grep_search, write_file and edit_file, \
+                 which reach nothing outside this workspace, plus web_search and fetch_url, which reach \
+                 the internet only while the Privacy switch is on."
             ),
         };
     }
@@ -245,6 +246,7 @@ fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
         "read_file" => StepKind::ReadFile,
         "grep_search" => StepKind::SearchContent,
         "edit_file" => StepKind::EditFile,
+        "write_file" => StepKind::CreateFile,
         "web_search" => StepKind::WebSearch,
         "fetch_url" => StepKind::WebReading,
         _ => StepKind::Tool,
@@ -288,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn the_offered_reads_the_write_and_the_web_calls_open_a_row() {
+    fn the_offered_reads_the_writes_and_the_web_calls_open_a_row() {
         // The executors and the offer have to agree, or a call would open a row nothing closes.
         for id in smollm_tools::EXECUTABLE {
             assert!(is_executable(id), "{id} is offered but not runnable");
@@ -296,11 +298,17 @@ mod tests {
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(smollm_tools::EXECUTABLE.len(), 7);
-        // The write is the row the pill is built from, so it cannot silently degrade to a generic tool.
+        assert_eq!(smollm_tools::EXECUTABLE.len(), 8);
+        // The writes are the rows the pill is built from, so neither can silently degrade to a generic
+        // tool — and a create says create, because a row that reads "Edit file" over a file the run
+        // invented would be the transcript contradicting the review under it.
         assert_eq!(
             started_row("edit_file", &json!({ "path": "a/b.rs" })).kind,
             StepKind::EditFile
+        );
+        assert_eq!(
+            started_row("write_file", &json!({ "path": "a/b.rs" })).kind,
+            StepKind::CreateFile
         );
         // Nor can the two web calls: a run that looked something up has to read as a lookup, not as
         // "Ran tool", which is the row shape that says nothing about what left the machine.
@@ -336,7 +344,8 @@ mod tests {
         };
         // A call for a tool with no executor gets a notice, not a row, so the header cannot claim it.
         assert_eq!(rows_for(&called(&["read_file", "grep_search"])), 2);
-        assert_eq!(rows_for(&called(&["read_file", "write_file"])), 1);
+        assert_eq!(rows_for(&called(&["read_file", "write_file"])), 2);
+        assert_eq!(rows_for(&called(&["read_file", "delete_path"])), 1);
         assert_eq!(rows_for(&called(&["delete_everything"])), 0);
     }
 }
