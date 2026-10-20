@@ -276,6 +276,9 @@ pub fn run() {
             chat::search_sessions,
             chat::open_session,
             chat::delete_session,
+            // The transcript a reopened conversation comes back to: the window hands the host the rows
+            // it drew, so the run's steps and diff survive with its words. See `chat::file_rows`.
+            chat::file_rows,
             // What the Trash holds, and the two presses it offers: put one back on the list, or take
             // its file off the machine. Only the second one is a loss.
             chat::list_trashed,

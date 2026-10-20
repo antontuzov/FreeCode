@@ -8,12 +8,17 @@
 //!
 //! Two rules keep it honest.
 //!
-//! *   **Only what the model was actually told.** A session holds the prompt/answer pairs the
-//!     history replays, because that is what makes reopening one mean something: the next prompt is
-//!     answered from the same exchange. A run's notices, refusals and timings are not replayed and so
-//!     are not filed, and the reasoning stream is deliberately never written back (Bonsai-demo#183).
+//! *   **Only what happened.** A session holds the prompt/answer pairs the history replays, because
+//!     that is what makes reopening one mean something: the next prompt is answered from the same
+//!     exchange. It also holds the rows the transcript drew while the run was up — the tool calls,
+//!     the edits and their hunks, the notices and the refusals — because those are not a rendering
+//!     of the exchange but a record of what the run *did*, and a reopened conversation that showed
+//!     only the words would claim the model answered without touching anything. The reasoning stream
+//!     is still deliberately never written back (Bonsai-demo#183), and neither is a picture's bytes
+//!     twice over: a filed row names the turn's image by its place in `turns`, which already holds it.
 //! *   **Nothing invented.** The workspace name is the folder the host resolved its root from, the
 //!     title is the user's own first sentence cut short, and the model is the label the run printed.
+//!     The rows are the window's own, handed over at the end of a turn rather than reconstructed here.
 //!     A field with no real source is a field this module does not have.
 
 use std::path::{Path, PathBuf};
@@ -94,6 +99,18 @@ pub struct Session {
     /// Wall-clock milliseconds of the last turn filed, which is what the list sorts by.
     pub updated_at_ms: u64,
     pub turns: Vec<Turn>,
+    /// The transcript as the window drew it, in order: turn rows interleaved with the run's steps.
+    ///
+    /// Held as the JSON the window sent rather than a Rust shape of this module's inventing, because
+    /// the row model belongs to the transcript and its i18n keys to the catalogs — a typed copy here
+    /// would be a second definition of `Step` free to drift from the first. A turn row's `image` is
+    /// stripped by the sender and re-joined from [`Session::turns`] on the way back, so a filed
+    /// picture is stored once.
+    ///
+    /// Additive, so `SESSION_SCHEMA_VERSION` stays where it is: a build from before this field
+    /// ignores it and reopens the conversation as the exchange alone, which is what it did anyway.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rows: Vec<serde_json::Value>,
 }
 
 /// What the sidebar needs, without every answer's text crossing the IPC boundary to get it.
@@ -149,6 +166,7 @@ impl Session {
             model: model.to_string(),
             updated_at_ms: now_ms(),
             turns: Vec::new(),
+            rows: Vec::new(),
         }
     }
 
@@ -158,6 +176,17 @@ impl Session {
             text: text.to_string(),
             image,
         });
+        self.updated_at_ms = now_ms();
+    }
+
+    /// Replace the filed transcript with the rows the window is holding.
+    ///
+    /// A whole-list write rather than an append, because the window is the only thing that knows the
+    /// order its rows came in and what it folded away: appending would need this module to guess
+    /// where the last filing stopped, and a guess about a transcript is how rows end up duplicated
+    /// under an answer.
+    pub fn set_rows(&mut self, rows: Vec<serde_json::Value>) {
+        self.rows = rows;
         self.updated_at_ms = now_ms();
     }
 
@@ -550,6 +579,54 @@ mod tests {
         assert_eq!(read.turns, first.turns);
         assert_eq!(read.title, "what pins the engine?");
         assert_eq!(read.workspace, "smollm-studio");
+    }
+
+    #[test]
+    fn a_filed_transcript_comes_back_with_the_run_that_made_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conversation = session("make me a page");
+        // The window's own row shapes, held as the JSON it sent rather than reinterpreted here.
+        conversation.set_rows(vec![
+            serde_json::json!({ "id": "t0", "kind": "turn", "role": "user", "text": "make me a page" }),
+            serde_json::json!({ "id": "s0", "kind": "createFile", "subject": "index.html" }),
+            serde_json::json!({ "id": "t1", "kind": "turn", "role": "assistant", "text": "an answer" }),
+        ]);
+        write_in(dir.path(), &conversation).unwrap();
+
+        let read = read_in(dir.path(), &conversation.id).unwrap();
+        assert_eq!(read.rows.len(), 3);
+        assert_eq!(read.rows[1]["kind"], "createFile");
+        assert_eq!(read.rows[1]["subject"], "index.html");
+    }
+
+    #[test]
+    fn a_conversation_with_no_rows_is_the_file_this_field_never_existed_in() {
+        // `skip_serializing_if` is what lets an older build read a newer file and lets a newer build
+        // leave a text-only conversation exactly as small as it was. A `rows: []` written into every
+        // file would be noise in all of them and a shape change in the one that matters.
+        let conversation = session("just a question");
+        let filed = serde_json::to_value(&conversation).unwrap();
+        assert!(
+            filed.get("rows").is_none(),
+            "an empty transcript was written: {filed}"
+        );
+    }
+
+    #[test]
+    fn a_file_written_before_the_transcript_field_still_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let conversation = session("asked in an older build");
+        write_in(dir.path(), &conversation).unwrap();
+        let path = dir.path().join(format!("{}.json", conversation.id));
+        let filed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        // This is the file a build from before the field wrote, and the one this build reads back:
+        // no `rows` key at all, which `serde(default)` turns into the exchange alone.
+        assert!(filed.get("rows").is_none(), "{filed}");
+
+        let read = read_in(dir.path(), &conversation.id).unwrap();
+        assert!(read.rows.is_empty());
+        assert_eq!(read.turns.len(), 2);
     }
 
     #[test]

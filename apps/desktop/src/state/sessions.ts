@@ -6,8 +6,8 @@
 // shows is a conversation that survived to the file system, and nothing more.
 import { create } from "zustand";
 
-import { ipc, type Session, type SessionSummary } from "../lib/ipc";
-import { useTranscript, type Row } from "./transcript";
+import { ipc, type Session, type SessionSummary, type SessionTurn } from "../lib/ipc";
+import { isTurn, useTranscript, type Row, type Step } from "./transcript";
 
 /**
  * Drop every claim the window is making about a run it has stopped watching. The meter measured a
@@ -23,13 +23,43 @@ function forgetRun() {
   transcript.setRunRounds(null);
 }
 
+/** A conversation's filed transcript, re-keyed for this window.
+ *
+ * The ids a row was drawn under belonged to the window that ran it, and this one numbers its own rows
+ * from zero, so a restored `turn-3` and a row the next run mints would arrive as the same key under
+ * one list. Prefixing with the conversation's own name is what makes that impossible, and it is the
+ * only thing rewritten: a row's content is filed exactly as it was drawn.
+ */
+function reid(rows: Row[], prefix: string): Row[] {
+  return rows.map((row, i) => {
+    const id = `${prefix}-${i}`;
+    if (isTurn(row)) return { ...row, id };
+    return { ...row, id, children: row.children && reidSteps(row.children, `${id}-child`) };
+  });
+}
+
+/** The same, for the rows folded under a batch header — which are steps, never turns. */
+function reidSteps(steps: Step[], prefix: string): Step[] {
+  return steps.map((step, i) => {
+    const id = `${prefix}-${i}`;
+    return step.children
+      ? { ...step, id, children: reidSteps(step.children, id) }
+      : { ...step, id };
+  });
+}
+
 /** A conversation's turns as the transcript draws them.
  *
- * Only the exchange comes back, in the ids the store hands out: a reopened conversation shows what
- * was said rather than the notices, refusals and timings of the runs that said it, because those
- * were never filed and inventing them now would be a transcript of things that did not happen.
+ * A filed conversation comes back with the rows the window held when it wrote it — the tool calls, the
+ * edits and their hunks, the notices — because those are the record of what the run did, and a
+ * transcript of only the sentences reads as an answer that arrived from nowhere. A conversation filed
+ * by an older build has no rows, and its exchange is rebuilt from the turns alone.
+ *
+ * Either way the pictures come back from `turns`, which is where they are stored: a row names its
+ * turn's image by its place in that list rather than carrying a second copy of the bytes.
  */
 function asRows(session: Session): Row[] {
+  if (session.rows?.length) return withPictures(reid(session.rows, session.id), session.turns);
   return session.turns.map((turn, i) => ({
     id: `${session.id}-${i}`,
     kind: "turn" as const,
@@ -37,6 +67,36 @@ function asRows(session: Session): Row[] {
     text: turn.text,
     image: turn.image,
   }));
+}
+
+/** The rows as the window drew them, minus the fields the conversation already stores elsewhere.
+ *
+ * A turn row's picture and its reasoning go without: the first is in `turns` and would be written
+ * twice, and the second is deliberately never filed at all, because replaying it makes the fork's
+ * prompt cache miss on every turn (Bonsai-demo#183).
+ */
+export function fileable(rows: Row[]): Row[] {
+  return rows.map((row) => {
+    if (!isTurn(row)) return row;
+    const filed = { ...row };
+    delete filed.image;
+    delete filed.thought;
+    return filed;
+  });
+}
+
+/** Put a filed picture back on the turn row that earned it, walking the turns in order. */
+function withPictures(rows: Row[], turns: SessionTurn[]): Row[] {
+  let spoken = 0;
+  return rows.map((row) => {
+    if (!isTurn(row)) return row;
+    const turn = turns[spoken];
+    // The cursor moves only when the row is the turn it points at. A prompt the host refused never
+    // became a turn, and stepping past a row that does not match would hand the next picture to a
+    // message that was not given one.
+    if (turn && turn.role === row.role && turn.text === row.text) spoken += 1;
+    return turn?.image ? { ...row, image: turn.image } : row;
+  });
 }
 
 type SessionStore = {

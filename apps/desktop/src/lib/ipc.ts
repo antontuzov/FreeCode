@@ -2,6 +2,9 @@
 // place is what stops the UI from inventing a field the host never sends.
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+// Type-only, which is what keeps the cycle it closes (the transcript store is built from the events
+// declared down here) in the type graph rather than in the bundle.
+import type { Row } from "../state/transcript";
 
 /**
  * Which of the twelve mascot ducks this launch wears, one-based, or `null` when nothing set it.
@@ -435,11 +438,14 @@ export type SessionTurn = {
 /**
  * A filed conversation. Mirrors `sessions::Session`.
  *
- * Only the prompt/answer pairs are here, because those are what the history replays and so the only
- * part that makes reopening one mean something. A run's notices, refusals and timings describe an
- * attempt rather than the exchange, and the reasoning stream is never replayed into a prompt
- * (Bonsai-demo#183) — none of the three is filed, and the transcript of a reopened conversation
- * shows the exchange rather than the diagnostics around it.
+ * The turns are the prompt/answer pairs the history replays. `rows` is the rest of what the window
+ * drew — the run's tool calls, its edits and their hunks, the notices and the refusals — handed back
+ * by the transcript at the end of a turn, so reopening a conversation shows the work and not only the
+ * words. A turn row's picture is not duplicated in it: the bytes stay in `turns`, and the row is
+ * joined back to them by its place in the list. The reasoning stream is still never filed, because
+ * it is never replayed (Bonsai-demo#183).
+ *
+ * Absent on a conversation an older build filed, whose transcript is rebuilt from the turns alone.
  */
 export type Session = {
   schemaVersion: number;
@@ -452,10 +458,13 @@ export type Session = {
   model: string;
   updatedAtMs: number;
   turns: SessionTurn[];
+  rows?: Row[];
 };
 
 /** What a sidebar row needs, without every answer's text crossing the boundary to get it. */
-export type SessionSummary = Omit<Session, "schemaVersion" | "turns"> & { turnCount: number };
+export type SessionSummary = Omit<Session, "schemaVersion" | "turns" | "rows"> & {
+  turnCount: number;
+};
 
 /**
  * A summary plus the line the search matched, flattened into one object by the host. Mirrors
@@ -730,6 +739,15 @@ export const ipc = {
    * because the run would file its answer back into the row that has just gone.
    */
   deleteSession: (id: string) => invoke<void>("delete_session", { id }),
+  /**
+   * File the transcript the window is holding over the conversation on screen, so a reopened one
+   * comes back with the run's step rows and their hunks rather than only its sentences.
+   *
+   * The whole list each time, because the window is the only thing that knows the order the rows came
+   * in and which of them a folded batch swallowed. Refused while a reply streams — the answer those
+   * rows describe has not been filed yet — and by a window holding no conversation at all.
+   */
+  fileRows: (rows: Row[]) => invoke<void>("file_rows", { rows }),
   /** What the Trash holds, newest first. Mirrors `sessions::Trashed`. */
   listTrashed: () => invoke<TrashedSession[]>("list_trashed"),
   /**

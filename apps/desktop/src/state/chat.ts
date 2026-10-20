@@ -4,7 +4,7 @@
 import { create } from "zustand";
 
 import { ipc, type EngineView } from "../lib/ipc";
-import { useSessions } from "./sessions";
+import { fileable, useSessions } from "./sessions";
 import { useTranscript } from "./transcript";
 
 type ChatStore = {
@@ -69,6 +69,13 @@ export const useChat = create<ChatStore>((set, get) => ({
       // list stops matching the sidebar. Refreshed after the send rather than on an event because the
       // turn is only on disk once the command has returned.
       void useSessions.getState().refresh();
+      // And this is the moment the run's own rows can be put back with it. The turns are the host's
+      // doing; the steps, hunks and notices only exist in this window, so a conversation reopened
+      // tomorrow shows the work it did only if the transcript is handed over now. A send that never
+      // reached a conversation has nothing to file under, and the exchange it did reach is already on
+      // disk — so a refusal here costs the rows and nothing else, which is what a reopen looked like
+      // before this existed.
+      void ipc.fileRows(fileable(useTranscript.getState().rows)).catch(() => {});
     }
   },
   stop: async () => {

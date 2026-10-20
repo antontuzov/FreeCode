@@ -1425,6 +1425,38 @@ pub async fn open_session(app: AppHandle, id: String) -> Result<Session, String>
     Ok(session)
 }
 
+/// File the transcript the window is holding over the conversation it belongs to.
+///
+/// The rows are the window's, not the host's: a run's events arrive here as they stream and the
+/// transcript store is what folds them into steps, batches and hunks, so the only faithful copy of
+/// what was on screen is the one the window hands back. Without it a reopened conversation shows the
+/// exchange and nothing of the work — the edit rows, the pages read, the diff the review panel drew
+/// from them — which reads as an answer that arrived from nowhere.
+///
+/// A whole-list write, and refused mid-reply: the answer the stream is still producing has not been
+/// filed, and rows filed above it would land under the wrong question.
+#[tauri::command]
+pub async fn file_rows(app: AppHandle, rows: Vec<serde_json::Value>) -> Result<(), String> {
+    let state = app.state::<ChatState>();
+    {
+        let slot = lock(&state.slot);
+        if slot.streaming {
+            return Err(
+                "a reply is still streaming; its rows cannot be filed until it closes".into(),
+            );
+        }
+    }
+    let session = {
+        let mut cell = lock(&state.session);
+        let session = cell
+            .as_mut()
+            .ok_or("there is no conversation on screen to file these rows under")?;
+        session.set_rows(rows);
+        session.clone()
+    };
+    sessions::write(&session).map_err(|why| why.to_string())
+}
+
 /// Move one filed conversation to the Trash, and take it off the screen too when the row deleted is
 /// the one already open there.
 ///
