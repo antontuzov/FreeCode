@@ -11,16 +11,16 @@ const SRC = "apps/desktop/src";
 
 const catalog = (name) => JSON.parse(readFileSync(join(I18N, `${name}.json`), "utf8"));
 const en = catalog("en");
-const zh = catalog("zh");
+const ru = catalog("ru");
 
 const placeholders = (s) => [...s.matchAll(/{{(\w+)}}/g)].map((m) => m[1]).sort().join(",");
 
 const failures = [];
-const missing = Object.keys(en).filter((k) => !(k in zh));
-const extra = Object.keys(zh).filter((k) => !(k in en));
-if (missing.length) failures.push(`missing from zh.json: ${missing.join(", ")}`);
+const missing = Object.keys(en).filter((k) => !(k in ru));
+const extra = Object.keys(ru).filter((k) => !(k in en));
+if (missing.length) failures.push(`missing from ru.json: ${missing.join(", ")}`);
 if (extra.length) failures.push(`not present in en.json: ${extra.join(", ")}`);
-const drift = Object.keys(en).filter((k) => k in zh && placeholders(en[k]) !== placeholders(zh[k]));
+const drift = Object.keys(en).filter((k) => k in ru && placeholders(en[k]) !== placeholders(ru[k]));
 if (drift.length) failures.push(`placeholder drift in: ${drift.join(", ")}`);
 
 const files = [];

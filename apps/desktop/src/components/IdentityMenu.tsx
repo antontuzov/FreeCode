@@ -78,7 +78,7 @@ export function IdentityMenu({
       label: t("settings.row.language"),
       current: a.language,
       value: opt(a.language),
-      options: (["en", "zh"] as Language[]).map((v) => ({ value: v, label: opt(v) })),
+      options: (["en", "ru"] as Language[]).map((v) => ({ value: v, label: opt(v) })),
       choose: (v) => void a.set({ language: v as Language }),
     },
     {

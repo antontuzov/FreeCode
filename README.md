@@ -23,9 +23,10 @@ engine or the host actually measured.
 - **Reports the run.** Token rates, prompt-cache reuse, the wait, the pages read, the files opened, the
   files changed, and the capabilities the run called on — all derived from the transcript's own rows, so
   the panel and the transcript cannot tell two stories.
-- **Speaks two languages and paints five ways.** English and Chinese, light and dark, five accent styles
-  that repaint the whole window including the sidebar, and a Dock tile drawn from the app's own mascot
-  set.
+- **Speaks two languages and paints eight ways.** English and Russian, light and dark, eight interface
+  styles that repaint the whole window including the sidebar, and a Dock tile drawn from the app's own
+  mascot set. A settings file that still names a catalog this build dropped opens in English rather
+  than failing to open.
 
 ## What this build does not do
 
@@ -132,7 +133,7 @@ Four of the checks exist because a claim that is not enforced rots within a comm
   of the same promise is `verify-transcript-i18n`, which fails when the host's `StepKind` list and the
   TypeScript one stop matching, because a row that renders a raw key mid-sentence is a bug in every
   language.
-- `check-contrast.mjs` — every grey and every style ink at 4.5:1 on every surface each of the five styles
+- `check-contrast.mjs` — every grey and every style ink at 4.5:1 on every surface each of the eight styles
   paints, in both modes.
 - `check-shortcuts.mjs` — every binding in `lib/shortcuts.ts` answered by a handler, and every hint that
   names a key reading its label from the table.

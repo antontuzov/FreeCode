@@ -88,14 +88,30 @@ pub enum FileIconSet {
     None,
 }
 
-/// `en` plus `zh`: the coding view's task-summary box ships in Chinese in the reference, so i18n is
-/// not a stretch goal — it is load-bearing for the demo content.
+/// `en` plus `ru`, the two catalogs the shell ships. Chinese was the second one until 2026-10-20, when
+/// the person using the app asked for their own language instead; the reference's task-summary box is
+/// the only thing that ever needed the Chinese one, and it is demo content, not a contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
     #[default]
     En,
-    Zh,
+    Ru,
+}
+
+/// Reads `language` so that a file naming a catalog this build no longer holds — `"zh"` on every
+/// machine that chose Chinese before it was replaced — opens in English rather than failing the whole
+/// document. A lost language choice is recoverable on the Appearance page; a settings file the app
+/// cannot read loses every other choice in it too.
+fn language_lenient<'de, D>(deserializer: D) -> Result<Language, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    Ok(match raw.as_str() {
+        "ru" => Language::Ru,
+        _ => Language::En,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -108,6 +124,7 @@ pub struct Appearance {
     pub glass_effects: bool,
     pub terminal_theme: TerminalTheme,
     pub use_built_in_browser_for_terminal_links: bool,
+    #[serde(deserialize_with = "language_lenient")]
     pub language: Language,
     pub font_style: FontStyle,
     pub content_width: ContentWidth,
@@ -182,6 +199,22 @@ mod tests {
         let a: Appearance = serde_json::from_value(json!({ "interfaceStyle": "bee" })).unwrap();
         assert_eq!(a.interface_style, InterfaceStyle::Bee);
         assert_eq!(a.font_style, FontStyle::Sans);
+    }
+
+    #[test]
+    fn a_language_this_build_dropped_opens_in_english() {
+        // `zh` is what every install that chose Chinese before Russian replaced it has on disk, and
+        // unlike a bad `interfaceStyle` it must not fail the document: losing the language is one row
+        // to put back on the Appearance page, losing the file is every row at once.
+        let a: Appearance =
+            serde_json::from_value(json!({ "language": "zh", "themeMode": "light" })).unwrap();
+        assert_eq!(a.language, Language::En);
+        assert_eq!(a.theme_mode, ThemeMode::Light);
+        let a: Appearance = serde_json::from_value(json!({ "language": "ru" })).unwrap();
+        assert_eq!(a.language, Language::Ru);
+        // And it is the value that goes back out, so a re-save stops carrying the dead code.
+        let s = serde_json::to_string(&a).unwrap();
+        assert!(s.contains("\"language\":\"ru\""), "{s}");
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //!
 //! `StepKind::i18n_key` is the contract — the Rust side names a row, the catalog owns its wording.
 //! A key missing from `en.json` renders as raw `transcript.step.ranTools` inside the transcript, and
-//! a key missing from `zh.json` silently falls back to English in the middle of the Chinese task
+//! a key missing from `ru.json` silently falls back to English in the middle of the Russian task
 //! summary the reference screenshot shows. Both are invisible until the app is running, so this
 //! binary fails the build instead.
 //!
@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use smollm_core::{all_i18n_keys, BlockerCode, CtaCode, NoticeCode};
 
-const LOCALES: [&str; 2] = ["en", "zh"];
+const LOCALES: [&str; 2] = ["en", "ru"];
 const STEP_PREFIX: &str = "transcript.step.";
 const NOTICE_PREFIX: &str = "notice.";
 const BLOCKER_PREFIX: &str = "blocker.";
@@ -325,7 +325,7 @@ mod tests {
     fn write_both(dir: &Path, map: &BTreeMap<String, String>) {
         let body = serde_json::to_string(map).unwrap();
         std::fs::write(dir.join("en.json"), &body).unwrap();
-        std::fs::write(dir.join("zh.json"), &body).unwrap();
+        std::fs::write(dir.join("ru.json"), &body).unwrap();
     }
 
     #[test]
@@ -455,7 +455,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let body = r#"{"transcript.step.processed":"Processed","app.name":"SmoLLM Studio"}"#;
         std::fs::write(dir.path().join("en.json"), body).unwrap();
-        std::fs::write(dir.path().join("zh.json"), body).unwrap();
+        std::fs::write(dir.path().join("ru.json"), body).unwrap();
         let failures = check(dir.path());
         assert!(
             failures
@@ -481,7 +481,7 @@ mod tests {
     fn interpolation_arguments_must_match_across_locales() {
         let dir = fixture(&[
             ("en.json", "{\"a\":\"Ran {{count}} tools\"}"),
-            ("zh.json", "{\"a\":\"运行了 个工具\"}"),
+            ("ru.json", "{\"a\":\"Вызваны инструменты\"}"),
         ]);
         let failures = check(dir.path());
         assert!(
@@ -498,8 +498,8 @@ mod tests {
                 "{\"transcript\":{\"step\":{\"processed\":\"Processed\"}}}",
             ),
             (
-                "zh.json",
-                "{\"transcript\":{\"step\":{\"processed\":\"已处理\"}}}",
+                "ru.json",
+                "{\"transcript\":{\"step\":{\"processed\":\"Обработано\"}}}",
             ),
         ]);
         let catalog = load(dir.path(), "en").unwrap();

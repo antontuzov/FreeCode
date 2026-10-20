@@ -62,7 +62,12 @@ export default function App() {
   const refreshFiled = useSessions((s) => s.refresh);
 
   // The catalog language is the setting, so switching it in Settings repaints every label.
-  const locale: Locale = language;
+  // `?lang=` is the dev-only press of that menu row. It cannot ride the appearance levers in
+  // state/appearance.ts, which work by painting CSS custom properties: a language is a catalog, not a
+  // colour. It stays out of the store for the same reason those levers do — a window opened with a
+  // seeded language must never write one nobody chose.
+  const seeded = query("lang");
+  const locale: Locale = seeded === "en" || seeded === "ru" ? seeded : language;
 
   useEffect(() => {
     void load();

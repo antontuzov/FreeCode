@@ -35,7 +35,9 @@
   /* Geometry and type, independent of the palette. */
   --font-ui: 14px;
   --font-code: 12px;
-  --font-family-ui: ui-sans-serif, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+  /* Every named family here carries Cyrillic, because the second catalog is Russian. The Chinese
+   * fallbacks that used to sit in these stacks were dropped with that catalog, not with this line. */
+  --font-family-ui: ui-sans-serif, -apple-system, "Segoe UI", "Noto Sans", sans-serif;
   --font-family-code: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
   /* The type scale. Every UI step is derived from `--font-ui`, which is the one the Appearance page
      drives, so a user who raises the body size raises the whole window in proportion. Components ask
@@ -421,9 +423,11 @@
 
 /* "The interface typeface. Code always stays monospaced": every monospaced site names
  * --font-family-code, which none of these three rules touch. Sans is the `:root` default, so it
- * needs no rule of its own. */
+ * needs no rule of its own. "Iowan Old Style" was dropped from the serif stack with the Chinese
+ * catalog it sat beside: it carries no Cyrillic, so a Russian window would have fallen through it to
+ * the generic serif mid-sentence and mixed two typefaces in one paragraph. */
 [data-font-style="serif"] {
-  --font-family-ui: ui-serif, Georgia, "Iowan Old Style", "Songti SC", "Noto Serif SC", serif;
+  --font-family-ui: ui-serif, Georgia, "PT Serif", "Noto Serif", serif;
 }
 [data-font-style="mono"] {
   --font-family-ui: var(--font-family-code);

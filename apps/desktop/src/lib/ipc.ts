@@ -128,7 +128,7 @@ export const INTERFACE_STYLES: { id: Accent; label: string }[] = [
   { id: "rose", label: "Rose" },
   { id: "slate", label: "Slate" },
 ];
-export type Language = "en" | "zh";
+export type Language = "en" | "ru";
 export type TerminalTheme = "follow_theme" | "light" | "dark" | "custom";
 export type FontStyle = "sans" | "serif" | "mono";
 export type ContentWidth = "standard" | "wide" | "full";

@@ -526,7 +526,7 @@ function Appearance({
           <Select
             label={t("row.language")}
             value={a.language}
-            options={(["en", "zh"] as const).map((v) => ({ value: v, label: opt(v) }))}
+            options={(["en", "ru"] as const).map((v) => ({ value: v, label: opt(v) }))}
             onChange={(v) => set((d) => void (d.appearance.language = v))}
           />
         </Row>

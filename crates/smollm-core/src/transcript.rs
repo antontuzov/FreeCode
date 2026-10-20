@@ -1,7 +1,7 @@
 //! The transcript data model — what a Coding-view step row *is*, before it becomes pixels.
 //!
 //! Rows are emitted as an i18n key plus parameters rather than English text, because every one of
-//! these labels appears in the reference screenshots and has to render in zh too: the frontend
+//! these labels appears in the reference screenshots and has to render in Russian too: the frontend
 //! catalog owns the wording, this crate owns the meaning. [`StepKind::i18n_key`] values are
 //! therefore a stable interface — CI asserts the frontend catalog contains each key in
 //! [`all_i18n_keys`].
@@ -228,7 +228,7 @@ impl TranscriptStep {
         self.status = status;
     }
 
-    /// The registry title when there is no localized label to show (dev fallback, never zh).
+    /// The registry title when there is no localized label to show (dev fallback, never localized).
     pub fn fallback_title(&self) -> String {
         self.tool_id
             .as_deref()

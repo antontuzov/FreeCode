@@ -1,13 +1,13 @@
 // A hand-rolled catalog rather than a framework: the surface is small, and every transcript label
 // already has one authoritative key in Rust (`smollm_core::transcript::StepKind::i18n_key`).
 import en from "./en.json";
-import zh from "./zh.json";
+import ru from "./ru.json";
 
-export type Locale = "en" | "zh";
+export type Locale = "en" | "ru";
 
 const catalogs: Record<Locale, Record<string, string>> = {
   en: en as Record<string, string>,
-  zh: zh as Record<string, string>,
+  ru: ru as Record<string, string>,
 };
 
 export const TRANSCRIPT_KEYS = Object.keys(catalogs.en).filter((k) =>
