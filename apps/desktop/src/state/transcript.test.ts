@@ -12,6 +12,7 @@ import {
   reviewRows,
   stepLabel,
   stepText,
+  subagents,
   useTranscript,
   usedCapabilities,
   type Row,
@@ -314,6 +315,44 @@ describe("derivations off the rows", () => {
       { id: "b", kind: "blocked", status: "error" },
     ];
     expect(usedCapabilities(used).map((step) => step.id)).toEqual(["r1", "t1", "tool1"]);
+  });
+
+  it("lists the delegations that came back with an answer, even under a folded round", () => {
+    const delegations: Row[] = [
+      { id: "turn", kind: "turn", role: "user", text: "question" },
+      {
+        id: "batch",
+        kind: "toolBatch",
+        children: [
+          {
+            id: "s1",
+            kind: "subagent",
+            subject: "Find the entry point",
+            status: "ok",
+            detail: "2 rounds · 3 reads",
+          },
+          {
+            id: "s2",
+            kind: "subagent",
+            subject: "A question that was refused",
+            status: "error",
+          },
+          { id: "s3", kind: "subagent", subject: "Still reading", status: "running" },
+        ],
+      },
+    ];
+    // A refused or in-flight delegation is one the run asked for, not one that answered — the same
+    // reading `readSubjects` and `usedCapabilities` use. The row keeps the subject and summary the
+    // inspector shows.
+    expect(subagents(delegations)).toEqual([
+      {
+        id: "s1",
+        kind: "subagent",
+        subject: "Find the entry point",
+        status: "ok",
+        detail: "2 rounds · 3 reads",
+      },
+    ]);
   });
 });
 

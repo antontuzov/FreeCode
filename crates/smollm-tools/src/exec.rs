@@ -179,12 +179,14 @@ pub enum SummaryKey {
     TerminalTimedOut,
     /// A command ended by a signal rather than by an exit status.
     TerminalStopped,
+    /// A subagent that answered, with the `{{rounds}}` it spent and the `{{reads}}` it made.
+    SubagentReport,
 }
 
 impl SummaryKey {
     /// Every key the executors can answer with, so a catalog entry no executor reaches is named as the
     /// dead copy it is.
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::Empty,
         Self::Lines,
         Self::NoRange,
@@ -212,6 +214,7 @@ impl SummaryKey {
         Self::TerminalExit,
         Self::TerminalTimedOut,
         Self::TerminalStopped,
+        Self::SubagentReport,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -243,6 +246,7 @@ impl SummaryKey {
             Self::TerminalExit => "transcript.summary.terminalExit",
             Self::TerminalTimedOut => "transcript.summary.terminalTimedOut",
             Self::TerminalStopped => "transcript.summary.terminalStopped",
+            Self::SubagentReport => "transcript.summary.subagentReport",
         }
     }
 
@@ -267,6 +271,7 @@ impl SummaryKey {
             Self::PageCut => &["title"],
             Self::TerminalExit => &["code"],
             Self::TerminalTimedOut => &["seconds"],
+            Self::SubagentReport => &["rounds", "reads"],
             Self::Empty
             | Self::MatchInFile
             | Self::CopyReplaced

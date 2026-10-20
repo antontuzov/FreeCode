@@ -46,6 +46,9 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   // one command, and that is the one call the tooltip's "nothing else reaches past this machine" would
   // otherwise be wrong about.
   const shell = useSettings((s) => s.doc?.approvals.shellEnabled ?? false);
+  // A delegation is a second model run, so the tooltip has to name it whenever the switch that pays
+  // for it is on — the base sentences price a run in tool results and would leave it out.
+  const subagents = useSettings((s) => s.doc?.approvals.subagentsEnabled ?? false);
   // The Coding control: whether the next prompt offers the workspace reads. It is per prompt rather
   // than per conversation, because each round costs the context window a tool result, and that is a
   // price the user agrees to one question at a time rather than once per chat.
@@ -264,16 +267,19 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
             className={`icon-btn ${coding ? "bg-accent-soft text-fg-strong" : ""}`}
             aria-label={translate(locale, "composer.coding")}
             aria-pressed={coding}
-            title={translate(
-              locale,
-              coding
-                ? shell
-                  ? "composer.coding.onShell"
-                  : "composer.coding.on"
-                : shell
-                  ? "composer.coding.offShell"
-                  : "composer.coding.off",
-            )}
+            title={[
+              translate(
+                locale,
+                coding
+                  ? shell
+                    ? "composer.coding.onShell"
+                    : "composer.coding.on"
+                  : shell
+                    ? "composer.coding.offShell"
+                    : "composer.coding.off",
+              ),
+              ...(coding && subagents ? [translate(locale, "composer.coding.subagents")] : []),
+            ].join(" ")}
           >
             <Icon name="coding" />
           </button>

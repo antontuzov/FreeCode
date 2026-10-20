@@ -13,7 +13,7 @@ use serde_json::json;
 use smollm_config::agent::{ApprovalMode, PermissionClass};
 use smollm_config::Settings;
 use smollm_core::approvals::{evaluate, ApprovalDecision, Pending};
-use smollm_tools::{is_executable, registry, SandboxPolicy, ToolDescriptor};
+use smollm_tools::{is_runnable, registry, SandboxPolicy, ToolDescriptor};
 use std::path::Path;
 
 /// One tool as the page shows it. The class is what the tool can do to the machine; the decision is
@@ -87,7 +87,7 @@ impl Inventory {
                 description: tool.description.to_string(),
                 permission: tool.permission,
                 requires_network: tool.requires_network,
-                runnable: is_executable(tool.id),
+                runnable: is_runnable(tool.id),
                 decision: decision_of(&tool, &sandbox, settings),
             })
             .collect();
@@ -115,13 +115,14 @@ mod tests {
         inv.tools.iter().find(|r| r.id == id).expect("tool")
     }
 
-    /// The four reads, the three workspace writes, the two web calls and the one command are what the
-    /// Coding control actually offers today, and the page has to say so: a list that showed all thirty
-    /// as live would describe an agent this build does not have.
+    /// The four reads, the three workspace writes, the two web calls, the one command and the one
+    /// delegation are what the Coding control actually offers today, and the page has to say so: a
+    /// list that showed all thirty as live would describe an agent this build does not have.
     #[test]
-    fn the_reads_the_writes_the_web_calls_and_the_shell_are_what_a_call_can_run_through() {
+    fn the_reads_the_writes_the_web_calls_the_shell_and_the_delegation_are_what_a_call_can_run_through(
+    ) {
         let inv = inventory(&Settings::default());
-        assert_eq!(inv.runnable, 10, "{:?}", inv.tools);
+        assert_eq!(inv.runnable, 11, "{:?}", inv.tools);
         for id in ["read_file", "list_dir", "glob", "grep_search"] {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "auto", "{id}");
@@ -144,10 +145,44 @@ mod tests {
         // refused rather than merely waiting for the dial.
         assert!(row(&inv, "terminal").runnable);
         assert_eq!(row(&inv, "terminal").decision, "blocked");
+        // The delegation is answered by the run loop rather than an executor, so it is runnable in
+        // this build — but a second model run costs the same context as the first, and the switch
+        // that pays for it starts off.
+        assert!(row(&inv, "spawn_subagent").runnable);
+        assert_eq!(row(&inv, "spawn_subagent").decision, "blocked");
         // And the calls that would take a file away or run something else are still declared only.
         for id in ["delete_path", "run_tests"] {
             assert!(!row(&inv, id).runnable, "{id}");
         }
+    }
+
+    /// The Subagents switch is the delegation's consent, and the page follows it the way the shell
+    /// row follows the Terminal switch: on means the default dial lets it run, Ask still asks, and
+    /// neither switch opens the other's tool.
+    #[test]
+    fn the_subagents_switch_is_what_moves_the_delegation_from_blocked_to_auto() {
+        let settings = Settings {
+            approvals: smollm_config::agent::Approvals {
+                subagents_enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let inv = inventory(&settings);
+        assert_eq!(row(&inv, "spawn_subagent").decision, "auto");
+        assert_eq!(row(&inv, "terminal").decision, "blocked");
+        let asking = Settings {
+            approvals: smollm_config::agent::Approvals {
+                mode: ApprovalMode::AskAlways,
+                subagents_enabled: true,
+                ..Default::default()
+            },
+            ..settings.clone()
+        };
+        assert_eq!(row(&inventory(&asking), "spawn_subagent").decision, "ask");
+        let mut plan = settings;
+        plan.approvals.mode = ApprovalMode::PlanOnly;
+        assert_eq!(row(&inventory(&plan), "spawn_subagent").decision, "blocked");
     }
 
     /// Turning the Privacy switch on is the only consent a web call gets, so the page has to move with

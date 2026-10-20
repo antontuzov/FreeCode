@@ -34,7 +34,9 @@ use smollm_core::transcript::{
     tool_batch, DiffStat, EditedFile, Hunk, StepKind, StepStatus, TranscriptStep,
 };
 use smollm_llama::ToolCall;
-use smollm_tools::{execute, is_executable, patch_target, Edit, SandboxPolicy};
+use smollm_tools::{
+    execute, is_delegated, is_executable, is_runnable, patch_target, Edit, SandboxPolicy,
+};
 
 /// One call's answer to the model, with the id the replay has to name.
 #[derive(Debug, Clone)]
@@ -42,23 +44,6 @@ pub struct Ran {
     pub call_id: String,
     /// The tool result text. A refusal is in here too, in words the model can act on.
     pub result: String,
-}
-
-/// Run one round of calls, emitting the rows as they open and close.
-///
-/// Results come back in the order the model asked for them: the replay pairs each `tool` message with
-/// the `call_id` it answers, and a mismatched pair is what makes the fork's template refuse the next
-/// prompt.
-pub fn run_batch(
-    app: &AppHandle,
-    calls: &[ToolCall],
-    settings: &Settings,
-    policy: &SandboxPolicy,
-) -> Vec<Ran> {
-    calls
-        .iter()
-        .map(|call| run_one(app, call, settings, policy))
-        .collect()
 }
 
 /// The batch header, emitted once a round's calls have all closed. The count comes from the rows the
@@ -77,15 +62,12 @@ pub fn close_batch(app: &AppHandle, calls: &[ToolCall]) {
     );
 }
 
-/// How many of these calls open a row: exactly the ones [`run_one`] will run, which is the same test
-/// it applies before emitting anything. A call for a tool with no executor is answered with a notice
-/// and never becomes a row, so counting it here would put a number in the header that the batch below
-/// it cannot show rows for.
+/// How many of these calls open a row: exactly the ones [`run_one`] or the loop's delegation path
+/// will answer, which is the same test applied before emitting anything. A call for a tool with no
+/// runner is answered with a notice and never becomes a row, so counting it here would put a number
+/// in the header that the batch below it cannot show rows for.
 fn rows_for(calls: &[ToolCall]) -> usize {
-    calls
-        .iter()
-        .filter(|call| is_executable(&call.name))
-        .count()
+    calls.iter().filter(|call| is_runnable(&call.name)).count()
 }
 
 /// The sandbox every tool call in this build goes through: the workspace the window is open on, with no
@@ -108,11 +90,33 @@ pub fn policy_for(app: &AppHandle, settings: &Settings) -> Result<SandboxPolicy,
     })
 }
 
-fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &SandboxPolicy) -> Ran {
+/// Run one call, emitting the rows as it opens and closes.
+pub(crate) fn run_one(
+    app: &AppHandle,
+    call: &ToolCall,
+    settings: &Settings,
+    policy: &SandboxPolicy,
+) -> Ran {
     // A call whose arguments never parsed is answered as an empty object: the executor's own
     // "path is required" names the field to fix, which a JSON error does not.
     let arguments: Value = serde_json::from_str(&call.arguments).unwrap_or_else(|_| json!({}));
     let name = call.name.as_str();
+
+    // Delegation is the loop's own call, answered in `chat::run_rounds`; a call that reaches this
+    // function is outside that road and must not run a second model request here.
+    if is_delegated(name) {
+        emit(
+            app,
+            AgentEvent::notice(NoticeCode::ToolNotOffered, &[("name", name)]),
+        );
+        return Ran {
+            call_id: call.id.clone(),
+            result: format!(
+                "{name} is answered by the run loop, not by a tool executor. Ask for it from a Coding \
+                 run with Subagents on."
+            ),
+        };
+    }
 
     // Not in the offered set — either the registry has no such tool or it has one this build cannot
     // run. Either way no row opens, because a row would promise work that never happens.
@@ -127,8 +131,9 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
                 "{name} is not available in this build: it reads nothing and changes nothing. The \
                  tools it has are read_file, list_dir, glob, grep_search, write_file, edit_file and \
                  apply_patch, which reach nothing outside this workspace; web_search and fetch_url, \
-                 which reach the internet only while the Privacy switch is on; and terminal, which \
-                 runs only while Terminal access is on."
+                 which reach the internet only while the Privacy switch is on; terminal, which \
+                 runs only while Terminal access is on; and spawn_subagent, which delegates only \
+                 while Subagents is on."
             ),
         };
     }
@@ -261,7 +266,7 @@ fn written(edits: &[Edit]) -> Option<Written> {
 ///
 /// A prompt this build cannot show is a refusal rather than a wait: the approval dial is in the
 /// composer, and a run hanging on a decision nothing can answer reads as a stalled server.
-fn cleared(
+pub(crate) fn cleared(
     name: &str,
     arguments: &Value,
     call_id: &str,
@@ -285,6 +290,20 @@ fn cleared(
     }
 }
 
+/// How many characters of a delegated question the transcript shows. A task can be a paragraph; the
+/// row is a line, and the full text the model wrote is in the run's own history rather than in a chip.
+const TASK_CHARS: usize = 80;
+
+fn task_subject(task: &str) -> String {
+    let line = task.lines().next().unwrap_or_default().trim();
+    if line.chars().count() <= TASK_CHARS {
+        return line.to_string();
+    }
+    let mut clipped: String = line.chars().take(TASK_CHARS).collect();
+    clipped.push('…');
+    clipped
+}
+
 /// The row's label argument: the path or pattern the call worked on, shown as the chip beside
 /// "Read file" rather than buried in a sentence about it.
 fn subject(name: &str, arguments: &Value) -> String {
@@ -298,6 +317,16 @@ fn subject(name: &str, arguments: &Value) -> String {
             .and_then(patch_target)
             .unwrap_or_default();
     }
+    // A delegated question is the row's subject: "Subagent" alone would say what kind of row it is
+    // and nothing about what was handed over.
+    if name == "spawn_subagent" {
+        return task_subject(
+            arguments
+                .get("task")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        );
+    }
     ["path", "pattern", "file", "query", "url", "command"]
         .iter()
         .find_map(|key| arguments.get(*key).and_then(Value::as_str))
@@ -305,7 +334,7 @@ fn subject(name: &str, arguments: &Value) -> String {
         .to_string()
 }
 
-fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
+pub(crate) fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
     let kind = match name {
         "read_file" => StepKind::ReadFile,
         "grep_search" => StepKind::SearchContent,
@@ -315,6 +344,7 @@ fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
         "terminal" => StepKind::Terminal,
         "web_search" => StepKind::WebSearch,
         "fetch_url" => StepKind::WebReading,
+        "spawn_subagent" => StepKind::Subagent,
         _ => StepKind::Tool,
     };
     let shown = subject(name, arguments);
@@ -323,7 +353,7 @@ fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
     row
 }
 
-fn emit(app: &AppHandle, event: AgentEvent) {
+pub(crate) fn emit(app: &AppHandle, event: AgentEvent) {
     let _ = app.emit(crate::chat::EVENT, event);
 }
 
@@ -382,6 +412,18 @@ mod tests {
             ),
             ""
         );
+        // A delegated question is its own subject, on one line and clipped to a chip's length.
+        assert_eq!(
+            subject(
+                "spawn_subagent",
+                &json!({ "task": "List the files\nand say which is largest" })
+            ),
+            "List the files"
+        );
+        let long = "x".repeat(TASK_CHARS + 10);
+        let clipped = subject("spawn_subagent", &json!({ "task": long }));
+        assert_eq!(clipped.chars().count(), TASK_CHARS + 1, "{clipped}");
+        assert!(clipped.ends_with('…'), "{clipped}");
     }
 
     #[test]
@@ -479,6 +521,11 @@ mod tests {
             started_row("terminal", &json!({ "command": "cargo test" })).kind,
             StepKind::Terminal
         );
+        // Delegation has its own glyph in the inspector, so its row cannot be a generic tool.
+        assert!(is_delegated("spawn_subagent"));
+        let delegated = started_row("spawn_subagent", &json!({ "task": "Find the entry point" }));
+        assert_eq!(delegated.kind, StepKind::Subagent);
+        assert_eq!(delegated.detail, "Find the entry point");
     }
 
     #[test]
@@ -504,6 +551,9 @@ mod tests {
         // A call for a tool with no executor gets a notice, not a row, so the header cannot claim it.
         assert_eq!(rows_for(&called(&["read_file", "grep_search"])), 2);
         assert_eq!(rows_for(&called(&["read_file", "write_file"])), 2);
+        // Delegation is run by the loop rather than an executor, and still opens the row it counts.
+        assert_eq!(rows_for(&called(&["spawn_subagent"])), 1);
+        assert_eq!(rows_for(&called(&["spawn_subagent", "read_file"])), 2);
         assert_eq!(rows_for(&called(&["read_file", "delete_path"])), 1);
         assert_eq!(rows_for(&called(&["delete_everything"])), 0);
     }

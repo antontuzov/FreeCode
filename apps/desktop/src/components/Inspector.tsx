@@ -7,6 +7,8 @@ import {
   readSubjects,
   reviewRows,
   stepLabel,
+  stepText,
+  subagents,
   usedCapabilities,
   useTranscript,
   type DiffStat,
@@ -31,8 +33,8 @@ type Group = {
 };
 
 // The groups the reference inspector shows, in order: first what the run changed, then the ones it
-// draws under it. `subagents` is the scripted set's own, so a real answer never lists it — see
-// FIXTURE_ONLY.
+// draws under it. Every group here is read off the run's own rows now; `?fixture=1` still has a
+// scripted Subagents list, and that is the only place those two rows come from.
 const GROUPS: Group[] = [
   { key: "files", icon: "editFile" },
   { key: "subagents", icon: "user", round: true },
@@ -94,20 +96,13 @@ const SEEDED_FOLDED = new Set(
 );
 
 /**
- * `?fixture=1` only, for the one group no loop in this build writes rows for yet — see the note in
- * state/transcript.ts about invented run output. The four a run *can* produce — `files`, `source`,
- * `webReading` and `skills` — and the page it leaves behind (`artifact`) are read off the transcript in
- * every mode, so what the panel lists and what the rows above it report stay one answer rather than
- * two.
+ * The scripted report `?fixture=1` shows, so the layout still renders with the rows it is compared
+ * against. A real run fills the same group from its `spawn_subagent` rows instead; the script is what
+ * keeps the reference's two-item shape reproducible in a capture with no live model.
  */
 const FIXTURE_ITEMS: Record<string, Item[]> = {
   subagents: [{ label: "Explore · llama.cpp", meta: "stopped" }, { label: "Audit engine claims" }],
 };
-
-/** The groups only the script can fill. A real run has no loop that writes rows for them, because
- * there is no subagent concept in this build — so a heading for them advertises a capability the app
- * does not have, which a folded empty row cannot unsay. */
-const FIXTURE_ONLY = new Set(Object.keys(FIXTURE_ITEMS));
 
 function SectionHeader({
   open,
@@ -168,10 +163,10 @@ function Section({ group, items, locale }: { group: Group; items: Item[]; locale
   const label = translate(locale, `inspector.${group.key}`);
   const folded = SEEDED_FOLDED.has(group.key);
   // A group starts open when it has rows and closed when it does not. Most of this build's run reports
-  // no skills, pages or subagents — the loops that would produce them are not wired, so under a real
-  // answer those groups are empty at once — and a column of open headings each followed by their own
-  // apology is a panel that advertises what is missing. The sentence is one press away either way, so
-  // closing says nothing that opening hides.
+  // no skills, pages or subagents — the run's offer is the loop's, and a prompt that never needed one
+  // leaves the group empty — and a column of open headings each followed by their own apology is a
+  // panel that advertises what is missing. The sentence is one press away either way, so closing says
+  // nothing that opening hides.
   const [open, setOpen] = useState(items.length > 0 && !folded);
   const has = items.length > 0;
   // A run that starts editing mid-answer fills this group from nothing, and a count the user has to
@@ -391,18 +386,30 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
       })),
     [rows, locale],
   );
+  // A delegation row is a second model run the user paid for, so the panel names the task it was
+  // given and the rounds and reads it spent. The subject is the host's clipped task, which is the one
+  // line that tells this delegation from another; the summary is the same sentence the transcript row
+  // carries, so the two cannot disagree.
+  const delegated = useMemo<Item[]>(
+    () =>
+      subagents(reviewRows(rows, "lastTurn")).map((step) => ({
+        label: step.subject || stepLabel(locale, step),
+        meta: stepText(locale, step) || undefined,
+      })),
+    [rows, locale],
+  );
   // The scripted group fills in under the row-derived ones, which a real run never sees — it has no
   // scripted rows to fill it from, and no heading either.
   const groups = useMemo<Record<string, Item[]>>(
     () => ({
-      ...(fixture ? FIXTURE_ITEMS : {}),
       files,
+      subagents: fixture ? (FIXTURE_ITEMS.subagents ?? []) : delegated,
       skills: capabilities,
       source: sources,
       webReading: pages,
       artifact: artifacts,
     }),
-    [fixture, files, capabilities, sources, pages, artifacts],
+    [fixture, delegated, files, capabilities, sources, pages, artifacts],
   );
 
   return (
@@ -411,7 +418,7 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
       className="flex min-h-0 flex-1 flex-col overflow-y-auto border-l border-line bg-bg"
     >
       {run ? <RunSection locale={locale} run={run} /> : <UnmeasuredSection locale={locale} />}
-      {GROUPS.filter((group) => fixture || !FIXTURE_ONLY.has(group.key)).map((group) => (
+      {GROUPS.map((group) => (
         <Section key={group.key} group={group} items={groups[group.key] ?? []} locale={locale} />
       ))}
     </aside>

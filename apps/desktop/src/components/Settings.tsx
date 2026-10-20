@@ -113,6 +113,7 @@ const CONTROLS: Record<Page, string[]> = {
   agent: [
     "approvalMode",
     "shellEnabled",
+    "subagentsEnabled",
     "shellTimeout",
     "compressAt",
     "keepRecentTurns",
@@ -804,6 +805,13 @@ function Agent({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
             min={5}
             max={600}
             onChange={(v) => set((d) => void (d.approvals.shellTimeoutMs = v * 1000))}
+          />
+        </Row>
+        <Row title={t("row.subagentsEnabled")} description={t("row.subagentsEnabled.desc")}>
+          <Toggle
+            on={approvals.subagentsEnabled}
+            label={t("row.subagentsEnabled")}
+            onChange={(next) => set((d) => void (d.approvals.subagentsEnabled = next))}
           />
         </Row>
       </Section>

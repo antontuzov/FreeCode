@@ -48,6 +48,10 @@ pub struct Approvals {
     /// approval prompt would otherwise ask for. Nothing in the loop offers `terminal` while it is off.
     pub shell_enabled: bool,
     pub shell_timeout_ms: u64,
+    /// Off by default: a subagent is a second model run against the same weights, and the main run
+    /// pays a tool result for its answer. The switch is the consent, the way Terminal access is, and
+    /// nothing in the loop offers `spawn_subagent` while it is off.
+    pub subagents_enabled: bool,
 }
 
 impl Default for Approvals {
@@ -59,6 +63,7 @@ impl Default for Approvals {
             shell_deny: Vec::new(),
             shell_enabled: false,
             shell_timeout_ms: Self::default_timeout_ms(),
+            subagents_enabled: false,
         }
     }
 }
@@ -85,6 +90,18 @@ impl Approvals {
         // here while the sandbox's own `shell_allowed` is on — the engine refuses a switched-off shell
         // before the mode is consulted.
         if tool_id == "terminal" && self.shell_enabled && self.mode != ApprovalMode::AskAlways {
+            return Some(matches!(
+                self.mode,
+                ApprovalMode::AutoApprove | ApprovalMode::Custom
+            ));
+        }
+        // The same bargain for delegation: the switch is what the prompt would have asked, and the
+        // subagent reads only. Plan-only still refuses it above, because `evaluate` treats a second
+        // model run as a side effect rather than as a read.
+        if tool_id == "spawn_subagent"
+            && self.subagents_enabled
+            && self.mode != ApprovalMode::AskAlways
+        {
             return Some(matches!(
                 self.mode,
                 ApprovalMode::AutoApprove | ApprovalMode::Custom
@@ -249,6 +266,37 @@ mod tests {
             blocked.decide("terminal", PermissionClass::SideEffect),
             Some(false)
         );
+    }
+
+    #[test]
+    fn delegation_is_off_until_its_switch_is_on_and_never_auto_runs_in_ask_mode() {
+        let off = Approvals::default();
+        assert!(!off.subagents_enabled);
+        assert_eq!(
+            off.decide("spawn_subagent", PermissionClass::SideEffect),
+            None,
+            "a switched-off subagent is not approved by the mode"
+        );
+        let on = Approvals {
+            subagents_enabled: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            on.decide("spawn_subagent", PermissionClass::SideEffect),
+            Some(true)
+        );
+        assert_eq!(
+            Approvals {
+                subagents_enabled: true,
+                mode: ApprovalMode::AskAlways,
+                ..Default::default()
+            }
+            .decide("spawn_subagent", PermissionClass::SideEffect),
+            None,
+            "Ask still means ask, even with the switch on"
+        );
+        // The switch is about delegation, not about the shell beside it.
+        assert_eq!(on.decide("terminal", PermissionClass::SideEffect), None);
     }
 
     #[test]

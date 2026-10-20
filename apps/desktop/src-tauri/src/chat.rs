@@ -32,18 +32,21 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use smollm_config::{PackingChoice, ReasoningEffort, Settings};
-use smollm_core::events::{AgentEvent, NoticeCode, RunReport};
-use smollm_core::transcript::DiffStat;
+use smollm_core::events::{AgentEvent, NoticeCode, RunReport, ToolOutcome};
+use smollm_core::transcript::{DiffStat, StepStatus, TranscriptStep};
 use smollm_llama::{
     prompt_tokens, start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message, Reply,
     ReplyDelta, ServerHandle, StreamControl, IMAGE_TOKEN_CAP,
 };
 use smollm_models::{gguf, IntegrityStatus, ModelEntry};
+use smollm_tools::{SandboxPolicy, Summary, SummaryKey};
 
-use crate::{agent, appearance, sessions, status};
+use crate::agent::{self, Ran};
+use crate::{appearance, sessions, status};
 use sessions::{Role, Session};
 
 /// Event name the transcript subscribes to for the duration of the window.
@@ -57,6 +60,28 @@ pub const EVENT: &str = "agent-event";
 /// stopped out loud rather than left to page the context full. Four is the number of reads a question
 /// about this workspace can be answered with — list it, find the file, read it, search the rest.
 const MAX_TOOL_ROUNDS: usize = 4;
+
+/// How many times a subagent may ask the engine before it has to answer. Two requests is one round of
+/// reading and one answer — the shape a self-contained "find X and tell me where" needs, and half the
+/// parent's budget because a delegation is already a second run against the same weights.
+const SUBAGENT_ROUNDS: usize = 2;
+
+/// How much of one read a subagent may bring into its own context. The parent's window is not the
+/// subagent's, but both are the same 32k slot: four uncut files could spend it in one round.
+const SUBAGENT_TOOL_CHARS: usize = 12_000;
+
+/// How much of a subagent's answer comes back to the parent. The report is folded into the parent's
+/// history as one tool result, and a transcript pasted whole would cost the delegation its point.
+const SUBAGENT_RESULT_CHARS: usize = 6_000;
+
+/// The one system turn a subagent is given. It names the read-only offer in the model's own terms,
+/// because a 1.7B model will otherwise ask for a write the loop does not offer and spend a round.
+const SUBAGENT_SYSTEM: &str = "\
+You are a subagent inside a local coding assistant. You answer one delegated question about this \
+workspace. You can read it with read_file, list_dir, glob and grep_search; you cannot change, create \
+or run anything, and you cannot reach the internet. Use the tools you need, then answer in plain \
+prose: what you found, and which files say so. Keep the answer short; the assistant that delegated \
+the question may act on it.";
 
 /// Sized for the largest pack the catalog offers, not the default one: a cold first load pages 5.95 GB
 /// of weights in from disk, and the observed warm load of that file on an M1 was under 11 s, so this is
@@ -861,13 +886,15 @@ fn request_for(state: &ChatState, settings: &Settings, turn: &Turn, tools: bool)
     request.max_tokens = turn.max_tokens;
     request.reasoning_effort = Some(turn.effort.clone());
     if tools {
-        // Only the calls this build has executors for — the four reads, the three workspace writes, the
-        // two web calls when the Privacy switch is on, and the shell when Terminal access is on: a schema the
-        // host cannot run, or one that would leave the machine against the user's stated wish, is a
-        // promise the model would be asked to break.
+        // Only the calls this build has runners for — the four reads, the three workspace writes, the
+        // two web calls when the Privacy switch is on, the shell when Terminal access is on, and
+        // delegation when Subagents is on: a schema the host cannot run, or one that would leave the
+        // machine or start a second run against the user's stated wish, is a promise the model would
+        // be asked to break.
         request.tools = smollm_tools::executable_specs(
             settings.privacy.allow_remote_providers,
             settings.approvals.shell_enabled,
+            settings.approvals.subagents_enabled,
         );
     }
     request
@@ -876,6 +903,284 @@ fn request_for(state: &ChatState, settings: &Settings, turn: &Turn, tools: bool)
 /// Whether the answer stopped to ask for a tool rather than finishing in prose.
 fn wants_tools(reply: &Reply) -> bool {
     !reply.tool_calls.is_empty()
+}
+
+/// Keep at most `max` characters, saying that the rest was cut. Character-based rather than byte-based
+/// so a Cyrillic answer is clipped at the length the constant names, not a third of it.
+fn clip_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut clipped: String = text.chars().take(max).collect();
+    clipped.push_str("\n… (cut)");
+    clipped
+}
+
+/// The one system turn a subagent is given: the user's own instructions, then the subagent's bounds.
+fn subagent_system(parent: &str) -> String {
+    let parent = parent.trim();
+    if parent.is_empty() {
+        SUBAGENT_SYSTEM.to_string()
+    } else {
+        format!("{parent}\n\n{SUBAGENT_SYSTEM}")
+    }
+}
+
+/// What one subagent run produced, for the row and the parent's tool result.
+struct Delegated {
+    text: String,
+    rounds: usize,
+    reads: usize,
+}
+
+/// Ask the engine a delegated question, let it read, and collect its answer.
+///
+/// This is the bounded second run the `spawn_subagent` switch pays for: its own history — the parent's
+/// conversation is not replayed into it — its own read-only offer, and [`SUBAGENT_ROUNDS`] requests.
+/// Its tool calls are run against the same sandbox and approval policy as the parent's, so a read the
+/// user's dial would refuse is refused here too. Nothing is emitted to the transcript from this loop:
+/// the one row the user sees is the delegation, and the report is what the parent gets back.
+async fn delegate(
+    turn: &Turn,
+    settings: &Settings,
+    policy: &SandboxPolicy,
+    task: &str,
+    stops: &Stops<'_>,
+) -> Result<Delegated, String> {
+    let mut history = vec![
+        Message::system(subagent_system(&settings.sampling.system_prompt)),
+        Message::user(task),
+    ];
+    let mut request = ChatRequest::new(history.clone());
+    request.max_tokens = turn.max_tokens;
+    request.reasoning_effort = Some(turn.effort.clone());
+    request.tools = smollm_tools::subagent_specs();
+
+    if let Ok(sent) = prompt_tokens(
+        &turn.view.base_url,
+        &request,
+        &turn.model,
+        turn.view.context_tokens,
+    )
+    .await
+    {
+        if leaves_no_room(sent, turn.view.context_tokens) {
+            return Err(
+                "the delegated question does not leave room in the model's window for an answer"
+                    .into(),
+            );
+        }
+    }
+
+    let mut rounds = 0usize;
+    let mut reads = 0usize;
+    loop {
+        if rounds == SUBAGENT_ROUNDS || stops.stopped.load(Ordering::Relaxed) {
+            return Ok(Delegated {
+                text: "The subagent was stopped before it answered.".into(),
+                rounds,
+                reads,
+            });
+        }
+        rounds += 1;
+        let reply = smollm_llama::stream_chat(
+            &turn.view.base_url,
+            &request,
+            &turn.model,
+            turn.view.context_tokens,
+            |_| {
+                if stops.requested.load(Ordering::Relaxed) {
+                    stops.stopped.store(true, Ordering::Relaxed);
+                    StreamControl::Stop
+                } else {
+                    StreamControl::Continue
+                }
+            },
+        )
+        .await
+        .map_err(|e| format!("the delegated request failed: {e}"))?;
+
+        if reply.tool_calls.is_empty() {
+            let text = if reply.text.trim().is_empty() {
+                if reply.ran_out_of_budget() {
+                    "The subagent ran out of its answer budget without saying anything.".to_string()
+                } else {
+                    "The subagent finished without an answer.".to_string()
+                }
+            } else {
+                reply.text.trim().to_string()
+            };
+            return Ok(Delegated {
+                text,
+                rounds,
+                reads,
+            });
+        }
+        if rounds == SUBAGENT_ROUNDS {
+            // No request left to answer with. Whatever prose came beside the calls is the report, and
+            // the row says the rounds were spent rather than pretending the subagent concluded.
+            let text = if reply.text.trim().is_empty() {
+                "The subagent spent its two rounds asking for tools and did not answer.".to_string()
+            } else {
+                reply.text.trim().to_string()
+            };
+            return Ok(Delegated {
+                text,
+                rounds,
+                reads,
+            });
+        }
+
+        let mut results = Vec::with_capacity(reply.tool_calls.len());
+        for call in &reply.tool_calls {
+            let arguments: Value =
+                serde_json::from_str(&call.arguments).unwrap_or_else(|_| json!({}));
+            let name = call.name.as_str();
+            let result = match smollm_tools::find(name) {
+                Some(tool) if smollm_tools::is_executable(name) && tool.is_read_only() => {
+                    match agent::cleared(name, &arguments, &call.id, settings, policy) {
+                        Ok(()) => match smollm_tools::execute(name, &arguments, policy) {
+                            Ok(done) => {
+                                reads += 1;
+                                clip_chars(&done.content, SUBAGENT_TOOL_CHARS)
+                            }
+                            Err(why) => format!("{name} did not run: {why}"),
+                        },
+                        Err(why) => format!("{name} did not run: {why}"),
+                    }
+                }
+                _ => format!(
+                    "{name} is not available to a subagent. It can use read_file, list_dir, glob and \
+                     grep_search."
+                ),
+            };
+            results.push((call.id.clone(), result));
+        }
+
+        history.push(Message {
+            tool_calls: reply.tool_calls.clone(),
+            ..Message::assistant(reply.text.clone())
+        });
+        for (id, result) in results {
+            history.push(Message::tool_result(&id, &result));
+        }
+        request = ChatRequest::new(history.clone());
+        request.max_tokens = turn.max_tokens;
+        request.reasoning_effort = Some(turn.effort.clone());
+        request.tools = smollm_tools::subagent_specs();
+        if let Ok(sent) = prompt_tokens(
+            &turn.view.base_url,
+            &request,
+            &turn.model,
+            turn.view.context_tokens,
+        )
+        .await
+        {
+            if leaves_no_room(sent, turn.view.context_tokens) {
+                return Err(
+                    "the subagent's reading did not leave room in the model's window for an answer"
+                        .into(),
+                );
+            }
+        }
+    }
+}
+
+/// Close a delegation that never started, as a row that says why.
+fn refuse_delegation(
+    app: &AppHandle,
+    call_id: &str,
+    mut row: TranscriptStep,
+    reason: String,
+) -> Ran {
+    row.finish(StepStatus::Blocked);
+    row.detail = reason.clone();
+    let outcome = ToolOutcome::blocked(&reason);
+    agent::emit(app, AgentEvent::ToolFinished { step: row, outcome });
+    Ran {
+        call_id: call_id.to_string(),
+        result: format!("spawn_subagent did not run: {reason}"),
+    }
+}
+
+/// Run one `spawn_subagent` call: the switch, the dial, one bounded second run, and the answer folded
+/// into the parent's history as one tool result.
+async fn run_delegation(
+    app: &AppHandle,
+    turn: &Turn,
+    settings: &Settings,
+    policy: &SandboxPolicy,
+    call: &smollm_llama::ToolCall,
+    stops: &Stops<'_>,
+    allowed: bool,
+) -> Ran {
+    let arguments: Value = serde_json::from_str(&call.arguments).unwrap_or_else(|_| json!({}));
+    let task = arguments
+        .get("task")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let row = agent::started_row("spawn_subagent", &arguments);
+    agent::emit(app, AgentEvent::ToolStarted { step: row.clone() });
+    if task.is_empty() {
+        return refuse_delegation(
+            app,
+            &call.id,
+            row,
+            "the task is empty; a subagent needs a self-contained question".into(),
+        );
+    }
+    if !settings.approvals.subagents_enabled {
+        return refuse_delegation(
+            app,
+            &call.id,
+            row,
+            "Subagents is off in Settings, so no second model run may start".into(),
+        );
+    }
+    if !allowed {
+        return refuse_delegation(
+            app,
+            &call.id,
+            row,
+            "this run has already used its one delegation".into(),
+        );
+    }
+    if let Err(reason) = agent::cleared("spawn_subagent", &arguments, &call.id, settings, policy) {
+        return refuse_delegation(app, &call.id, row, reason);
+    }
+
+    let mut row = row;
+    match delegate(turn, settings, policy, &task, stops).await {
+        Ok(done) => {
+            row.finish(StepStatus::Done);
+            let summary = Summary::said(
+                SummaryKey::SubagentReport,
+                json!({ "rounds": done.rounds, "reads": done.reads }),
+                format!("{} rounds · {} reads", done.rounds, done.reads),
+            );
+            row.detail = summary.text.clone();
+            agent::emit(
+                app,
+                AgentEvent::ToolFinished {
+                    step: row,
+                    outcome: ToolOutcome::ok(summary),
+                },
+            );
+            Ran {
+                call_id: call.id.clone(),
+                result: format!(
+                    "A read-only subagent answered after {} round(s) and {} read(s):\n{}\n\nIt could \
+                     not change any file; make any edit yourself.",
+                    done.rounds,
+                    done.reads,
+                    clip_chars(&done.text, SUBAGENT_RESULT_CHARS)
+                ),
+            }
+        }
+        Err(reason) => refuse_delegation(app, &call.id, row, reason),
+    }
 }
 
 /// Ask, run what the answer calls for, and ask again — until the model answers in prose.
@@ -907,6 +1212,9 @@ async fn run_rounds(
     // because the root does not move inside a run.
     let policy = agent::policy_for(app, settings)?;
     let mut rounds = 0usize;
+    // One delegation per run. The switch is the consent to pay for a second model run; the budget is
+    // what keeps a model that likes delegating from spending the whole window on its subagents.
+    let mut delegations = 0usize;
     while wants_tools(&reply) && !stops.stopped.load(Ordering::Relaxed) {
         if rounds == MAX_TOOL_ROUNDS {
             let cap = MAX_TOOL_ROUNDS.to_string();
@@ -918,15 +1226,29 @@ async fn run_rounds(
         }
         rounds += 1;
         let calls = reply.tool_calls.clone();
-        // The reads go on the blocking pool: a walk of the workspace is exactly the kind of thing the
-        // event loop must not wait on, and the rows it emits are events, not replies.
-        let (host, batch_settings, batch_policy, batch_calls) =
-            (app.clone(), settings.clone(), policy.clone(), calls.clone());
-        let ran = tauri::async_runtime::spawn_blocking(move || {
-            agent::run_batch(&host, &batch_calls, &batch_settings, &batch_policy)
-        })
-        .await
-        .map_err(|e| format!("the tool round stopped: {e}"))?;
+        // In the order the model asked, because the replay pairs each result with its `call_id` and
+        // the template rejects a batch whose answers are shuffled. An ordinary call goes on the
+        // blocking pool — a walk of the workspace is exactly the kind of thing the event loop must not
+        // wait on — while a delegation is itself async and streams its own request.
+        let mut ran = Vec::with_capacity(calls.len());
+        for call in &calls {
+            if smollm_tools::is_delegated(&call.name) {
+                let allowed = delegations == 0;
+                if allowed {
+                    delegations += 1;
+                }
+                ran.push(run_delegation(app, turn, settings, &policy, call, stops, allowed).await);
+                continue;
+            }
+            let (host, batch_settings, batch_policy, one) =
+                (app.clone(), settings.clone(), policy.clone(), call.clone());
+            let one = tauri::async_runtime::spawn_blocking(move || {
+                agent::run_one(&host, &one, &batch_settings, &batch_policy)
+            })
+            .await
+            .map_err(|e| format!("the tool round stopped: {e}"))?;
+            ran.push(one);
+        }
         agent::close_batch(app, &calls);
 
         // The replay the fork's template needs: the assistant's own call list, then one result per
@@ -943,6 +1265,11 @@ async fn run_rounds(
             }
         }
 
+        // A Stop press during the batch — most likely inside a subagent's own stream — has nothing
+        // left to ask for. The rows are closed; the run ends here.
+        if stops.stopped.load(Ordering::Relaxed) {
+            break;
+        }
         request = request_for(state, settings, turn, tools);
         // Measured again for the same reason the first prompt is: a conversation that filled the window
         // during this run cannot be replayed, and the server would answer from its tail without saying
@@ -2186,5 +2513,39 @@ mod tests {
             projector(weights, &at_length),
             Projector::Absent { .. }
         ));
+    }
+
+    /// The subagent's answer is folded into the parent's history, which grows the window by one tool
+    /// result; the cap is counted in characters so a Cyrillic or CJK answer is cut at the length the
+    /// constant names rather than at a third of it. The marker is the model's cue that something is
+    /// missing, so it stays even for a text that overruns by one character.
+    #[test]
+    fn a_subagent_answer_is_clipped_by_characters_not_bytes() {
+        let short = "нашёл точку входа в main.rs";
+        assert_eq!(clip_chars(short, 40), short);
+        let long = "я".repeat(30);
+        let clipped = clip_chars(&long, 10);
+        assert!(clipped.starts_with(&"я".repeat(10)));
+        assert!(clipped.ends_with("\n… (cut)"));
+        assert_eq!(clipped.chars().count(), 10 + "\n… (cut)".chars().count());
+        // A non-ASCII text just past the cap is cut and marked, not passed through whole.
+        assert!(clip_chars(&"я".repeat(11), 10).ends_with("\n… (cut)"));
+    }
+
+    /// The subagent is the same assistant with narrower hands, not a stranger: it gets the user's own
+    /// instructions first, then the bounds that say what it cannot do. An empty parent prompt is the
+    /// one case where the bounds are the whole system turn.
+    #[test]
+    fn a_subagent_inherits_the_users_instructions_before_its_own_bounds() {
+        let inherited = subagent_system("You are terse.\n");
+        assert!(inherited.starts_with("You are terse.\n\n"));
+        assert!(inherited.ends_with(SUBAGENT_SYSTEM));
+        assert!(!inherited.contains("You are terse.  \n"));
+        assert_eq!(subagent_system("   \n"), SUBAGENT_SYSTEM);
+        // The bounds are the promise the switch makes: read-only, no network, and an answer rather
+        // than an edit. A change to this sentence is a change to what the user consented to.
+        for bound in ["cannot change", "cannot reach the internet", "read_file"] {
+            assert!(SUBAGENT_SYSTEM.contains(bound), "{bound}");
+        }
     }
 }

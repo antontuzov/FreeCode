@@ -446,6 +446,8 @@ export type ApprovalsDoc = {
   toolOverrides: Record<string, boolean>;
   /** Off by default: the one switch that lets the loop run a command, and the consent it stands on. */
   shellEnabled: boolean;
+  /** Off by default: consent for one read-only second model run per prompt. */
+  subagentsEnabled: boolean;
   shellAllow: string[];
   shellDeny: string[];
   shellTimeoutMs: number;

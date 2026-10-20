@@ -75,6 +75,7 @@ function document_(): SettingsDoc {
       mode: "ask_always",
       toolOverrides: {},
       shellEnabled: false,
+      subagentsEnabled: false,
       shellAllow: [],
       shellDeny: [],
       shellTimeoutMs: 30_000,

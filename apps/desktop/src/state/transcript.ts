@@ -523,6 +523,19 @@ export function readSubjects(rows: Row[], kind: "webReading" | "readFile"): stri
 }
 
 /**
+ * The delegations this span's rows say the run made, in the order it made them: one entry per
+ * `spawn_subagent` row that came back with an answer. A refused delegation is excluded on the same
+ * reading as a refused read — the run asked, and asking is not an answer — and the host's one-per-run
+ * budget keeps the list to a single row without the panel needing to enforce it.
+ *
+ * The row's subject is the task, clipped by the host, so the panel can name what was delegated rather
+ * than repeat the group's own title; the row's summary supplies the rounds and reads.
+ */
+export function subagents(rows: Row[]): Step[] {
+  return everyStep(rows).filter((row) => row.kind === "subagent" && row.status === "ok");
+}
+
+/**
  * The kinds that name a capability the loop can be handed, as opposed to a row the run leaves behind.
  * The rest of the model is narration (`thought`, `processed`, a batch's own header) or a seam
  * (`contextCompressed`), and a list of what a run *used* that counted its own commentary would be

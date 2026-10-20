@@ -14,10 +14,12 @@ engine or the host actually measured.
   math (KaTeX) and code fences with a copy control, and keeps the reasoning of past turns visible while
   replaying only the answers, so the fork's prompt cache keeps hitting.
 - **Runs a coding loop.** The composer's Coding control turns the same model into an agent that reads,
-  searches, creates files, edits them and — with the Privacy switch on — looks things up on the web, which
-  is what lets it lay out a small app from nothing rather than only patch one. Each round narrates
-  itself in the transcript; each write lands in a review panel with its diff, its line numbers, a find
-  control inside it, and a press on its file row that hands the page to the desktop's own handler.
+  searches, creates files, edits them and applies a multi-file patch; with the Privacy switch on it looks
+  things up on the web, with Terminal access on it runs one command, and with Subagents on it may hand
+  one self-contained question to a read-only second model run. That is what lets it lay out a small app
+  from nothing rather than only patch one. Each round narrates itself in the transcript; each write lands
+  in a review panel with its diff, its line numbers, a find control inside it, and a press on its file row
+  that hands the page to the desktop's own handler.
 - **Files conversations on this machine.** The sidebar searches them, reopens them, and moves deleted
   ones to a Trash that Settings → Storage can put back.
 - **Reports the run.** Token rates, prompt-cache reuse, the wait, the pages read, the files opened, the
@@ -33,11 +35,12 @@ engine or the host actually measured.
 Said plainly, because the interface says it too — a control that is not built is disabled and names the
 reason on hover:
 
-- Only eight of the thirty declared tools have executors. `delete_path`, `apply_patch`, `terminal`,
-  `git_*` and the rest are declared so the model can ask, and a call to one is answered with a row that
-  says it was not run.
-- Nothing spawns a subagent and nothing produces an artifact yet, so those inspector groups are the two
-  still scripted under `?fixture=1`.
+- Ten of the thirty declared tools have executors, and one more — `spawn_subagent` — is answered by the
+  run loop rather than an executor. `delete_path`, `run_tests`, `codebase_search`, `git_*` and the rest
+  are declared so the model can ask, and a call to one is answered with a row that says it was not run.
+- Nothing produces an artifact yet, so that inspector group is the one still scripted under
+  `?fixture=1`. The Subagents group is fed by the run's own delegation rows; a real run leaves it empty
+  while the Subagents switch is off.
 - You cannot attach a file to a prompt. The composer's add control is deliberately dead until there is a
   retrieval path to put it in.
 - The supervised server is **not authenticated**. It binds `127.0.0.1` on a port the host picks, and any

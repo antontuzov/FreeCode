@@ -406,14 +406,17 @@ pub fn registry() -> Vec<ToolDescriptor> {
         ToolDescriptor {
             id: "spawn_subagent",
             title: "Run subagent",
-            description: "Delegate a self-contained subtask to a subagent and collect its result.",
+            description: "Delegate one self-contained question to a subagent: a second model run that \
+                          can read this workspace with read_file, list_dir, glob and grep_search but \
+                          cannot change it. Its answer returns as one tool result. One delegation per run.",
             permission: SideEffect,
             requires_network: false,
             input_schema: s(
                 json!({
-                    "task": { "type": "string" },
-                    "agent_type": { "type": "string" },
-                    "read_only": { "type": "boolean" }
+                    "task": {
+                        "type": "string",
+                        "description": "The self-contained question the subagent should answer"
+                    }
                 }),
                 &["task"],
             ),
@@ -502,18 +505,54 @@ pub fn is_executable(tool_id: &str) -> bool {
     EXECUTABLE.contains(&tool_id)
 }
 
-/// The declaration side for [`EXECUTABLE`], minus the two web calls while `network` is off and the
-/// command while `shell` is off.
+/// The one call the host's own loop runs rather than an executor in [`crate::exec`]: a subagent is a
+/// second model request, so it lives in the chat path and not in the tool crate.
+///
+/// It is kept out of [`EXECUTABLE`] on purpose: `execute` has no runtime and no engine, and a match
+/// arm returning "not here" would be a verb this crate cannot honour. [`is_runnable`] is the answer
+/// for a surface that only needs to know whether a call does something.
+pub const DELEGATED: &[&str] = &["spawn_subagent"];
+
+pub fn is_delegated(tool_id: &str) -> bool {
+    DELEGATED.contains(&tool_id)
+}
+
+/// Whether a call reaches a runner in this build — an executor, or the loop's own delegation path.
+/// What the Extensions page counts, what the round header counts, and what the refusal text means by
+/// "available".
+pub fn is_runnable(tool_id: &str) -> bool {
+    is_executable(tool_id) || is_delegated(tool_id)
+}
+
+/// The declaration side for [`EXECUTABLE`], minus the two web calls while `network` is off, the
+/// command while `shell` is off, and delegation while `subagents` is off.
 ///
 /// The gate itself is [`crate::authorize`], which refuses either one anyway — but a tool that is
 /// offered and then refused is a promise the interface made and broke, and it costs the model a round
 /// to learn so. When a switch is off, the offer itself has to say what this run cannot reach.
-pub fn executable_specs(network: bool, shell: bool) -> Vec<Value> {
+pub fn executable_specs(network: bool, shell: bool, subagents: bool) -> Vec<Value> {
     registry()
         .into_iter()
         .filter(|t| {
-            is_executable(t.id) && (network || !t.requires_network) && (shell || t.id != "terminal")
+            is_runnable(t.id)
+                && (network || !t.requires_network)
+                && (shell || t.id != "terminal")
+                && (subagents || t.id != "spawn_subagent")
         })
+        .map(spec)
+        .collect()
+}
+
+/// The read-only workspace calls a subagent is offered: the same four reads the main run has, and
+/// nothing that writes, runs or reaches the internet.
+///
+/// A subagent that could write would change files the parent's review never saw, which is the one
+/// thing this build's transcript cannot honestly report. Web reads stay out too: one switch already
+/// governs what leaves the machine, and a nested run is not the place to spend it a second time.
+pub fn subagent_specs() -> Vec<Value> {
+    registry()
+        .into_iter()
+        .filter(|t| is_executable(t.id) && t.is_read_only())
         .map(spec)
         .collect()
 }
@@ -786,30 +825,72 @@ mod tests {
         );
         // `codebase_search` is a declared read with no index behind it, so it stays out too.
         assert!(!is_executable("codebase_search"));
-        assert_eq!(executable_specs(true, true).len(), EXECUTABLE.len());
-        assert!(executable_specs(true, true)
+        // Delegation is runnable without an executor: the chat loop runs it, so it is offered with the
+        // rest while its switch is on — and counted by the same roll-call the page prints.
+        assert!(is_delegated("spawn_subagent"));
+        assert!(!is_executable("spawn_subagent"));
+        assert!(is_runnable("spawn_subagent"));
+        assert_eq!(
+            executable_specs(true, true, true).len(),
+            EXECUTABLE.len() + DELEGATED.len()
+        );
+        assert!(executable_specs(true, true, true)
             .iter()
             .all(|s| s["type"] == json!("function")));
         // With the Privacy switch off, the two web calls are not offered at all — refused-and-explained
         // would spend a round of the run to arrive at the same answer.
-        let offline = executable_specs(false, true);
+        let offline = executable_specs(false, true, true);
         let names: Vec<&str> = offline
             .iter()
             .map(|s| s["function"]["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), EXECUTABLE.len() - 2, "{names:?}");
+        assert_eq!(
+            names.len(),
+            EXECUTABLE.len() + DELEGATED.len() - 2,
+            "{names:?}"
+        );
         assert!(!names.contains(&"web_search"), "{names:?}");
         assert!(!names.contains(&"fetch_url"), "{names:?}");
         // And with Terminal access off, the command is not offered either, whatever the other switch
         // says. This is the offer the default settings produce.
         for network in [true, false] {
-            let specs = executable_specs(network, false);
+            let specs = executable_specs(network, false, true);
             let names: Vec<&str> = specs
                 .iter()
                 .map(|s| s["function"]["name"].as_str().unwrap())
                 .collect();
             assert!(!names.contains(&"terminal"), "{names:?}");
-            assert_eq!(names.len(), EXECUTABLE.len() - if network { 1 } else { 3 });
+            assert_eq!(
+                names.len(),
+                EXECUTABLE.len() + DELEGATED.len() - if network { 1 } else { 3 }
+            );
+            // Subagents stay out until their own switch is on, on top of every other gate.
+            let no_delegation = executable_specs(network, false, false);
+            assert!(!no_delegation
+                .iter()
+                .any(|s| s["function"]["name"] == json!("spawn_subagent")));
         }
+    }
+
+    #[test]
+    fn a_subagent_is_offered_the_reads_and_nothing_that_writes() {
+        let names: Vec<String> = subagent_specs()
+            .iter()
+            .map(|s| s["function"]["name"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            names,
+            ["read_file", "list_dir", "glob", "grep_search"],
+            "the four reads, in registry order, and nothing else"
+        );
+        // The schema asks for the one thing the loop reads, and no field it would ignore.
+        let spawn = find("spawn_subagent").expect("declared");
+        assert_eq!(spawn.input_schema["required"], json!(["task"]));
+        assert_eq!(
+            spawn.input_schema["properties"].as_object().unwrap().len(),
+            1,
+            "{:?}",
+            spawn.input_schema
+        );
     }
 }

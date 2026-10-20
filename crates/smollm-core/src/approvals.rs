@@ -113,6 +113,13 @@ pub fn evaluate(
         return Pending::Decided(ApprovalDecision::BlockedByPolicy);
     }
 
+    // 2c. A subagent is a second model run, and its own switch is that run's consent. Off means the
+    // call does not reach the loop at all; the page reports the refusal rather than a prompt this
+    // build cannot show.
+    if tool.id == "spawn_subagent" && !approvals.subagents_enabled {
+        return Pending::Decided(ApprovalDecision::BlockedByPolicy);
+    }
+
     // 3. An explicitly denied shell command is blocked without prompting; an explicitly allowed one
     //    runs without asking. These lists are the user's own words, so they outrank the mode.
     if let Some(cmd) = arguments.get("command").and_then(|v| v.as_str()) {
