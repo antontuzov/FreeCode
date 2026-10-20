@@ -344,7 +344,7 @@
   "settings.corrections.add": "Add",
   "settings.corrections.empty": "No corrections yet.",
   "settings.corrections.remove": "Remove {{term}}",
-  "settings.voice.pending": "Recording starts once the local engine is installed. These preferences are stored now.",
+  "settings.voice.notInBuild": "Speech input is not in this build yet. These controls only store the preferences a later build will read.",
   "settings.help.title": "What is running",
   "settings.help.model": "Model",
   "settings.help.engine": "Engine",

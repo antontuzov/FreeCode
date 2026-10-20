@@ -629,12 +629,15 @@ function Appearance({
 
 function Voice({ doc, set, t, locale }: { doc: SettingsDoc; set: SetFn; t: T; locale: Locale }) {
   const v = doc.voice;
-  const status = useModel((s) => s.status);
   const device = typeof v.inputDevice === "string" ? "automatic" : v.inputDevice.named;
+  // No layer of this build opens a microphone or plays speech, so every row here stores a preference
+  // and does nothing yet. The rows stay live — the document they save is the one a later build reads —
+  // but each one says so, in the same words the Appearance page uses for the same case.
+  const inert = translate(locale, "common.notInBuild");
   return (
     <>
       <Section label={t("section.general")}>
-        <Row title={t("row.inputDevice")} description={t("row.inputDevice.desc")}>
+        <Row title={t("row.inputDevice")} description={t("row.inputDevice.desc")} inert={inert}>
           <Select
             label={t("row.inputDevice")}
             value={device}
@@ -645,35 +648,43 @@ function Voice({ doc, set, t, locale }: { doc: SettingsDoc; set: SetFn; t: T; lo
       </Section>
 
       <Section label={t("section.voiceInput")}>
-        <Row title={t("row.voiceInput")} description={t("row.voiceInput.desc")}>
+        <Row title={t("row.voiceInput")} description={t("row.voiceInput.desc")} inert={inert}>
           <Toggle
             on={v.voiceInput}
             label={t("row.voiceInput")}
             onChange={(next) => set((d) => void (d.voice.voiceInput = next))}
           />
         </Row>
-        <Row title={t("row.recognitionPolish")} description={t("row.recognitionPolish.desc")}>
+        <Row
+          title={t("row.recognitionPolish")}
+          description={t("row.recognitionPolish.desc")}
+          inert={inert}
+        >
           <Toggle
             on={v.recognitionPolish}
             label={t("row.recognitionPolish")}
             onChange={(next) => set((d) => void (d.voice.recognitionPolish = next))}
           />
         </Row>
-        <Row title={t("row.voiceprint")} description={t("row.voiceprint.desc")}>
+        <Row title={t("row.voiceprint")} description={t("row.voiceprint.desc")} inert={inert}>
           <Toggle
             on={v.voiceprintRecognition}
             label={t("row.voiceprint")}
             onChange={(next) => set((d) => void (d.voice.voiceprintRecognition = next))}
           />
         </Row>
-        <Row title={t("row.sendAutomatically")} description={t("row.sendAutomatically.desc")}>
+        <Row
+          title={t("row.sendAutomatically")}
+          description={t("row.sendAutomatically.desc")}
+          inert={inert}
+        >
           <Toggle
             on={v.sendAutomatically}
             label={t("row.sendAutomatically")}
             onChange={(next) => set((d) => void (d.voice.sendAutomatically = next))}
           />
         </Row>
-        <Corrections terms={v.commonWordCorrections} set={set} t={t} />
+        <Corrections terms={v.commonWordCorrections} set={set} t={t} inert={inert} />
         <Row title={t("row.liveVoiceShortcut")} description={t("row.liveVoiceShortcut.desc")}>
           <ShortcutChips
             shortcut={v.liveVoiceShortcut}
@@ -682,16 +693,22 @@ function Voice({ doc, set, t, locale }: { doc: SettingsDoc; set: SetFn; t: T; lo
         </Row>
       </Section>
 
-      {/* Recording is the engine's job, so the page says so instead of implying a microphone works
-       * before the runtime is on disk. */}
-      {status && !status.engineInstalled && (
-        <p className="text-quiet text-faint">{translate(locale, "settings.voice.pending")}</p>
-      )}
+      <p className="text-quiet text-faint">{translate(locale, "settings.voice.notInBuild")}</p>
     </>
   );
 }
 
-function Corrections({ terms, set, t }: { terms: string[]; set: SetFn; t: T }) {
+function Corrections({
+  terms,
+  set,
+  t,
+  inert,
+}: {
+  terms: string[];
+  set: SetFn;
+  t: T;
+  inert: string;
+}) {
   const [draft, setDraft] = useState("");
   const add = () => {
     const term = draft.trim();
@@ -704,7 +721,10 @@ function Corrections({ terms, set, t }: { terms: string[]; set: SetFn; t: T }) {
   return (
     <div className="card-row items-start">
       <div className="row-copy">
-        <span className="row-title">{t("row.corrections")}</span>
+        <span className="row-title">
+          {t("row.corrections")}
+          <span className="row-inert">{inert}</span>
+        </span>
         <span className="row-desc">{t("row.corrections.desc")}</span>
         <div className="mt-[var(--space-3)] flex items-center gap-[var(--space-2)]">
           <label className="field flex-1">

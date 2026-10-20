@@ -1,4 +1,7 @@
 //! Voice settings: the controls on Settings › Voice, all of which save immediately.
+//!
+//! Nothing in this build records or plays speech; the document carries the preferences a later build
+//! reads, and the page says so on every row rather than promising recording once the engine lands.
 
 use serde::{Deserialize, Serialize};
 

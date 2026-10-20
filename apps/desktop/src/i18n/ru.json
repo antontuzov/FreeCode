@@ -344,7 +344,7 @@
   "settings.corrections.add": "Добавить",
   "settings.corrections.empty": "Исправлений пока нет.",
   "settings.corrections.remove": "Убрать {{term}}",
-  "settings.voice.pending": "Запись начнётся, когда локальный движок будет установлен. Эти параметры сохраняются уже сейчас.",
+  "settings.voice.notInBuild": "Голосовой ввод пока не в этой сборке. Эти параметры только сохраняются для будущей сборки.",
   "settings.help.title": "Что сейчас запущено",
   "settings.help.model": "Модель",
   "settings.help.engine": "Движок",
