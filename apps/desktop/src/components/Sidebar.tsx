@@ -315,9 +315,11 @@ export function Sidebar({
       aria-label={translate(locale, "sidebar.workspaces")}
       className="flex h-full w-[var(--sidebar-width)] shrink-0 flex-col border-r border-line bg-panel"
     >
-      {/* Traffic lights occupy the top-left of the window, so the row starts below them. */}
+      {/* The traffic lights own the window's top-left, so the row starts clear of them sideways and
+          sits on their centre line: this band is the titlebar's, and the reference draws the toggle
+          and the two history arrows on that line rather than stacked under it. */}
       <div
-        className="flex items-center gap-1 px-[var(--space-3)] pt-[var(--space-3)] pb-1"
+        className="flex h-[calc(var(--traffic-light-center)*2)] items-center gap-1 px-[var(--space-3)]"
         style={{ paddingLeft: "max(var(--space-3), var(--traffic-light-inset))" }}
       >
         {/* The reference's header row: a column that folds, the two steps along the surfaces this
@@ -335,7 +337,10 @@ export function Sidebar({
         <NavSteps locale={locale} onOpenPalette={actions.openPalette} />
       </div>
 
-      <div className="flex flex-col gap-1 p-[var(--space-3)]">
+      {/* The band above ends at the lights' own line, so the first row of the column gets the extra
+          step: a hover pill that starts where the titlebar band leaves off reads as jammed under the
+          window's chrome rather than as its first item. */}
+      <div className="flex flex-col gap-1 p-[var(--space-3)] pt-[var(--space-4)]">
         <div className="flex items-center gap-1">
           <span className="pill w-fit">
             <Icon name="coding" />
