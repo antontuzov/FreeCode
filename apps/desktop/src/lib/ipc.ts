@@ -101,7 +101,20 @@ export type WeightsProgress =
   | { phase: "done"; downloaded: WeightsDownloaded };
 
 export type ThemeMode = "light" | "dark" | "system";
-export type Accent = "forest" | "mint" | "bee" | "parchment" | "rain";
+/** The interface styles, in the order the Appearance page cards them. One list rather than four:
+ * the picker, the `?accent=` override, the preview swatches and the Rust enum all have to agree, and
+ * a style the page offers that the store refuses to save is the bug that list-by-hand produces. */
+export const ACCENTS = [
+  "forest",
+  "mint",
+  "bee",
+  "parchment",
+  "rain",
+  "ink",
+  "rose",
+  "slate",
+] as const;
+export type Accent = (typeof ACCENTS)[number];
 export type Language = "en" | "zh";
 export type TerminalTheme = "follow_theme" | "light" | "dark" | "custom";
 export type FontStyle = "sans" | "serif" | "mono";

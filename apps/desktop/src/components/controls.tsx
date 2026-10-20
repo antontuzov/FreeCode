@@ -1,10 +1,10 @@
 // The control vocabulary of the Settings surface, taken control-for-control from
 // docs/reference-ui/01-03: a labelled row, a bordered field trigger, an accent switch, shortcut
-// chips and the four interface-style preview cards.
+// chips and the interface-style preview cards.
 import type { ReactNode } from "react";
 
 import { Icon, type IconName } from "./icons";
-import type { ShortcutDoc } from "../lib/ipc";
+import { type Accent, type ShortcutDoc } from "../lib/ipc";
 import { shortcutChips } from "../lib/shortcuts";
 
 export function Section({
@@ -201,8 +201,8 @@ export function ShortcutChips({
 }
 
 /**
- * One of the interface-style cards. It paints the style it advertises through `--preview`, so all
- * five stay distinguishable whatever accent is live; selection is the outline plus the filled dot,
+ * One of the interface-style cards. It paints the style it advertises through `--preview`, so every
+ * family stays distinguishable whatever accent is live; selection is the outline plus the filled dot,
  * never colour alone.
  */
 export function StyleCard({
@@ -211,7 +211,7 @@ export function StyleCard({
   selected,
   onSelect,
 }: {
-  style: "forest" | "mint" | "bee" | "parchment" | "rain";
+  style: Accent;
   name: string;
   selected: boolean;
   onSelect: () => void;

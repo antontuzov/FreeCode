@@ -229,7 +229,16 @@ const TEXT_INKS = [
   "--warning",
   "--danger",
 ];
-const ACCENTS = ["forest", "mint", "bee", "parchment", "rain"];
+const ACCENTS = [
+  "forest",
+  "mint",
+  "bee",
+  "parchment",
+  "rain",
+  "ink",
+  "rose",
+  "slate",
+];
 // The surfaces a style's translucent fill is laid on: the page, the sidebar, a card. Not
 // `--bg-sunken`, which is a code gutter and the user's own bubble — both of which paint their own
 // label rather than a chip, so no fill is ever stacked on them.

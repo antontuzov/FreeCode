@@ -3,7 +3,7 @@
 // through the host, so there is a single source of truth on disk.
 import { create } from "zustand";
 
-import { ipc, type AppearanceState } from "../lib/ipc";
+import { ipc, ACCENTS, type Accent, type AppearanceState } from "../lib/ipc";
 
 const FALLBACK: AppearanceState = {
   themeMode: "dark",
@@ -79,14 +79,8 @@ function devOverrides(): Partial<AppearanceState> {
   const mode = q.get("mode");
   if (mode === "light" || mode === "dark" || mode === "system") forced.themeMode = mode;
   const accent = q.get("accent");
-  if (
-    accent === "forest" ||
-    accent === "mint" ||
-    accent === "bee" ||
-    accent === "parchment" ||
-    accent === "rain"
-  ) {
-    forced.accent = accent;
+  if (accent && (ACCENTS as readonly string[]).includes(accent)) {
+    forced.accent = accent as Accent;
   }
   const font = q.get("font");
   if (font === "sans" || font === "serif" || font === "mono") forced.fontStyle = font;

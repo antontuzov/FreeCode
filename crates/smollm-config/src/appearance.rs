@@ -28,6 +28,11 @@ pub enum InterfaceStyle {
     /// The reference app's own chrome: a cool periwinkle wash under a green action colour. Unlike the
     /// other four, its wash is not its accent's hue — see `--style-rain-tint` in tokens.css.
     Rain,
+    /// The achromatic window: no green anywhere, and the one family whose action square inverts with
+    /// the mode rather than merely lifting, because a near-black cannot lift on a near-black page.
+    Ink,
+    Rose,
+    Slate,
 }
 
 impl InterfaceStyle {
@@ -38,6 +43,9 @@ impl InterfaceStyle {
             Self::Bee => "Bee",
             Self::Parchment => "Parchment",
             Self::Rain => "Rain",
+            Self::Ink => "Ink",
+            Self::Rose => "Rose",
+            Self::Slate => "Slate",
         }
     }
 }
@@ -174,5 +182,28 @@ mod tests {
         let a: Appearance = serde_json::from_value(json!({ "interfaceStyle": "bee" })).unwrap();
         assert_eq!(a.interface_style, InterfaceStyle::Bee);
         assert_eq!(a.font_style, FontStyle::Sans);
+    }
+
+    #[test]
+    fn every_style_the_page_offers_parses() {
+        // The Appearance page cards these eight, and the settings document is the only path from a
+        // click to a stored style. An id the enum does not know does not fall back to a default — it
+        // fails the whole document, so one drifted list loses every appearance setting at once.
+        for id in [
+            "forest",
+            "mint",
+            "bee",
+            "parchment",
+            "rain",
+            "ink",
+            "rose",
+            "slate",
+        ] {
+            let a: Appearance = serde_json::from_value(json!({ "interfaceStyle": id }))
+                .unwrap_or_else(|e| {
+                    panic!("interfaceStyle {id} is offered by the page but does not parse: {e}")
+                });
+            assert!(!a.interface_style.label().is_empty());
+        }
     }
 }

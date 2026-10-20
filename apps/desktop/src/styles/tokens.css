@@ -245,6 +245,29 @@
      the #e8eef4 measured off the reference's own sidebar, at Mint's normalized lightness so choosing
      Rain repaints the chrome without brightening it. */
   --style-rain-tint: #8294d6;
+  /* The three that follow are not measured off a reference shot — the reference has one chrome, and
+   * these are the styles that window does not have. They are built to the same two rules the first
+   * five obey: the family colour is the action square, and the wash is that hue pulled to Mint's
+   * lightness so choosing them repaints the window without brightening it.
+   *
+   * Ink is the achromatic one: the app with no colour opinion. Its accent is the near-black the other
+   * four never reach, and because the accent is also what a heading is mixed from, this is the only
+   * style whose headings are grey rather than green. Rose and Slate take the two hues the set had
+   * room for; Rose's wash is solved one notch paler than its hue wants, because the pink panel was
+   * the ground that `--success` read 4.49:1 on, and a green check that fails AA in a pink window is a
+   * bug wearing a theme. */
+  --style-ink: #24282a;
+  --style-rose: #a94a6f;
+  --style-slate: #5d7386;
+  --style-ink-contrast: #f6f8f7;
+  --style-rose-contrast: #fff4f8;
+  --style-slate-contrast: #f4f7fa;
+  --style-ink-ink: #24282a;
+  --style-rose-ink: #9d3a62;
+  --style-slate-ink: #43566a;
+  --style-ink-tint: #92979a;
+  --style-rose-tint: #c57c9b;
+  --style-slate-tint: #8099b0;
 
   --accent: var(--style-mint);
   --accent-contrast: var(--style-mint-contrast);
@@ -282,6 +305,24 @@
   --accent-ink: var(--style-rain-ink);
   --accent-tint: var(--style-rain-tint);
 }
+[data-accent="ink"] {
+  --accent: var(--style-ink);
+  --accent-contrast: var(--style-ink-contrast);
+  --accent-ink: var(--style-ink-ink);
+  --accent-tint: var(--style-ink-tint);
+}
+[data-accent="rose"] {
+  --accent: var(--style-rose);
+  --accent-contrast: var(--style-rose-contrast);
+  --accent-ink: var(--style-rose-ink);
+  --accent-tint: var(--style-rose-tint);
+}
+[data-accent="slate"] {
+  --accent: var(--style-slate);
+  --accent-contrast: var(--style-slate-contrast);
+  --accent-ink: var(--style-slate-ink);
+  --accent-tint: var(--style-slate-tint);
+}
 
 /* On the near-black green a light-mode accent sinks in; the same hue lifted ~14% is what shots 05
  * and 06 actually show (mint measures #62c9a8 there). */
@@ -318,6 +359,26 @@
   --style-bee-tint: #c4b362;
   --style-parchment-tint: #f79571;
   --style-rain-tint: #85abdd;
+  /* The three new families. Rose and Slate behave like the five above them: the same hue lifted until
+     it reads as ink on a dark ground, and its wash normalized to this mode's Mint.
+     Ink is the exception, and it has to be. A near-black action square cannot be "lifted 14%" into
+     anything — it is already the floor of the mode, and on a #0a110e page it would be a hole rather
+     than a button. So the achromatic style inverts instead: the square goes pale, its label goes dark,
+     and the window keeps the same brightness relationship it had in light mode. That is what makes it
+     the neutral style rather than a dark one — the mode is the axis that decides whether the page is
+     black, and this family is the one that says none of it is green. */
+  --style-ink: #dfe4e6;
+  --style-rose: #e58fb0;
+  --style-slate: #8fa8bf;
+  --style-ink-contrast: #121516;
+  --style-rose-contrast: #1f0d14;
+  --style-slate-contrast: #0e1317;
+  --style-ink-ink: #c3cacd;
+  --style-rose-ink: #eb9dbc;
+  --style-slate-ink: #9db6cc;
+  --style-ink-tint: #acb4b8;
+  --style-rose-tint: #eb94b5;
+  --style-slate-tint: #9db6cd;
 }
 
 /* Soft fills carry the style without claiming its contrast budget: selected rows, the user's

@@ -163,6 +163,9 @@ const STYLES: { id: Accent; label: string }[] = [
   { id: "bee", label: "Bee" },
   { id: "parchment", label: "Parchment" },
   { id: "rain", label: "Rain" },
+  { id: "ink", label: "Ink" },
+  { id: "rose", label: "Rose" },
+  { id: "slate", label: "Slate" },
 ];
 
 export function Settings({

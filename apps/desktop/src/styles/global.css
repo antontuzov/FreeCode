@@ -671,7 +671,11 @@ select.field-input {
   padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: color-mix(in oklab, var(--preview) 12%, var(--bg-elevated));
+  /* The card shows a window, and a window's ground is the style's wash rather than its action colour.
+   * Mixed from `--preview` the eight cards were eight different brightnesses — Ink's near-black square
+   * at 12% is a grey field beside Mint's faint one — which is the one thing the normalized tints exist
+   * to prevent. The bar and the dot below stay the accent, because those are the action colour. */
+  background: color-mix(in oklab, var(--preview-chrome) 12%, var(--bg-elevated));
 }
 .style-card[data-selected="true"] .style-preview {
   border-color: var(--accent);
@@ -707,7 +711,7 @@ select.field-input {
 }
 .style-card[data-selected="true"] .style-dot {
   background: var(--preview);
-  box-shadow: inset 0 0 0 5px color-mix(in oklab, var(--preview) 12%, var(--bg-elevated));
+  box-shadow: inset 0 0 0 5px color-mix(in oklab, var(--preview-chrome) 12%, var(--bg-elevated));
 }
 .style-panel {
   display: flex;
@@ -715,9 +719,9 @@ select.field-input {
   gap: 5px;
   margin-top: auto;
   padding: var(--space-2);
-  border: 1px solid color-mix(in oklab, var(--preview) 25%, transparent);
+  border: 1px solid color-mix(in oklab, var(--preview-chrome) 25%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in oklab, var(--preview) 6%, var(--bg-elevated));
+  background: color-mix(in oklab, var(--preview-chrome) 6%, var(--bg-elevated));
 }
 .style-line {
   height: 5px;
@@ -725,20 +729,41 @@ select.field-input {
   background: color-mix(in oklab, var(--ink-quiet) 45%, transparent);
 }
 
+/* Each card paints its own style: `--preview` is the action colour the bar and the dot wear, and
+ * `--preview-chrome` is the wash that window's grounds are mixed from. They are different tokens
+ * because the style's hue is normalized in lightness for the grounds and is not for the square — for
+ * Rain they are two different hues entirely, which is the whole point of that one. */
 .swatch-forest {
   --preview: var(--style-forest);
+  --preview-chrome: var(--style-forest-tint);
 }
 .swatch-mint {
   --preview: var(--style-mint);
+  --preview-chrome: var(--style-mint-tint);
 }
 .swatch-bee {
   --preview: var(--style-bee);
+  --preview-chrome: var(--style-bee-tint);
 }
 .swatch-parchment {
   --preview: var(--style-parchment);
+  --preview-chrome: var(--style-parchment-tint);
 }
 .swatch-rain {
   --preview: var(--style-rain);
+  --preview-chrome: var(--style-rain-tint);
+}
+.swatch-ink {
+  --preview: var(--style-ink);
+  --preview-chrome: var(--style-ink-tint);
+}
+.swatch-rose {
+  --preview: var(--style-rose);
+  --preview-chrome: var(--style-rose-tint);
+}
+.swatch-slate {
+  --preview: var(--style-slate);
+  --preview-chrome: var(--style-slate-tint);
 }
 
 /* The twelve mascot tiles the app can wear. Each is shown against both ends of the live palette —
