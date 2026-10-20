@@ -8,6 +8,7 @@
     "dev": "pnpm --filter @smollm/desktop dev",
     "build": "pnpm --filter @smollm/desktop build",
     "typecheck": "pnpm --filter @smollm/desktop typecheck",
+    "test": "pnpm --filter @smollm/desktop test",
     "lint": "pnpm --filter @smollm/desktop lint",
     "tauri": "pnpm --filter @smollm/desktop tauri",
     "app:dev": "pnpm --filter @smollm/desktop tauri dev",

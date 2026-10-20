@@ -121,7 +121,8 @@ To build the app bundle: `pnpm app:build`.
 ## Checks
 
 `./scripts/verify-precommit.sh` is the gate — fmt, clippy at `-D warnings`, the whole Rust test suite,
-frontend format, lint, typecheck and build. It runs in CI on every PR and from `.githooks/pre-commit`.
+frontend format, lint, typecheck, store tests and build. It runs in CI on every PR and from
+`.githooks/pre-commit`.
 
 Alongside it, `verify-catalog.sh` re-checks the model contract (offline by default, against Hugging Face
 when `HF_VERIFY_REMOTE=1`), `verify-tauri-ui.sh` and `verify-desktop-native.sh` boot the real window, and

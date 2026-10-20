@@ -93,9 +93,10 @@ function withPictures(rows: Row[], turns: SessionTurn[]): Row[] {
     const turn = turns[spoken];
     // The cursor moves only when the row is the turn it points at. A prompt the host refused never
     // became a turn, and stepping past a row that does not match would hand the next picture to a
-    // message that was not given one.
-    if (turn && turn.role === row.role && turn.text === row.text) spoken += 1;
-    return turn?.image ? { ...row, image: turn.image } : row;
+    // message that was not given one — so a row that does not match keeps no picture at all.
+    if (!turn || turn.role !== row.role || turn.text !== row.text) return row;
+    spoken += 1;
+    return turn.image ? { ...row, image: turn.image } : row;
   });
 }
 

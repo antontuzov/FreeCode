@@ -21,6 +21,9 @@ pnpm_cmd lint
 step "frontend typecheck"
 pnpm_cmd typecheck
 
+step "frontend tests"
+pnpm_cmd test
+
 step "frontend build"
 pnpm_cmd build
 
