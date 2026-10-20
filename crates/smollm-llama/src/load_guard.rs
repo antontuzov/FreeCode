@@ -512,6 +512,7 @@ mod tests {
             avx512: false,
             degraded_to_cpu: false,
             prebuilt_engine: true,
+            backend_override: None,
         }
     }
 

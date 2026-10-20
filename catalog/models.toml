@@ -151,8 +151,12 @@ severity = "severe"
 # KNOWN_ISSUES.md "ROCm/HIP aborts on consumer RDNA2 GPUs" — the row cites Bonsai-demo#197, which the
 # tracker now redirects to llama.cpp#264, and it is open as of 2026-10-20, so no release closes it.
 # The abort is a property of the HIP backend on gfx103x parts rather than of a packing, which is why
-# this row sits on both runtime packs. `gpu ==` is an atom the load guard does not evaluate
-# (crates/smollm-llama/src/load_guard.rs::caveat_matches), so it reaches the card as "may or may not
+# this row sits on both runtime packs. Since 2026-10-20 the workaround below is applied rather than
+# only printed: `HostHardware::refuse_hostile_backend`
+# (crates/smollm-models/src/hardware.rs) swaps such a host onto the Vulkan engine, so on a machine
+# that got this far the row describes the build that was refused, not the one that runs — and because
+# `gpu ==` is an atom the load guard does not evaluate
+# (crates/smollm-llama/src/load_guard.rs::caveat_matches), it still reaches the card as "may or may not
 # apply" instead of claiming this host is affected.
 condition = "backend == hip and gpu == rdna2 (gfx103x)"
 symptom = "the server aborts during load on a consumer RDNA2 card (RX 6000 series / gfx1030), whatever the packing"

@@ -30,12 +30,13 @@ because upstream's tracker still shows the item open, and that is what the wordi
 Every row was re-read that way on **2026-10-20**, together with the tracker states of the items the
 catalog names. Still open there: #192, #199, #201, #213, #222, #223, #264 and #270 — so their rows
 stay, and their wording says what upstream actually measured rather than what an older release did.
-Two of them have no answer in the pinned build at all and are the only entries that point off it:
+One of them has no answer in the pinned build at all and is the only entry that points off it:
 llama.cpp#199 (RTX 5090 / sm_120 prebuilt Linux CUDA builds, fixed only by building from source with
-`-DCMAKE_CUDA_ARCHITECTURES=120a-real`) and llama.cpp#264 (RDNA2 under HIP, which upstream says has
-no workaround on that backend — swap to the Vulkan build; note that upstream's own row still cites
-Bonsai-demo#197, and the tracker redirects it). #241, which the model's list also calls open, is not:
-it was closed by #271 in `prism-b10743`, before this pin.
+`-DCMAKE_CUDA_ARCHITECTURES=120a-real`). llama.cpp#264 (RDNA2 under HIP — upstream's own row still
+cites Bonsai-demo#197, and the tracker redirects it) is open with no fix in any release too, but its
+answer is a different pinned asset rather than a source build, and this app now takes it: see
+"ROCm/HIP aborts during load on consumer RDNA2 cards". #241, which the model's list also calls open,
+is not: it was closed by #271 in `prism-b10743`, before this pin.
 
 ## Replies that come back empty or cut off
 
@@ -120,10 +121,21 @@ beats quietly hiding a documented crash. The card splits the two in
 
 **ROCm/HIP aborts during load on consumer RDNA2 cards** (RX 6000 / gfx1030), whatever the packing
 (llama.cpp#264 — upstream's row still cites Bonsai-demo#197, which the tracker redirects — open as of
-2026-10-20). _Enforced_: only as a caveat, on every runtime pack a HIP host can be routed to, saying
-there is nothing to apply on HIP and the Vulkan build is the way. **What this app does not do**: it
-does not override the probed backend, so a machine whose probe chooses HIP still has to swap engine
-builds itself.
+2026-10-20). _Enforced_: as a caveat on every runtime pack a HIP host can be routed to, and since
+2026-10-20 also as a decision. `HostHardware::refuse_hostile_backend`
+(`crates/smollm-models/src/hardware.rs`) takes the probe's HIP answer away from a card it classifies as
+RDNA2 and hands every later step Vulkan instead: the lock lookup (the 31 MB `win-vulkan` asset rather
+than the 342 MB HIP one), the pack choice, `-ngl`, and the status card, which shows the reason and
+labels the run "Vulkan". Doing it on the probe rather than inside `resolve_for` is what keeps those
+four from disagreeing. Tests: `a_hip_probe_on_consumer_rdna2_runs_the_vulkan_build`,
+`only_the_rdna2_hip_combination_is_refused`,
+`a_refused_hip_probe_resolves_the_pinned_vulkan_asset`, and the lock-level
+`every_hip_target_has_a_vulkan_asset_on_the_same_triple`.
+_Not covered_: Linux reports the same silicon as ROCm, which #264 does not name and for which no Vulkan
+asset is pinned, so a Linux RDNA2 host still resolves the ROCm build; the swap assumes a machine that
+had the HIP runtime also has a working Vulkan driver, which is what upstream's workaround implies but
+this app has not run; and the card still lists the fatal caveat as "may or may not apply", because
+`caveat_matches` deliberately does not evaluate `gpu ==` atoms.
 
 **RTX 5090 (sm_120) prebuilt Linux CUDA builds decode erratically** (llama.cpp#199, open), reported
 on both ternary bands, and this is the one entry on upstream's list whose recorded fix really is a

@@ -346,6 +346,7 @@ mod tests {
             avx512: false,
             degraded_to_cpu: backend == Backend::Cpu,
             prebuilt_engine: true,
+            backend_override: None,
         }
     }
 

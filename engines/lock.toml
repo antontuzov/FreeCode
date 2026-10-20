@@ -147,7 +147,7 @@ asset = "llama-prism-b10787-73bfe6c-bin-win-hip-radeon-x64.zip"
 size_bytes = 342_816_702
 sha256 = "0e9174d8cb9854c15ebb8d1f6cfe680f39ec488b4fbc673ae07f6a7f08f51d0e"
 recommended = true
-notes = "gfx1151 gets garbled PQ2_0 output (#223, still open): use -ngl 0 or Vulkan+PTQ1_0. RDNA2 consumer parts abort — that report moved out of the demo repo and is now llama.cpp#264, open."
+notes = "gfx1151 gets garbled PQ2_0 output (#223, still open): use -ngl 0 or Vulkan+PTQ1_0. RDNA2 consumer parts abort — that report moved out of the demo repo and is now llama.cpp#264, open — and this app will not install this asset on such a card: HostHardware::refuse_hostile_backend resolves the win-vulkan target there instead, so `every_hip_target_has_a_vulkan_asset_on_the_same_triple` in crates/smollm-models/src/lock.rs is the test that keeps that route open."
 
 [[target]]
 key = "linux-cuda-12.8-x64"
@@ -203,11 +203,13 @@ sycl = "the TernSYCL kernels (#235, #356) and a measured Arc B390 run are in thi
 # only" — the header above records that #245, #238, #206 and #196 are each an ancestor of the pinned
 # commit. It is still the answer for a machine no asset above covers, and for what upstream still
 # records as open with no merged fix: #192 (PTQ1_0 hangs Intel Arc on Vulkan), #201 (PTQ1_0 Vulkan
-# decode speed), #223 (gfx1151 HIP), #264 (RDNA2/HIP abort, transferred from Bonsai-demo#197),
-# #199 (RTX 5090 / sm_120 decodes erratically out of the prebuilt Linux CUDA tarballs — the one
-# entry whose recorded fix is `-DCMAKE_CUDA_ARCHITECTURES=120a-real` rather than a release) and
-# #270 (Xe3 iGPUs on 8-wide subgroups, which #238's whitelist does not cover). All six were read back
-# as `state: open` from the tracker on 2026-10-20, after the bump to this tag; none of the 15 commits
+# decode speed), #223 (gfx1151 HIP), #199 (RTX 5090 / sm_120 decodes erratically out of the prebuilt
+# Linux CUDA tarballs — the one entry whose recorded fix is `-DCMAKE_CUDA_ARCHITECTURES=120a-real`
+# rather than a release) and #270 (Xe3 iGPUs on 8-wide subgroups, which #238's whitelist does not
+# cover). A sixth, #264 (the RDNA2/HIP abort, transferred from Bonsai-demo#197), is open with no fix
+# either but a source build is not its answer here: another pinned asset is, and the app takes it
+# (crates/smollm-models/src/hardware.rs::refuse_hostile_backend). All six were read back as
+# `state: open` from the tracker on 2026-10-20, after the bump to this tag; none of the 15 commits
 # the bump brought in closes one of them.
 repo = "https://github.com/PrismML-Eng/llama.cpp"
 branch = "prism"

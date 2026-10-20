@@ -40,6 +40,11 @@ pub struct EngineBinary {
 
 impl EngineBinary {
     /// Resolve the fork build for the machine we are running on.
+    ///
+    /// `host.backend` is the probe's answer *after* `HostHardware::refuse_hostile_backend` has taken
+    /// out any build that aborts on the GPU class beside it (#264), so the asset chosen here, the pack
+    /// chosen by the recommender and the flags chosen by the launcher are all answers about the same
+    /// backend.
     pub fn resolve(
         root: &Path,
         lock: &EngineLock,
@@ -278,6 +283,7 @@ fn same_commit(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smollm_models::hardware::GpuArch;
     use smollm_models::Catalog;
     use std::path::Path;
 
@@ -339,6 +345,31 @@ mod tests {
             .expect("windows/cuda is pinned");
         assert!(e.target.recommended, "{}", e.target.key);
         assert!(e.target.asset.contains("cuda-12.4"), "{}", e.target.asset);
+    }
+
+    /// #264, from the resolver's side. The refusal happens on the probe result, so the lookup that
+    /// follows asks the lock for the Vulkan asset — 31 MB rather than the 342 MB HIP one, and a
+    /// backend the pack choice keeps PQ2_0 off. `resolve_for` takes the triple explicitly, so this
+    /// runs on a machine with no AMD GPU in it.
+    #[test]
+    fn a_refused_hip_probe_resolves_the_pinned_vulkan_asset() {
+        let root = repo_root();
+        let lock = lock();
+        let mut host = HostHardware {
+            backend: Backend::Hip,
+            arch: GpuArch::AmdRdna2,
+            ..Default::default()
+        };
+        host.refuse_hostile_backend();
+        let e = EngineBinary::resolve_for(&root, &lock, "windows", "x86_64", host.backend)
+            .expect("windows/x86_64 has a Vulkan asset");
+        assert_eq!(e.target.backend, Backend::Vulkan);
+        assert!(e.target.asset.contains("win-vulkan"), "{}", e.target.asset);
+        assert!(e.download_url(&lock).contains("win-vulkan"));
+        let refused = lock
+            .target_for("windows", "x86_64", Backend::Hip)
+            .expect("the HIP asset is pinned — that is why the refusal has to happen here");
+        assert_ne!(refused.key, e.target.key);
     }
 
     #[test]

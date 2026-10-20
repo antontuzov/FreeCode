@@ -102,7 +102,7 @@ pub enum GpuArch {
     NvidiaBlackwell,
     AppleSilicon,
     /// Consumer RDNA2 (RX 6000 / gfx103x): the HIP build aborts during load (#264, open), which is
-    /// why the catalog's HIP caveats name this class.
+    /// why [`HostHardware::refuse_hostile_backend`] swaps that combination onto Vulkan.
     AmdRdna2,
     /// Strix Halo iGPU: PQ2_0 output is garbled on Windows HIP (#223).
     AmdGfx1151,
@@ -177,6 +177,19 @@ impl GpuArch {
     }
 }
 
+/// A backend this app swapped out after probing it: the probe reported `from`, this app refuses to
+/// run that build on the GPU class found beside it, and every later decision sees `to`.
+///
+/// Carried on the probe result rather than re-derived where it is displayed, so the status card, the
+/// pack choice and the launch plan cannot disagree about which engine is about to run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendOverride {
+    pub from: Backend,
+    pub to: Backend,
+    /// The sentence for the card: what was refused, and what the user should expect instead.
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostHardware {
     pub backend: Backend,
@@ -190,6 +203,10 @@ pub struct HostHardware {
     pub avx512: bool,
     /// True when the probe for the chosen backend failed and we fell back to CPU.
     pub degraded_to_cpu: bool,
+    /// Set when [`HostHardware::refuse_hostile_backend`] replaced the probed backend, so the swap is
+    /// reported rather than silent. `None` means `backend` is what the probe found.
+    #[serde(default)]
+    pub backend_override: Option<BackendOverride>,
     /// A release binary is being used rather than a build the user made themselves, so anything
     /// merged to `prism` after `pinned_tag` is unavailable. Note that the fixes this field was
     /// written for are *in* the pinned release — see the header of `engines/lock.toml` — so rules
@@ -209,6 +226,7 @@ impl Default for HostHardware {
             avx512: false,
             degraded_to_cpu: true,
             prebuilt_engine: true,
+            backend_override: None,
         }
     }
 }
@@ -321,20 +339,17 @@ impl HostHardware {
                 } else {
                     Backend::Rocm
                 };
-                host.arch = run("rocminfo", &[])
-                    .and_then(|o| {
-                        o.lines()
-                            .find(|l| l.trim_start().starts_with("gfx"))
-                            .map(|l| l.trim().to_string())
-                    })
-                    .map(|g| GpuArch::from_gpu_name(&g))
+                // The chip class and the chip name come from one read of the same value, because a
+                // probe that lands on `Unknown` here is a host `refuse_hostile_backend` cannot
+                // protect from #264's load abort.
+                let amd = run("rocminfo", &[])
+                    .as_deref()
+                    .and_then(Self::amd_target_from_rocminfo);
+                host.arch = amd
+                    .as_ref()
+                    .map(|(arch, _)| *arch)
                     .unwrap_or(GpuArch::Unknown);
-                host.gpu_name = run("rocminfo", &[]).and_then(|o| {
-                    o.lines()
-                        .find_map(|l| l.strip_prefix("  Name:"))
-                        .map(str::trim)
-                        .map(str::to_string)
-                });
+                host.gpu_name = amd.map(|(_, name)| name);
                 host.degraded_to_cpu = false;
             } else if run("vulkaninfo", &["--summary"]).is_some() {
                 host.backend = Backend::Vulkan;
@@ -354,7 +369,27 @@ impl HostHardware {
                 host.degraded_to_cpu = true;
             }
         }
+        host.refuse_hostile_backend();
         host
+    }
+
+    /// `(class, name)` for the AMD agent in a `rocminfo` dump, read off the agent's ISA target — the
+    /// `Name:` field inside each agent block (`  Name:   gfx1030`), which `GpuArch::from_gpu_name`
+    /// resolves to a card class. CPU agents come first and their `Name:` values are not targets, so
+    /// the scan takes the first line that normalises to something starting with `gfx` and ignores the
+    /// rest. Compiled and tested on every host: on a machine with no AMD GPU in it this is the only
+    /// way to know the parser reads the field it claims to.
+    pub fn amd_target_from_rocminfo(raw: &str) -> Option<(GpuArch, String)> {
+        let target = raw
+            .lines()
+            .map(|line| {
+                line.trim()
+                    .trim_start_matches("Name:")
+                    .trim()
+                    .trim_end_matches(':')
+            })
+            .find(|value| value.starts_with("gfx"))?;
+        Some((GpuArch::from_gpu_name(target), target.to_string()))
     }
 
     fn detect_ram() -> u64 {
@@ -425,6 +460,37 @@ impl HostHardware {
         Some((name.clone(), GpuArch::from_gpu_name(&name), mib))
     }
 
+    /// llama.cpp#264: the HIP engine build aborts during load on a consumer RDNA2 card (RX 6000 /
+    /// gfx1030) whatever the packing, and the workaround the catalog records for it is "none on HIP:
+    /// install the Vulkan engine build". This applies that workaround: the probe's HIP answer becomes
+    /// Vulkan, with the reason kept on the result so the card can say what was refused.
+    ///
+    /// It happens here, on the probe, rather than inside `EngineBinary::resolve_for`, because the
+    /// backend is read by more than the engine lookup — the pack choice (which keeps PQ2_0 off
+    /// Vulkan), `-ngl`, the status card, diagnostics — and none of them may disagree about which
+    /// build is about to run.
+    ///
+    /// HIP only. Linux reports the same silicon as ROCm, which #264 does not name, and
+    /// `engines/lock.toml` pins no Linux Vulkan asset, so there would be nothing to route it to.
+    ///
+    /// The swap trades a certain abort for a build that needs a working Vulkan driver on the card,
+    /// which is the trade upstream's own workaround line records — hence the reason travelling with
+    /// the result, so the card says what was refused and why rather than changing silently.
+    pub fn refuse_hostile_backend(&mut self) {
+        if self.backend == Backend::Hip && self.arch == GpuArch::AmdRdna2 {
+            self.backend_override = Some(BackendOverride {
+                from: Backend::Hip,
+                to: Backend::Vulkan,
+                reason: "the HIP engine build aborts while loading on a consumer RDNA2 card \
+                         (RX 6000 / gfx1030) at any packing — llama.cpp#264, still open, so no \
+                         release fixes it. This app resolves the pinned Vulkan build for this \
+                         machine instead, and the pack choice follows that backend."
+                    .to_string(),
+            });
+            self.backend = Backend::Vulkan;
+        }
+    }
+
     /// The 27B packs stream from RAM/VRAM, so this is the number that decides whether a laptop can
     /// hold the model at all.
     pub fn can_hold(&self, pack_size_bytes: u64, headroom_bytes: u64) -> bool {
@@ -488,6 +554,76 @@ mod tests {
         assert_eq!(GpuArch::from_gpu_name("Intel Arc B390"), GpuArch::IntelArc);
         assert!(GpuArch::NvidiaAda.prefers_dense_trits());
         assert!(!GpuArch::NvidiaBlackwell.prefers_dense_trits());
+    }
+
+    /// `rocminfo` prints one block per agent, CPU agents first, and the field that names the card
+    /// class sits indented inside them. Written from that layout rather than captured from a Radeon
+    /// card — this machine has none — so it proves the parser reads the field it claims to, not that
+    /// a particular driver prints it.
+    #[test]
+    fn the_amd_agent_target_is_read_out_of_a_rocminfo_dump() {
+        let raw = "******************\n\
+                   Agent 0\n\
+                   ******************\n\
+                     Name: 0\n\
+                   ******************\n\
+                   Agent 1\n\
+                   ******************\n\
+                     Name:                    gfx1030\n\
+                     Marketing Name:          AMD Radeon RX 6800\n";
+        let (arch, name) =
+            HostHardware::amd_target_from_rocminfo(raw).expect("the GPU agent names its target");
+        assert_eq!(arch, GpuArch::AmdRdna2);
+        assert_eq!(name, "gfx1030");
+        // A CPU-only dump reports no target rather than reading `Name: 0` as one.
+        assert!(HostHardware::amd_target_from_rocminfo("  Name: 0\n").is_none());
+    }
+
+    /// #264: the abort belongs to the HIP build on this card class, not to a packing, so the build
+    /// must not be resolved at all here. The rule reads the probe's two fields, so no AMD GPU is
+    /// needed to test it.
+    #[test]
+    fn a_hip_probe_on_consumer_rdna2_runs_the_vulkan_build() {
+        let mut h = HostHardware {
+            backend: Backend::Hip,
+            arch: GpuArch::AmdRdna2,
+            gpu_name: Some("gfx1030".into()),
+            ..Default::default()
+        };
+        h.refuse_hostile_backend();
+        assert_eq!(h.backend, Backend::Vulkan);
+        let o = h
+            .backend_override
+            .expect("the swap is recorded, not made silently");
+        assert_eq!((o.from, o.to), (Backend::Hip, Backend::Vulkan));
+        assert!(o.reason.contains("#264"), "{}", o.reason);
+        assert!(o.reason.contains("Vulkan"), "{}", o.reason);
+    }
+
+    /// Every other combination keeps the backend the probe found. An unclassified card is not swapped
+    /// on a guess, and the documented neighbours each have their own answer: gfx1151 garbles output
+    /// rather than aborting (#223, and the pack choice handles it), RDNA3 and newer load, and #264
+    /// does not name the ROCm build Linux reports.
+    #[test]
+    fn only_the_rdna2_hip_combination_is_refused() {
+        for (backend, arch) in [
+            (Backend::Hip, GpuArch::AmdGfx1151),
+            (Backend::Hip, GpuArch::AmdOther),
+            (Backend::Hip, GpuArch::Unknown),
+            (Backend::Rocm, GpuArch::AmdRdna2),
+            (Backend::Cuda, GpuArch::AmdRdna2),
+            (Backend::Vulkan, GpuArch::IntelArc),
+            (Backend::Metal, GpuArch::AppleSilicon),
+        ] {
+            let mut h = HostHardware {
+                backend,
+                arch,
+                ..Default::default()
+            };
+            h.refuse_hostile_backend();
+            assert_eq!(h.backend, backend, "{backend:?} on {arch:?}");
+            assert_eq!(h.backend_override, None, "{backend:?} on {arch:?}");
+        }
     }
 
     #[test]

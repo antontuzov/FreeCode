@@ -263,6 +263,28 @@ mod tests {
         }
     }
 
+    /// `HostHardware::refuse_hostile_backend` routes a HIP host onto Vulkan, which only lands
+    /// somewhere if every triple with a HIP asset also has a Vulkan one. Without that sibling the
+    /// refusal would turn "build that aborts" into "no engine pinned for this machine".
+    #[test]
+    fn every_hip_target_has_a_vulkan_asset_on_the_same_triple() {
+        let l = lock();
+        let hip: Vec<&EngineTarget> = l
+            .targets
+            .iter()
+            .filter(|t| t.backend == Backend::Hip)
+            .collect();
+        assert!(!hip.is_empty(), "with no HIP target this proves nothing");
+        for t in hip {
+            assert!(
+                l.target_for(&t.os, &t.arch, Backend::Vulkan)
+                    .is_some_and(|v| v.backend == Backend::Vulkan),
+                "{} is a HIP asset with no Vulkan fallback",
+                t.key
+            );
+        }
+    }
+
     #[test]
     fn cuda_12_4_is_the_recommended_windows_build() {
         let l = lock();

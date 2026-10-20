@@ -73,10 +73,11 @@ impl Assembly {
         // It travels in its own field so the UI can fold it behind a disclosure, rather than
         // printing another platform's bug report as if it were a warning about this one.
         let mut warnings: Vec<String> = self
-            .recommendation
-            .warnings
+            .host
+            .backend_override
             .iter()
-            .cloned()
+            .map(|o| o.reason.clone())
+            .chain(self.recommendation.warnings.iter().cloned())
             .chain(
                 self.report
                     .warnings
@@ -315,6 +316,8 @@ pub struct ModelStatusView {
     pub catalog_id: String,
     pub display_name: String,
     pub repo_id: String,
+    /// The backend the run uses. Normally what the probe found; different when `warnings` carries a
+    /// refusal that swapped it, which is then what the row is honestly reporting.
     pub backend: String,
     pub engine_tag: String,
     pub engine_installed: bool,
@@ -332,6 +335,7 @@ pub struct ModelStatusView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smollm_models::hardware::{Backend, GpuArch};
     use smollm_models::Catalog;
 
     fn repo_root() -> PathBuf {
@@ -431,6 +435,30 @@ mod tests {
         assert!(
             !status.unchecked_warnings.is_empty(),
             "the catalog's unverifiable caveats must still be surfaced somewhere"
+        );
+    }
+
+    /// A backend the app refused is a fact about the run, not a detail of the probe: the card's
+    /// backend row now names something other than what the machine installed. Assembled on this
+    /// machine and then re-stamped as an RDNA2 host, because no Apple hardware produces that state.
+    #[test]
+    fn a_refused_backend_reaches_the_card_as_a_warning() {
+        let root = clean_checkout();
+        let mut assembly = assemble(root.path(), &Settings::default()).unwrap();
+        let mut host = HostHardware {
+            backend: Backend::Hip,
+            arch: GpuArch::AmdRdna2,
+            ..assembly.host.clone()
+        };
+        host.refuse_hostile_backend();
+        assembly.host = host;
+
+        let view = assembly.view(&Settings::default());
+        assert_eq!(view.backend, "Vulkan");
+        assert!(
+            view.warnings.iter().any(|w| w.contains("#264")),
+            "{:?}",
+            view.warnings
         );
     }
 
