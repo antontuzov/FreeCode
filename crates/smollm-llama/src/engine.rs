@@ -48,9 +48,10 @@ impl EngineBinary {
         Self::resolve_for(root, lock, host_os(), std::env::consts::ARCH, host.backend)
     }
 
-    /// Resolve for an explicit triple. `UnsupportedBackend` carries the reason copied verbatim out
-    /// of `engines/lock.toml`, which quotes KNOWN_ISSUES.md — SYCL cannot load PQ2_0/PTQ1_0 at all
-    /// (llama.cpp#235), so it must never be chosen.
+    /// Resolve for an explicit triple. `UnsupportedBackend` carries the reason copied verbatim out of
+    /// `engines/lock.toml`: SYCL has ternary kernels in the pinned build (llama.cpp#235 merged them),
+    /// but no SYCL asset is pinned here and upstream leaves that row unvalidated, so it is never
+    /// chosen.
     pub fn resolve_for(
         root: &Path,
         lock: &EngineLock,

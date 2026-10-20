@@ -13,6 +13,28 @@ numbers are `PrismML-Eng/llama.cpp` for the runtime and `PrismML-Eng/Bonsai-demo
 scripts. `catalog/models.toml` names the same URL in its header, and `engines/lock.toml` records the
 build this app ships.
 
+**How to re-check whether an entry still applies.** Upstream's list describes releases older than
+this app's pin, so "fixed in source but not in a release" is a claim about a different binary. Test
+it against the pin instead of trusting the prose: the fork's compare endpoint answers the ancestry
+question directly —
+`GET https://api.github.com/repos/PrismML-Eng/llama.cpp/compare/<pin-commit>…<fix-commit>` returns
+`status: "behind"` when the fix is already an ancestor of the pinned build. Re-run for the fixes the
+pin is asserted to carry on 2026-10-20: #245 `0324c665`, #238 `3ae4f510`, #235 `ccbf5a75`, #252
+`c53526a0`, #291 `46d25326`, #206 `01ae597e`, #196 `922be44a`, #317 `8b0c19c8`, and the tag
+`prism-b10735-842b188` — all behind, so all present. **An entry in this file therefore cannot argue
+for a from-source build on the grounds that the fix is unreleased**; if it needs one now, it is
+because upstream's tracker still shows the item open, and that is what the wording says.
+
+Every row was re-read that way on **2026-10-20**, together with the tracker states of the items the
+catalog names. Still open there: #192, #199, #201, #213, #222, #223, #264 and #270 — so their rows
+stay, and their wording says what upstream actually measured rather than what an older release did.
+Two of them have no answer in the pinned build at all and are the only entries that point off it:
+llama.cpp#199 (RTX 5090 / sm_120 prebuilt Linux CUDA builds, fixed only by building from source with
+`-DCMAKE_CUDA_ARCHITECTURES=120a-real`) and llama.cpp#264 (RDNA2 under HIP, which upstream says has
+no workaround on that backend — swap to the Vulkan build; note that upstream's own row still cites
+Bonsai-demo#197, and the tracker redirects it). #241, which the model's list also calls open, is not:
+it was closed by #271 in `prism-b10743`, before this pin.
+
 ## Replies that come back empty or cut off
 
 **A small output cap ends the run mid-thought.** The reasoning counts against the limit, so a tight
@@ -78,25 +100,48 @@ activation transform depends on metadata only the PrismML build applies.
 
 _Enforced_: the load guard refuses a pack whose quant type is not the fork's, or whose GGUF lacks
 every prefix the catalog entry requires, before any weight file reaches any binary —
-`crates/smollm-llama/src/load_guard.rs`. Warnings never block a launch; they are the pack's
-`[[model.packs.caveats]]` rows matched against this host, which is what the status card lists.
+`crates/smollm-llama/src/load_guard.rs`. Warnings never block a launch. They are the pack's
+`[[model.packs.caveats]]` rows, and `caveat_matches` evaluates only the atoms `backend == <name>`,
+`host_has_avx512`, and the OS names `windows` / `macos` / `linux`; a row that also names `gpu == …`
+or an engine release is shown under "may or may not apply" rather than dropped, because failing open
+beats quietly hiding a documented crash. The card splits the two in
+`apps/desktop/src-tauri/src/status.rs`.
 
-**The SYCL build cannot load either ternary type at all** (llama.cpp#235, "unsupport data type").
-_Enforced_: `engines/lock.toml` marks SYCL unsupported with the reason copied verbatim, and
-`EngineBinary::resolve_for` returns `UnsupportedBackend` rather than launching it —
-`crates/smollm-llama/src/engine.rs`. Test: `sycl_is_refused_with_the_reason_from_the_lock_file`.
+**ROCm/HIP aborts during load on consumer RDNA2 cards** (RX 6000 / gfx1030), whatever the packing
+(llama.cpp#264 — upstream's row still cites Bonsai-demo#197, which the tracker redirects — open as of
+2026-10-20). _Enforced_: only as a caveat, on every runtime pack a HIP host can be routed to, saying
+there is nothing to apply on HIP and the Vulkan build is the way. **What this app does not do**: it
+does not override the probed backend, so a machine whose probe chooses HIP still has to swap engine
+builds itself.
+
+**RTX 5090 (sm_120) prebuilt Linux CUDA builds decode erratically** (llama.cpp#199, open), reported
+on both ternary bands, and this is the one entry on upstream's list whose recorded fix really is a
+source build: `-DCMAKE_CUDA_ARCHITECTURES=120a-real`. Nothing in the pin addresses it. _Enforced_:
+as a caveat on the 27B's two runtime packs, plus `engines/lock.toml`'s `[from_source]` table.
+
+**SYCL has no binary for this app to run.** Upstream used to report "unsupport data type" for both
+ternary types there; llama.cpp#235 merged ternary SYCL loading on 2026-09-24, so the pinned build is
+not missing the kernels — but upstream still marks that row unvalidated, no SYCL asset is pinned
+in `engines/lock.toml`, and even the demo's own scripts never select it.
+_Enforced_: the lock marks SYCL unsupported with that reason, and `EngineBinary::resolve_for` returns
+`UnsupportedBackend` rather than launching it — `crates/smollm-llama/src/engine.rs`. Test:
+`sycl_is_refused_with_the_reason_from_the_lock_file`.
 
 **CUDA 13.3 builds crash on load; on Windows the server prints its banner and exits silently**
 (llama.cpp#222). _Enforced_: the lock marks one asset per backend `recommended`, and auto-resolution
 picks it — Windows/CUDA resolves to 12.4. Test:
 `auto_resolution_prefers_the_recommended_asset_for_a_backend`.
 
-**`PQ2_0` segfaults while loading on AVX-512 CPUs** (Zen 4/5, Strix Halo; fixed in source by
-llama.cpp#245, merged 2026-09-23). This app ships `prism-b10772-e8fd209`, newer than the release
-upstream names as the workaround, and the pin is asserted to be `>= prism-b10709` because the
-launch-day `prism-b10687` shipped no binaries at all. **What this app cannot check**: whether this
-machine is an affected CPU — the caveat is shown as a risk on the host that matches it, not as a
-claim that it was reproduced.
+**`PQ2_0` segfaults while loading on AVX-512 CPUs** (Zen 4/5, Strix Halo) — **on releases before
+llama.cpp#245**, merged 2026-09-23 and an ancestor of this app's pin, so the pinned build carries the
+fix. The warning `score_pack` emits on such a host is therefore about what has never been *measured
+here*, not about a crash the user is about to hit. This app ships `prism-b10772-e8fd209`, newer than
+the release upstream names as the workaround, and the pin is asserted to be `>= prism-b10709` because
+the launch-day `prism-b10687` shipped no binaries at all. **What this app cannot check**: whether this
+machine is an affected CPU, and whether the fixed kernel path actually decodes on GPU there. The
+pack's `condition` strings are prose for a human to read, not rules the host is matched against —
+`apps/desktop/src-tauri/src/status.rs` lists any caveat it cannot evaluate under `unchecked_warnings`
+("may or may not apply"), while the decision that avoids the risk is made in code by `score_pack`.
 
 ## Performance and context
 
@@ -116,11 +161,17 @@ half of the decision into the Model Manager UI. **What this app does not do**: s
 VRAM. A 12 GB GPU in a 16 GB machine still gets a 16 384 window from the RAM tier, so the offload
 plan and the caveats — not the tier — are what keep it loadable.
 
-**`PQ2_0` on Vulkan silently runs on the CPU at under 2 tok/s in the binary release** (fixed in
-source by llama.cpp#238, merged 2026-09-21, not in a release at the time of writing). Decided before
-the packing is ever chosen: `score_pack` penalises `PQ2_0` on a Vulkan host and warns that the GPU log
-is misleading — watch the `CPU model buffer size` — so `PTQ1_0` is selected instead
-(`crates/smollm-models/src/select.rs`).
+**`PQ2_0` on Vulkan used to silently run on the CPU** at under 2 tok/s in the binary releases, while
+the log still claimed every layer was offloaded (llama.cpp#238, merged 2026-09-21). Upstream's note
+says "not in a release at the time of writing"; `#238` is an ancestor of this app's pin, so on the
+build this app installs the fallback this row describes is not the risk — what is left is
+BACKEND-SUPPORT.md marking that cell partial (kernel selection depends on the device and driver,
+no direct coopmat2 decoder, "no new hardware tests were run for this table"), plus #192 and #270,
+which stay open on Intel parts. _Enforced_ before the packing is ever chosen: `score_pack` penalises
+`PQ2_0` on a Vulkan host so `PTQ1_0` is selected, and the warning says plainly that this is this app's
+unmeasured caution rather than a known failure
+(`crates/smollm-models/src/select.rs`, test `vulkan_never_gets_pq2`). If a ternary run on a Vulkan
+part is ever measured here, the rule and the wording change together.
 
 ## Vision
 

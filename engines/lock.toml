@@ -8,10 +8,19 @@
 #   python3 scripts/refresh-engine-digests.py --check    # fails if any digest is stale
 # The install path refuses to unpack an archive whose sha256 does not match the value recorded
 # here, so a substituted release asset cannot reach the loader.
-# The tag is NOT "whatever is newest": Bonsai-demo's scripts/download_binaries.sh currently pins an
-# older build (prism-b10743-adfffbe), and several ternary fixes are merged to the `prism` branch but
-# absent from ANY binary release. Where the two disagree the demo repo wins, so an override env var
-# (SMOLLM_ENGINE_TAG) and a from-source build path both exist.
+# The tag is NOT "whatever is newest", and an override env var (SMOLLM_ENGINE_TAG) plus a from-source
+# build path both exist. What the pin decision rests on changed on 2026-10-20, when every "fixed in
+# source, not in a release" item in the model's KNOWN_ISSUES.md (last checked 2026-09-23) was tested
+# against this tag by asking GitHub whether each merge commit is an ancestor of e8fd209. All of them
+# are: #245 0324c665, #238 3ae4f510, #235 ccbf5a75, #252 c53526a0, #291 46d25326, #206 01ae597e,
+# #196 922be44a, and the #241 release change 9a4dd89d. So this release is not missing the fixes the
+# card says only a source build has, and no caveat in catalog/models.toml may argue for a source
+# build on those grounds. Re-run the ancestry check before repeating any "prebuilt binaries do not
+# have the fix" claim.
+# What the pin is genuinely missing is the two weeks after it: upstream has since published
+# prism-b10776 / b10777 (2026-10-14) and prism-b10787 (2026-10-19), which is what Bonsai-demo's
+# scripts/download_binaries.sh pins now. Bumping this file to a newer tag needs its asset names,
+# sizes and sha256 values re-read from the Releases API by scripts/refresh-engine-digests.py.
 #
 # verify-hf-gguf-catalog-entry asserts: tag >= prism-b10709 (b10687 shipped no binaries), every
 # target we ship has a resolvable asset, and no stock-llama.cpp path is reachable.
@@ -23,8 +32,10 @@ published_at = "2026-10-10T19:02:41Z"
 min_allowed_tag = "prism-b10709-9a9394a"
 repo = "PrismML-Eng/llama.cpp"
 download_url_template = "https://github.com/PrismML-Eng/llama.cpp/releases/download/{tag}/{asset}"
-# Bonsai-demo's own pin, recorded so CI can compare and flag drift.
-demo_pinned_tag = "prism-b10743-adfffbe"
+# Bonsai-demo's own pin, recorded so CI can compare and flag drift. Read off
+# scripts/download_binaries.sh on 2026-10-20: it is now AHEAD of this file, not behind it, which is
+# the opposite of the assumption this file was written under.
+demo_pinned_tag = "prism-b10787-73bfe6c"
 
 # Binaries the supervisor is allowed to launch, relative to engines/<tag>/<asset-dir>/.
 [binaries]
@@ -74,7 +85,7 @@ asset = "llama-prism-b10772-e8fd209-bin-win-cpu-x64.zip"
 size_bytes = 19_458_591
 sha256 = "53be70c8b87a4261a1a56f0f72df9d1b7b815e5794702c2d779cdea1c78a347b"
 recommended = true
-notes = "Fallback when no usable GPU build starts; llama.cpp#241 reports CUDA builds failing on some CPUs while the CPU build works."
+notes = "Fallback when no usable GPU build starts. It was written for llama.cpp#241, where a Windows CUDA zip shipped one AVX2-only ggml-cpu.dll and exited silently on a CPU without AVX2; #271 closed that in prism-b10743 and the reporter confirmed it working, so the pinned release is past it. The row stays as the no-GPU path regardless."
 [[target]]
 key = "windows-cpu-arm64"
 os = "windows"
@@ -113,8 +124,11 @@ asset = "llama-prism-b10772-e8fd209-bin-win-vulkan-x64.zip"
 size_bytes = 31_242_630
 sha256 = "f365ad7c56fb9df8805eb4f701bd068ee36c61da894dc7c52f48644d1fa2b625"
 recommended = true
-# Vulkan is NOT in common.sh's pq2_0_ready_backend() list, because PQ2_0 silently decodes on the CPU
-# (#238). Pair this target with PTQ1_0.
+# Vulkan is the one backend the demo's own selection registry (common.sh pq2_0_ready_backend(), which
+# MODEL-FORMATS.md's PQ2_0 kernel table mirrors as "not yet") leaves out of the PQ2_0 list, even
+# though BACKEND-SUPPORT.md records those kernels as landed by llama.cpp#238 and shipped in
+# prism-b10735-842b188 — a release older than this pin. The conservative reading is kept as policy,
+# not as a claim about what this build can do: pair this target with PTQ1_0.
 notes = "Must pair with the PTQ1_0 pack; the pack recommender encodes this."
 [[target]]
 key = "windows-hip-x64"
@@ -125,7 +139,7 @@ asset = "llama-prism-b10772-e8fd209-bin-win-hip-radeon-x64.zip"
 size_bytes = 342_445_816
 sha256 = "742631b81d558c40c154599e2af8b1cb1679470405267148118fb3bf14a4e6bc"
 recommended = true
-notes = "gfx1151 gets garbled PQ2_0 output (#223): use -ngl 0 or Vulkan+PTQ1_0. RDNA2 consumer parts abort (Bonsai-demo#197)."
+notes = "gfx1151 gets garbled PQ2_0 output (#223, still open): use -ngl 0 or Vulkan+PTQ1_0. RDNA2 consumer parts abort — that report moved out of the demo repo and is now llama.cpp#264, open."
 
 [[target]]
 key = "linux-cuda-12.8-x64"
@@ -156,19 +170,33 @@ size_bytes = 155_865_338
 sha256 = "da677becd1ab0a514c481275f87208079e749e286908a04aad5a42acfee7fb01"
 recommended = true
 
-# Deliberately unresolvable: SYCL cannot load PQ2_0 or PTQ1_0 at all ("unsupport data type",
-# llama.cpp#235 still in review). We ship no SYCL target so a detection bug cannot select it; Intel
-# GPUs go to the Vulkan target with PTQ1_0 instead.
+# Deliberately unresolvable — and not for the reason this file first gave. llama.cpp#235 merged
+# ternary SYCL support on 2026-09-24 and is in the pinned tag, and BACKEND-SUPPORT.md marks SYCL
+# PQ2_0/PTQ1_0 as ✅* with native conversion and matrix-vector kernels. It stays unresolvable on the
+# app's own account: no SYCL asset is pinned below, upstream's matrix calls that row "partial / needs
+# validation" with "no new end-to-end Intel GPU validation run here", and the demo's own setup
+# scripts "do not automatically select or install SYCL yet" (BACKEND-SUPPORT.md, "SYCL release
+# packages"). Intel GPUs therefore go to the Vulkan target with PTQ1_0.
 [unsupported_backends]
-sycl = "llama.cpp#235: cannot load PQ2_0/PTQ1_0; use vulkan + PTQ1_0"
+sycl = "llama.cpp#235 put ternary SYCL kernels into this release, but they are upstream's ✅* unvalidated row, no SYCL asset is pinned here, and even the demo scripts do not select SYCL; use vulkan + PTQ1_0"
 
 [from_source]
-# Several important fixes are merged to `prism` but not in any binary release (llama.cpp#245 AVX-512
-# load crash, #238 Vulkan PQ2_0, #206 AVX2/AVX-VNNI CPU kernels, #196 Metal tensor API on newest
-# chips). When the detected machine hits one of those, the resolver must offer a source build.
+# A source build is no longer the answer to the fixes the model's KNOWN_ISSUES.md lists as "in source
+# only" — the header above records that #245, #238, #206 and #196 are each an ancestor of the pinned
+# commit. It is still the answer for a machine no asset above covers, and for what upstream still
+# records as open with no merged fix: #192 (PTQ1_0 hangs Intel Arc on Vulkan), #201 (PTQ1_0 Vulkan
+# decode speed), #223 (gfx1151 HIP), #264 (RDNA2/HIP abort, transferred from Bonsai-demo#197),
+# #199 (RTX 5090 / sm_120 decodes erratically out of the prebuilt Linux CUDA tarballs — the one
+# entry whose recorded fix is `-DCMAKE_CUDA_ARCHITECTURES=120a-real` rather than a release) and
+# #270 (Xe3 iGPUs on 8-wide subgroups, which #238's whitelist does not cover).
 repo = "https://github.com/PrismML-Eng/llama.cpp"
 branch = "prism"
 macos = "git clone https://github.com/PrismML-Eng/llama.cpp && cd llama.cpp && cmake -B build && cmake --build build -j"
 cuda = "git clone https://github.com/PrismML-Eng/llama.cpp && cd llama.cpp && cmake -B build -DGGML_CUDA=ON && cmake --build build -j"
-cuda_arch_note = "source CUDA builds may need -DCMAKE_CUDA_ARCHITECTURES=89 (Ada) or 120a-real (RTX 5090), and -DGGML_CUDA_FA_ALL_QUANTS=ON for quantized KV cache with flash attention"
-known_blocker = "Bonsai-demo#177: setup.sh fails to build on macOS 27 / Xcode 26.5 — prefer the prebuilt macos-arm64 asset there"
+# #317 (8b0c19c8, in the pinned release) replaced GGML_CUDA_FA_ALL_QUANTS with the finer-grained
+# GGML_CUDA_FA_QUANTS, so a source build against this branch should name the new knob.
+cuda_arch_note = "source CUDA builds may need -DCMAKE_CUDA_ARCHITECTURES=89 (Ada) or 120a-real (RTX 5090), and -DGGML_CUDA_FA_QUANTS=ON (formerly GGML_CUDA_FA_ALL_QUANTS, renamed by llama.cpp#317) for quantized KV cache with flash attention"
+# Bonsai-demo#177 was closed on 2026-09-24 by backporting the macOS 27 SDK fix into the demo's mlx
+# fork, and it was never this app's path anyway: the app only ever unpacks a prebuilt GGUF runtime,
+# and has no mlx. Recorded as history rather than as a blocker.
+known_blocker = "was: setup.sh failing to build mlx on macOS 27 / Xcode 26.5 (Bonsai-demo#177, closed 2026-09-24). Does not apply to this app, which ships the prebuilt macos-arm64 asset and never builds from the demo's scripts"

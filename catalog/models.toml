@@ -119,22 +119,54 @@ preferred_for_backends = ["metal", "cpu", "cuda", "rocm", "hip"]
 # everywhere.
 notes = "Faster prefill on every backend; the pack benchmarked on Apple M5 Pro/Max."
 [[model.packs.caveats]]
-# KNOWN_ISSUES.md "CPU crash on load (AVX-512 CPUs)"
-condition = "backend == cpu and host_has_avx512 and engine_release < the fix for llama.cpp#245"
-symptom = "segfault while loading, even with all layers offloaded to a GPU"
-workaround = "prefer PTQ1_0, or build the prism branch from source; --no-repack is unconfirmed"
+# KNOWN_ISSUES.md "CPU crash on load (AVX-512 CPUs)". The condition stays in the two atoms the load
+# guard can evaluate (`crates/smollm-llama/src/load_guard.rs::caveat_matches`), so the row fires only
+# on the hosts it is about instead of landing on every card as "may or may not apply". The version
+# scope therefore lives in the prose: the crash is what releases BEFORE llama.cpp#245 did, and the
+# pinned tag already contains #245 (0324c665, checked 2026-10-20 to be an ancestor of e8fd209). This
+# row is inert for the engine this app installs and live only for an SMOLLM_ENGINE_TAG override or a
+# user-supplied older binary.
+condition = "backend == cpu and host_has_avx512"
+symptom = "segfault while loading, even with all layers offloaded to a GPU, on an engine release before llama.cpp#245 — the pinned build carries that fix, so on it this is an untested path rather than a known crash"
+workaround = "on an older release, prefer PTQ1_0; --no-repack is unconfirmed. Nothing to apply on the pinned build, which this app has not run on an AVX-512 host"
 severity = "fatal"
 [[model.packs.caveats]]
-# KNOWN_ISSUES.md: "PQ2_0 on Vulkan silently runs on the CPU" under 2 tok/s in the binary release.
+# KNOWN_ISSUES.md: "PQ2_0 on Vulkan silently runs on the CPU" under 2 tok/s — in the releases that
+# preceded llama.cpp#238, which is in the pinned build. What is left is that no run of PQ2_0 on a
+# Vulkan part has ever been measured here, and the 4B row below records why the kernels are
+# device-dependent. So the pack choice stays PTQ1_0 on Vulkan, on this app's own caution.
 condition = "backend == vulkan"
-symptom = "silently falls back to CPU decode, under 2 tok/s, while logs claim full offload"
-workaround = "use PTQ1_0 on Vulkan, or build the prism branch from source (llama.cpp#238)"
-severity = "severe"
+symptom = "on releases before llama.cpp#238, PQ2_0 silently decodes on the CPU at under 2 tok/s while logs claim full offload; on the pinned build the risk is unmeasured kernel selection, which depends on the device and driver"
+workaround = "the pack recommender keeps Vulkan on PTQ1_0 until a ternary run on a Vulkan part is evidence rather than a matrix cell"
+severity = "moderate"
 [[model.packs.caveats]]
-# KNOWN_ISSUES.md (llama.cpp#223)
+# KNOWN_ISSUES.md (llama.cpp#223) — still open on the tracker as of 2026-10-20, so no release,
+# pinned or otherwise, closes it.
 condition = "backend == hip and windows and gpu == gfx1151"
 symptom = "garbled output"
 workaround = "-ngl 0, or the Vulkan build with PTQ1_0"
+severity = "severe"
+[[model.packs.caveats]]
+# KNOWN_ISSUES.md "ROCm/HIP aborts on consumer RDNA2 GPUs" — the row cites Bonsai-demo#197, which the
+# tracker now redirects to llama.cpp#264, and it is open as of 2026-10-20, so no release closes it.
+# The abort is a property of the HIP backend on gfx103x parts rather than of a packing, which is why
+# this row sits on both runtime packs. `gpu ==` is an atom the load guard does not evaluate
+# (crates/smollm-llama/src/load_guard.rs::caveat_matches), so it reaches the card as "may or may not
+# apply" instead of claiming this host is affected.
+condition = "backend == hip and gpu == rdna2 (gfx103x)"
+symptom = "the server aborts during load on a consumer RDNA2 card (RX 6000 series / gfx1030), whatever the packing"
+workaround = "none on HIP: install the Vulkan engine build. Changing pack does not help"
+severity = "fatal"
+[[model.packs.caveats]]
+# KNOWN_ISSUES.md "RTX 5090: prebuilt Linux binaries decode erratically" (llama.cpp#199, open as of
+# 2026-10-20) — the one entry on that list for which a source build IS the answer, because nothing has
+# been merged to fix it: sm_120 kernels in the prebuilt Linux tarballs decode erratically on driver
+# 570 hosts, reported on both ternary bands. The pinned release does not help; the reported fix is
+# `-DCMAKE_CUDA_ARCHITECTURES=120a-real`. Evidence is 27B-only, so it is not copied to the smaller
+# entries.
+condition = "backend == cuda and linux and gpu == nvidia blackwell (sm_120)"
+symptom = "erratic or catastrophic decode throughput from a prebuilt Linux CUDA build on an RTX 5090"
+workaround = "build the prism branch from source with -DCMAKE_CUDA_ARCHITECTURES=120a-real, as engines/lock.toml's [from_source] records"
 severity = "severe"
 
 [[model.packs]]
@@ -149,24 +181,43 @@ sha256 = "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3"
 marketing_ratio_vs_fp16 = 9.0
 # Faster decode on Ada-generation GPUs and L4 (model card); the pick wherever memory is tightest.
 # Unpacking dense trits costs arithmetic.
-# Vulkan is the one backend that must take PTQ1_0: PQ2_0 silently decodes on the CPU there (#238).
-# SYCL is not listed at all because it cannot load either ternary type (llama.cpp#235).
+# Vulkan is the one backend that takes PTQ1_0 by rule rather than by measurement: PQ2_0's Vulkan
+# kernels are device-dependent (llama.cpp#238, in the pinned build) and no run here has settled them.
+# SYCL is not listed at all: #235 merged ternary SYCL loading on 2026-09-24 and is in this release,
+# but upstream's measurement of that path (#360, a verbatim Arc B390 run) postdates the pin, and no
+# SYCL asset is pinned in engines/lock.toml. Intel GPUs are therefore served by Vulkan.
 preferred_for_backends = ["vulkan"]
 fallback_for_backends = ["metal", "cpu", "cuda", "rocm", "hip"]
 notes = "The '1-bit / ~9x smaller than FP16' pack. Cheapest on disk and RAM."
 [[model.packs.caveats]]
-# KNOWN_ISSUES.md (llama.cpp#192)
+# KNOWN_ISSUES.md (llama.cpp#192) — still open on the tracker as of 2026-10-20.
 condition = "backend == vulkan and gpu == intel_arc"
 symptom = "hang after roughly 1,900 tokens"
 workaround = "run on CPU for now"
 severity = "severe"
 [[model.packs.caveats]]
-# KNOWN_ISSUES.md (llama.cpp#201): decode under 2 tok/s on Intel Arc in the binary release; fixed in
-# source for Xe2-class GPUs only.
-condition = "backend == vulkan"
-symptom = "slow decode on some Intel GPUs in prebuilt binaries"
-workaround = "build the prism branch from source"
+# KNOWN_ISSUES.md (llama.cpp#201): under 2 tok/s on Intel Arc, "fixed in source" by #238 for Xe2
+# parts. The pinned release contains #238, #252 and #291, so this is no longer an argument for a
+# source build — but #201 itself is still open, and #270 records that Xe3 iGPUs reporting an 8-wide
+# minimum subgroup (Intel Arc 140T) do not get #238's fast path at all.
+condition = "backend == vulkan and gpu == intel"
+symptom = "PTQ1_0 decodes slower on Vulkan than on CUDA on the same Intel GPU; the pinned build's faster paths cover Xe2-class parts and not 8-wide-subgroup Xe3 iGPUs (#270)"
+workaround = "none to apply here: the pin already carries #238/#252/#291. Expect the gap on the parts #270 names"
 severity = "moderate"
+[[model.packs.caveats]]
+# The same RDNA2/HIP abort as on the PQ2_0 pack (#264, open): it happens at load on the backend, so
+# taking the dense-trit pack does not avoid it and this row has to be here too.
+condition = "backend == hip and gpu == rdna2 (gfx103x)"
+symptom = "the server aborts during load on a consumer RDNA2 card (RX 6000 series / gfx1030), whatever the packing"
+workaround = "none on HIP: install the Vulkan engine build"
+severity = "fatal"
+[[model.packs.caveats]]
+# The same #199 as on the PQ2_0 pack: that report ran both ternary bands on the RTX 5090, and it is
+# still open, so neither pack is safe on a prebuilt Linux CUDA build there.
+condition = "backend == cuda and linux and gpu == nvidia blackwell (sm_120)"
+symptom = "erratic or catastrophic decode throughput from a prebuilt Linux CUDA build on an RTX 5090"
+workaround = "build the prism branch from source with -DCMAKE_CUDA_ARCHITECTURES=120a-real"
+severity = "severe"
 
 [[model.packs]]
 # Shipped for reference/eval only: it is ~53.8 GB on disk (the card's "~54 GB" is rounded), does not
@@ -365,16 +416,27 @@ notes = "The pack to run on this backend: group-128, 463 MB, fork kernels for Me
 [[model.packs.caveats]]
 # The two PQ2_0 failures recorded in the 27B's KNOWN_ISSUES.md are properties of the type-142
 # kernels rather than of a size, so they are listed here as a documented risk to check, not as a
-# measurement of this pack: no 1.7B run on those parts is published.
-condition = "backend == cpu and host_has_avx512 and engine_release < the fix for llama.cpp#245"
-symptom = "segfault while loading (documented for the 27B's PQ2_0 band; the same ggml type 142 kernels)"
-workaround = "use Q2_0_g64, or build the prism branch from source"
+# measurement of this pack: no 1.7B run on those parts is published. The AVX-512 half of that is
+# closed in the pinned build (llama.cpp#245 is in it), which is why the release scope is in the
+# prose while the condition stays in atoms the load guard evaluates.
+condition = "backend == cpu and host_has_avx512"
+symptom = "segfault while loading on an engine release before llama.cpp#245 (documented for the 27B's PQ2_0 band; the same ggml type 142 kernels). The pinned build carries the fix"
+workaround = "on a release before the fix, use Q2_0_g64 instead"
 severity = "fatal"
 [[model.packs.caveats]]
+# llama.cpp#223, still open as of 2026-10-20.
 condition = "backend == hip and windows and gpu == gfx1151"
 symptom = "garbled output (documented for the 27B's PQ2_0 band; the same kernels)"
 workaround = "-ngl 0, or the Vulkan build with Q2_0_g64"
 severity = "severe"
+[[model.packs.caveats]]
+# KNOWN_ISSUES.md "ROCm/HIP aborts on consumer RDNA2 GPUs" (row cites Bonsai-demo#197, now
+# llama.cpp#264; open as of 2026-10-20). A backend property, not a packing one, so both runtime packs
+# of this model carry it — see the 27B's PQ2_0 row for the full note.
+condition = "backend == hip and gpu == rdna2 (gfx103x)"
+symptom = "the server aborts during load on a consumer RDNA2 card (RX 6000 series / gfx1030), whatever the packing"
+workaround = "none on HIP: install the Vulkan engine build"
+severity = "fatal"
 
 [[model.packs]]
 # MODEL-FORMATS.md: the official group-64 band keeps mainline compatibility — "works everywhere
@@ -393,6 +455,13 @@ sha256 = "6d0ecb3d9055969b5cde332b6fdb60e67ed3599e9f73e56b977731e1467e5c91"
 preferred_for_backends = ["vulkan"]
 fallback_for_backends = ["metal", "cpu", "cuda", "rocm", "hip"]
 notes = "The portable band: +27 MB over PQ2_0, and the only ternary pack a stock llama.cpp can read."
+[[model.packs.caveats]]
+# The RDNA2/HIP abort (#264, open) happens at load on the backend, so this pack carries it too: a
+# HIP host steered away from PQ2_0 still cannot load.
+condition = "backend == hip and gpu == rdna2 (gfx103x)"
+symptom = "the server aborts during load on a consumer RDNA2 card (RX 6000 series / gfx1030), whatever the packing"
+workaround = "none on HIP: install the Vulkan engine build"
+severity = "fatal"
 
 [[model.packs]]
 # The file the card still recommends — the reason this entry exists. It is the DEPRECATED legacy
@@ -650,22 +719,34 @@ notes = "The default pack: faster prompt processing than PTQ1_0, and the one thi
 [[model.packs.caveats]]
 # 27B KNOWN_ISSUES.md "CPU crash on load (AVX-512 CPUs)". Recorded here as a risk to check rather
 # than a measurement: it is a property of the ggml type 142 CPU kernels, and no 4B run on such a host
-# is published.
-condition = "backend == cpu and host_has_avx512 and engine_release < the fix for llama.cpp#245"
-symptom = "segfault while loading, even with all layers offloaded to a GPU (documented for the 27B's PQ2_0 band, which is the same ggml type)"
-workaround = "prefer PTQ1_0, or build the prism branch from source; --no-repack is unconfirmed"
+# is published. llama.cpp#245 closed it and the pinned release contains that commit, so the row is
+# inert for the engine this app installs — which is why the scope is prose and the condition stays
+# in the atoms the load guard evaluates.
+condition = "backend == cpu and host_has_avx512"
+symptom = "segfault while loading, even with all layers offloaded to a GPU, on an engine release before llama.cpp#245 (documented for the 27B's PQ2_0 band, which is the same ggml type). The pinned build carries the fix"
+workaround = "on a release before the fix, prefer PTQ1_0; --no-repack is unconfirmed"
 severity = "fatal"
 [[model.packs.caveats]]
-# 27B KNOWN_ISSUES.md (llama.cpp#223), same reasoning as above.
+# 27B KNOWN_ISSUES.md (llama.cpp#223), same reasoning as above. #223 is still open on the tracker as
+# of 2026-10-20, so no release closes it.
 condition = "backend == hip and windows and gpu == gfx1151"
 symptom = "garbled output (documented for the 27B's PQ2_0 band; the same kernels)"
 workaround = "-ngl 0, or the Vulkan build with PTQ1_0"
 severity = "severe"
 [[model.packs.caveats]]
+# KNOWN_ISSUES.md "ROCm/HIP aborts on consumer RDNA2 GPUs" (Bonsai-demo#197, which the tracker
+# redirects to llama.cpp#264; open as of 2026-10-20). Packing-independent, so both runtime packs of
+# this model carry it — see the 27B's PQ2_0 row for why it is prose and not a matched condition.
+condition = "backend == hip and gpu == rdna2 (gfx103x)"
+symptom = "the server aborts during load on a consumer RDNA2 card (RX 6000 series / gfx1030), whatever the packing"
+workaround = "none on HIP: install the Vulkan engine build"
+severity = "fatal"
+[[model.packs.caveats]]
 # Two sources disagree about Vulkan for this generation, and this app follows the conservative one.
 # llama.cpp#238 (the PQ2_0-on-Vulkan CPU fallback that the 27B's KNOWN_ISSUES.md reports as "under 2
-# tok/s") is recorded in BACKEND-SUPPORT.md as landed and shipped in prism-b10735-842b188, and
-# common.sh's bonsai2 branch ignores pq2_0_ready_backend() entirely — so the demo would run PQ2_0 on
+# tok/s") is recorded in BACKEND-SUPPORT.md as landed and shipped in prism-b10735-842b188 — which the
+# pinned tag is newer than, so the CPU fallback this row was written about is not this app's release —
+# and common.sh's bonsai2 branch ignores pq2_0_ready_backend() entirely, so the demo would run PQ2_0 on
 # Vulkan. BACKEND-SUPPORT still marks that cell ✅* (partial / needs validation, "no direct coopmat2
 # decoder", "kernel selection depends on the device and driver"), warns that FWHT is disabled on
 # Intel's Windows drivers 32.0.101.8509 up to but not including 32.0.101.8860, and says of itself:
@@ -687,9 +768,13 @@ severity = "severe"
 # `enable_thinking` at its generation prompt and does not contain the string `reasoning_effort` at
 # all — unlike the 27B, whose template validates that field. So an effort word is inert here, while
 # the card says thinking "can use 3,000+ thinking tokens" before answering.
-condition = "a request turns thinking off with reasoning_effort instead of chat_template_kwargs.enable_thinking"
-symptom = "thinking continues, so the reply is longer than the request asked for rather than shorter"
-workaround = "send chat_template_kwargs {\"enable_thinking\": false}; the output floor below is sized for thinking staying on"
+# This is not a hypothetical: the app's client builds OpenAI chat requests and sends no
+# chat_template_kwargs anywhere (grep the crates for it), so its thinking switch for this pack is
+# `reasoning_effort: "none"` — which this template ignores. The condition is therefore always true
+# for this pack, and the reply budget is the only lever this build has on trace length.
+condition = "always, on this build: thinking is turned off with reasoning_effort, which this template does not read"
+symptom = "thinking continues whatever the picker says, so the reply is longer than the request asked for rather than shorter"
+workaround = "nothing this app can apply over its wire format: chat_template_kwargs {\"enable_thinking\": false} would work on a server the user starts themselves, and the output floor below is sized for thinking staying on"
 severity = "moderate"
 
 [[model.packs]]
@@ -709,18 +794,28 @@ preferred_for_backends = ["vulkan"]
 fallback_for_backends = ["metal", "cpu", "cuda", "rocm", "hip"]
 notes = "Card: \"the smallest file; use it where memory is tightest\" — 197 MB under PQ2_0."
 [[model.packs.caveats]]
-# 27B KNOWN_ISSUES.md (llama.cpp#192), for the same dense-trit kernels.
+# 27B KNOWN_ISSUES.md (llama.cpp#192), for the same dense-trit kernels. #192 is still open on the
+# tracker as of 2026-10-20.
 condition = "backend == vulkan and gpu == intel_arc"
 symptom = "hang after roughly 1,900 tokens (documented for the 27B's PTQ1_0 band)"
 workaround = "run on CPU for now"
 severity = "severe"
 [[model.packs.caveats]]
-# 27B KNOWN_ISSUES.md (llama.cpp#201): under 2 tok/s decode on Intel Arc in prebuilt binaries, fixed
-# in source for Xe2-class GPUs only.
-condition = "backend == vulkan"
-symptom = "slow decode on some Intel GPUs in prebuilt binaries"
-workaround = "build the prism branch from source"
+# 27B KNOWN_ISSUES.md (llama.cpp#201): under 2 tok/s on Intel Arc, "fixed in source" for Xe2-class
+# GPUs by #238. The pinned release contains #238, #252 and #291, so a source build is not the answer
+# here any more — but #201 is still open, and #270 records that Xe3 iGPUs reporting an 8-wide minimum
+# subgroup (Intel Arc 140T) do not get #238's fast path.
+condition = "backend == vulkan and gpu == intel"
+symptom = "PTQ1_0 decodes slower on Vulkan than on CUDA on the same Intel GPU; the pinned build's faster paths cover Xe2-class parts, not 8-wide-subgroup Xe3 iGPUs (#270)"
+workaround = "none to apply: the pin already carries #238/#252/#291. Expect the gap on the parts #270 names"
 severity = "moderate"
+[[model.packs.caveats]]
+# The RDNA2/HIP abort (#264, open) happens at load on the backend, so this pack carries it too: a
+# HIP host steered away from PQ2_0 still cannot load.
+condition = "backend == hip and gpu == rdna2 (gfx103x)"
+symptom = "the server aborts during load on a consumer RDNA2 card (RX 6000 series / gfx1030), whatever the packing"
+workaround = "none on HIP: install the Vulkan engine build"
+severity = "fatal"
 
 [[model.packs]]
 # The official group-64 band: MODEL-FORMATS.md's table puts group-64 Q2_0 under ggml type id 42, and

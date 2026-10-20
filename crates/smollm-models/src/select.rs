@@ -41,9 +41,6 @@ pub struct Recommendation {
     pub backend: Backend,
     pub arch: GpuArch,
     pub reports: Vec<PackReport>,
-    /// Set when the only way to satisfy the host is a from-source build of the `prism` branch,
-    /// because the needed fix is merged but not shipped in any binary release.
-    pub requires_source_build: bool,
     pub warnings: Vec<String>,
     /// True when the choice came from a user override rather than detection.
     pub forced: bool,
@@ -60,7 +57,6 @@ struct Score {
     reasons: Vec<String>,
     warnings: Vec<String>,
     viable: bool,
-    source_build: bool,
 }
 
 /// A pack already sitting in the weights directory beats the hardware preference. The scoring below
@@ -74,14 +70,13 @@ fn score_pack(pack: &Pack, host: &HostHardware, headroom: u64, installed: bool) 
         reasons: Vec::new(),
         warnings: Vec::new(),
         viable: true,
-        source_build: false,
     };
     let is_pq2 = pack.key == "PQ2_0";
     let is_ptq1 = pack.key == "PTQ1_0";
 
-    // Rule: the fork's PQ2_0 kernels exist for mac/cpu/cuda/rocm/hip only
-    // (common.sh pq2_0_ready_backend). Vulkan is excluded because PQ2_0 silently decodes on the CPU
-    // at under 2 tok/s in the current binary release (llama.cpp#238).
+    // Rule: the demo's registry (common.sh pq2_0_ready_backend) offers PQ2_0 on mac/cpu/cuda/rocm/hip
+    // only. Vulkan is left out of that list even though its PQ2_0 kernels shipped in
+    // prism-b10735-842b188 (llama.cpp#238), which the pinned release is newer than.
     if host.backend.pq2_0_kernels_ready() {
         if is_pq2 {
             s.value += 30;
@@ -103,20 +98,19 @@ fn score_pack(pack: &Pack, host: &HostHardware, headroom: u64, installed: bool) 
         if is_pq2 {
             s.value -= 120;
             s.warnings.push(
-                "PQ2_0 on Vulkan silently runs on the CPU at under 2 tok/s (llama.cpp#238): the GPU log is misleading, watch the CPU model buffer size. PTQ1_0 was selected instead."
-                    .into(),
+                "PQ2_0 stays off Vulkan on this app's own caution, not on a measured failure: the demo's registry excludes the backend, and BACKEND-SUPPORT.md marks the cell partial — kernel selection depends on the device and driver, and there is no coopmat2 decoder. The pinned build already carries llama.cpp#238's kernels, so PTQ1_0 is chosen here until a ternary run on a Vulkan part is evidence rather than a matrix cell.".into(),
             );
-            s.source_build = true;
         }
     }
 
-    // Rule: SYCL cannot load either ternary type at all ("unsupport data type", #235, fix still in
-    // review) — nothing is viable on it.
+    // Rule: SYCL is declined. Not because the kernels are missing — llama.cpp#235 merged ternary SYCL
+    // support into the pinned release — but because no SYCL asset is pinned in engines/lock.toml and
+    // upstream's own matrix marks that row partial with no end-to-end Intel validation.
     if host.backend == Backend::Sycl && pack.is_ternary_quant() {
         s.viable = false;
         s.value -= 1000;
         s.warnings
-            .push("The SYCL build cannot load PQ2_0 or PTQ1_0 (llama.cpp#235). Use the Vulkan build instead.".into());
+            .push("No SYCL engine is pinned for this app (llama.cpp#235 put the ternary kernels in the pinned build, but upstream leaves that row unvalidated). Use the Vulkan build instead.".into());
     }
 
     // Rule: model card throughput table — PTQ1_0 decodes faster on Ada-generation GPUs and L4,
@@ -147,9 +141,10 @@ fn score_pack(pack: &Pack, host: &HostHardware, headroom: u64, installed: bool) 
             .push("PQ2_0 is the pack benchmarked on Apple Silicon".into());
     }
 
-    // Rule: PQ2_0 segfaults while loading on AVX-512 CPUs (Zen 4/5 and some server/virtualised
-    // parts), even with all layers offloaded (#245). Merged to the prism branch, not in a binary
-    // release, so a prebuilt engine on such a host is exposed to it.
+    // Rule: PQ2_0 segfaulted while loading on AVX-512 CPUs (Zen 4/5 and some server/virtualised
+    // parts), even with all layers offloaded — llama.cpp#245. That commit is an ancestor of the
+    // pinned release, so the crash is not this app's symptom; what is left is that no PQ2_0 run on
+    // such a host has ever been measured here, and PTQ1_0 is the safer default until it is.
     if is_pq2
         && host.avx512
         && host.prebuilt_engine
@@ -160,10 +155,9 @@ fn score_pack(pack: &Pack, host: &HostHardware, headroom: u64, installed: bool) 
     {
         s.value -= 200;
         s.warnings.push(
-            "PQ2_0 segfaults while loading on AVX-512 CPUs with prebuilt binaries (llama.cpp#245). PTQ1_0 was selected; build the prism branch from source to use PQ2_0 here."
+            "This is a caution, not a known crash: llama.cpp#245's AVX-512 load segfault is fixed in the pinned build, but PQ2_0 has never been run on such a host here, so PTQ1_0 was selected while that stays unmeasured."
                 .into(),
         );
-        s.source_build = true;
     }
 
     // Rule: PQ2_0 output is garbled on Windows HIP with gfx1151 (Strix Halo) (#223); the workarounds
@@ -175,8 +169,10 @@ fn score_pack(pack: &Pack, host: &HostHardware, headroom: u64, installed: bool) 
         );
     }
 
-    // Rule: consumer x86 CPUs without the AVX2/AVX-VNNI kernels (#206, fixed in source) decode
-    // slowly on PQ2_0 in prebuilt binaries.
+    // Rule: upstream reported that prebuilt CPU builds skipped the fast AVX2/AVX-VNNI PQ2_0 kernels
+    // on consumer x86 (llama.cpp#206). That commit is an ancestor of the pinned release, so the
+    // kernels are here — what is left is that no CPU PQ2_0 run on such a part has been timed by this
+    // app, which is a read-the-log caution and not a claim of low throughput.
     if is_pq2
         && host.backend == Backend::Cpu
         && host.prebuilt_engine
@@ -184,7 +180,7 @@ fn score_pack(pack: &Pack, host: &HostHardware, headroom: u64, installed: bool) 
         && std::env::consts::OS == "linux"
     {
         s.warnings
-            .push("Prebuilt CPU builds miss the fast PQ2_0 kernels on consumer x86 (llama.cpp#206); expect low throughput.".into());
+            .push("llama.cpp#206's fast PQ2_0 CPU kernels are in the pinned build, but this app has not timed a consumer x86 CPU run: if decode is slow, read the llama-server log and try PTQ1_0.".into());
     }
 
     // Rule: memory-tight hosts take the smaller pack. This is the "1-bit / ~9x smaller" case.
@@ -297,7 +293,6 @@ pub fn recommend(
             }
         }
     }
-    let requires_source_build = scores.iter().any(|(_, sc)| sc.source_build);
     let chosen = &scores[chosen_idx].0;
     let reason = if forced {
         format!(
@@ -323,7 +318,6 @@ pub fn recommend(
         backend: host.backend,
         arch: host.arch,
         reports,
-        requires_source_build,
         warnings,
         forced,
     }
@@ -460,17 +454,25 @@ mod tests {
             &[],
         );
         assert_eq!(rec.selected_key, "PTQ1_0");
-        assert!(rec.requires_source_build);
         assert!(rec.warnings.iter().any(|w| w.contains("#238")));
+        // The pinned build carries #238's kernels, so this warning must not send the user off to
+        // build from source for a fix they already have.
+        assert!(
+            !rec.warnings.iter().any(|w| w.contains("source build")),
+            "{:?}",
+            rec.warnings
+        );
     }
 
     #[test]
-    fn avx512_host_with_prebuilt_engine_avoids_the_load_crash() {
+    fn avx512_host_stays_on_the_pack_this_app_has_measured() {
         let m = catalog().model("ternary-bonsai-2-27b").unwrap().clone();
         let mut h = host(Backend::Cpu, GpuArch::None);
         h.avx512 = true;
-        // Even with the crashing pack already downloaded: a documented segfault outranks "it is
-        // already here", which is the whole reason the bonus is a score and not a short-circuit.
+        // Even with PQ2_0 already downloaded: an unmeasured packing on an unmeasured CPU outranks
+        // "it is already here", which is the whole reason the bonus is a score and not a
+        // short-circuit. The #245 segfault itself is fixed in the pinned build, so the warning this
+        // asserts is the caution about never having run it here, not a claim that it will crash.
         let rec = recommend(
             &m,
             &h,

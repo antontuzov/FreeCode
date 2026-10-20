@@ -816,6 +816,40 @@ mod tests {
         assert!(report.is_allowed());
     }
 
+    /// The two halves of the caveat contract, on the pack a non-AVX-512 machine actually runs: a row
+    /// whose atoms are all evaluable is *decided* here, while a row naming a GPU class is shown as a
+    /// risk to check. Neither may be silently dropped, and neither may be presented as a fact about
+    /// a host this build cannot classify.
+    #[test]
+    fn evaluable_conditions_are_decided_while_gpu_rows_stay_risks() {
+        let (root, lock, model) = fixture();
+        let pack = model.packs.iter().find(|p| p.key == "PQ2_0").unwrap();
+        let mut engine = EngineBinary::from_target(&root, &lock, &lock.targets[0]).unwrap();
+        engine.installed = true;
+        let report = check(&request(
+            &root,
+            &lock,
+            &model,
+            pack,
+            Some(&header_with(vec!["prism.hadamard.".into()])),
+            Some(&engine),
+            Some(&host(Backend::Metal)),
+        ));
+        assert!(report.is_allowed());
+        // #264: the RDNA2/HIP abort names a GPU class, so it travels as an unchecked risk.
+        assert!(report
+            .warnings
+            .iter()
+            .any(|w| w.code == WarningCode::CaveatUnevaluated && w.message.contains("rdna2")));
+        // #245: the AVX-512 row's atoms are all evaluable and this host has no AVX-512, so its
+        // condition text must not reach the card at all.
+        assert!(
+            !report.warnings.iter().any(|w| w.message.contains("avx512")),
+            "{:?}",
+            report.warnings
+        );
+    }
+
     #[test]
     fn the_avx512_cpu_condition_only_fires_on_avx512_hosts() {
         let mut h = host(Backend::Cpu);

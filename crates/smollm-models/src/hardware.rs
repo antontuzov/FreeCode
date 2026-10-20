@@ -26,9 +26,12 @@ pub enum Backend {
 
 impl Backend {
     /// Verbatim registry from common.sh `pq2_0_ready_backend()`: `mac|cpu|cuda|rocm|hip|local`.
-    /// Vulkan is excluded because PQ2_0 silently decodes on the CPU there (llama.cpp#238, fixed in
-    /// source but not in a binary release), and SYCL is excluded because it cannot load either
-    /// ternary type at all (#235).
+    /// The two exclusions are that script's policy, not a statement about what the pinned build can
+    /// do. Vulkan is left out even though its PQ2_0 kernels shipped in `prism-b10735-842b188`
+    /// (llama.cpp#238, so they are in this pin), and SYCL is left out although llama.cpp#235 merged
+    /// ternary SYCL kernels — also in this pin. Both rows are still marked partial in
+    /// BACKEND-SUPPORT.md with "no new hardware tests were run for this table", which is why this app
+    /// keeps the demo's conservative list rather than the capability matrix.
     pub fn pq2_0_kernels_ready(self) -> bool {
         matches!(
             self,
@@ -70,8 +73,9 @@ impl Backend {
         }
     }
 
-    /// Backends the app ships an engine for. SYCL is deliberately absent: it cannot load either
-    /// ternary type (llama.cpp#235), so Intel GPUs are served by the Vulkan build instead.
+    /// Backends the app ships an engine for. SYCL is deliberately absent: no SYCL asset is pinned in
+    /// `engines/lock.toml`, and upstream marks its ternary rows partial with no end-to-end Intel
+    /// validation, so Intel GPUs are served by the Vulkan build instead.
     pub fn distributable() -> [Backend; 6] {
         [
             Self::Metal,
@@ -94,12 +98,15 @@ pub enum GpuArch {
     NvidiaHopper,
     NvidiaBlackwell,
     AppleSilicon,
+    /// Consumer RDNA2 (RX 6000 / gfx103x): the HIP build aborts during load (#264, open), which is
+    /// why the catalog's HIP caveats name this class.
     AmdRdna2,
     /// Strix Halo iGPU: PQ2_0 output is garbled on Windows HIP (#223).
     AmdGfx1151,
     AmdOther,
-    /// Intel Arc: Vulkan only (SYCL cannot load ternary), and PTQ1_0 can hang after ~1900 tokens
-    /// (#192).
+    /// Intel Arc: this app's Intel path is Vulkan, because no SYCL engine is pinned and upstream
+    /// leaves that row unvalidated (#235 put the kernels in the pinned build); and PTQ1_0 can still
+    /// hang after ~1900 tokens on Vulkan (#192, open).
     IntelArc,
     Unknown,
     None,
@@ -179,8 +186,10 @@ pub struct HostHardware {
     pub avx512: bool,
     /// True when the probe for the chosen backend failed and we fell back to CPU.
     pub degraded_to_cpu: bool,
-    /// A binary release is being used rather than a from-source build, so fixes merged to `prism`
-    /// but not yet shipped are unavailable.
+    /// A release binary is being used rather than a build the user made themselves, so anything
+    /// merged to `prism` after `pinned_tag` is unavailable. Note that the fixes this field was
+    /// written for are *in* the pinned release — see the header of `engines/lock.toml` — so rules
+    /// gated on it can only ever decline a pack this app has not measured, not dodge a missing fix.
     pub prebuilt_engine: bool,
 }
 
