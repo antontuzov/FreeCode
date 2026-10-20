@@ -2,9 +2,9 @@
  *
  * Three colour axes, all of which the Appearance page drives:
  *   data-theme-mode = light | dark
- *   data-accent     = forest | mint | bee | parchment | rain
+ *   data-accent     = forest | mint | bee | parchment | rain | ink | rose | slate
  *   data-surface    = glass | solid   (glass degrades to solid when blur is unavailable)
- * Every screen must render correctly in all 2 x 5 x 2 combinations, so components consume these
+ * Every screen must render correctly in all 2 x 8 x 2 combinations, so components consume these
  * variables exclusively and never mix a color literal with them.
  *
  * The second axis is a whole-window one, not a button colour: the grounds, rules and turn markers are
@@ -20,11 +20,15 @@
  *
  * The neutrals below are measured, not eyeballed: each one is a pixel read out of
  * docs/reference-ui with scripts/probe-reference-palette.swift (see the citation on the line).
- * The four original accent families are measured in light mode from the interface-style cards in
+ * The first four accent families are measured in light mode from the interface-style cards in
  * shot 02; their dark-mode counterparts are the same hues lifted for contrast on the near-black
  * green, and are marked as derived rather than claimed as measurements. The fifth, Rain, is measured
  * off the 2026-10-17 shots of the reference app's own cool chrome, and is the one family whose wash
  * and whose action colour are deliberately not the same hue — see its block.
+ * The last three — Ink, Rose, Slate — are the styles the user asked for on 2026-10-20 and no shot
+ * holds them, so they are not measurements: each is one hue at eight steps, solved for against the
+ * legibility floor `check-contrast.mjs` enforces, with its wash normalised to Mint's OKLab lightness
+ * so a style switch changes the colour of the window and not its brightness.
  */
 
 :root {

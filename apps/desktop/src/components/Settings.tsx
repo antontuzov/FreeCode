@@ -20,7 +20,7 @@ import { has, translate, type Locale } from "../i18n";
 import { formatBytes, formatMemory } from "../lib/bytes";
 import {
   ipc,
-  type Accent,
+  INTERFACE_STYLES,
   type DiagnosticsReport,
   type SettingsDoc,
   type StorageArea,
@@ -157,16 +157,8 @@ const CONTROLS: Record<Page, string[]> = {
   ],
 };
 
-const STYLES: { id: Accent; label: string }[] = [
-  { id: "forest", label: "Forest" },
-  { id: "mint", label: "Mint" },
-  { id: "bee", label: "Bee" },
-  { id: "parchment", label: "Parchment" },
-  { id: "rain", label: "Rain" },
-  { id: "ink", label: "Ink" },
-  { id: "rose", label: "Rose" },
-  { id: "slate", label: "Slate" },
-];
+// The list is the ipc module's, because the footer's Theme submenu sells exactly these eight.
+const STYLES = INTERFACE_STYLES;
 
 export function Settings({
   locale,

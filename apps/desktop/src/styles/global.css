@@ -654,6 +654,86 @@ select.field-input {
   border-color: var(--accent-line);
 }
 
+/* ---- the footer's identity menu ----
+ * Two columns side by side: the groups on the left, the live group's options on the right. The
+ * reference keeps the list visible while you choose inside one of it, so the submenu sits beside the
+ * groups rather than replacing them — and the pair is wider than the 264px column it opens from, which
+ * is why it is allowed to overhang the sidebar instead of folding inside it. */
+.menu-panel {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 31;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-bg);
+  backdrop-filter: var(--surface-blur);
+  box-shadow: var(--shadow);
+  animation: surface-enter var(--dur-quick) var(--ease-standard);
+}
+.menu-main {
+  width: 250px;
+  padding: var(--space-1) 0 var(--space-2);
+}
+/* Eight style names is the longest list the menu holds, and the panel is anchored to the window's
+ * bottom edge, so the column scrolls rather than reaching above the screen. */
+.menu-sub {
+  width: 190px;
+  max-height: 320px;
+  padding: var(--space-1) 0 var(--space-2);
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+}
+/* A menu row is a picker row: same hover, same quiet-until-touched colour, so the window has no third
+ * selection idiom. The group that is open takes the hover fill rather than the accent's, because the
+ * accent marks the value that is *stored* and that is what the tick in the other column says. */
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 6px var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--size-quiet);
+  text-align: left;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+.menu-row:hover,
+.menu-row:focus-visible,
+.menu-row[data-open] {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The live value, at the end of the row it belongs to: what the window is wearing right now, in the
+ * same words the option that would change it uses. */
+.menu-value {
+  flex-shrink: 0;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: var(--size-fine);
+}
+/* The style's own action colour, so the eight are chosen by sight. Its ring is the rule token rather
+ * than a shade of the fill, which is what keeps a pale swatch visible on a pale panel. */
+.menu-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.menu-sep {
+  height: 1px;
+  margin: var(--space-1) var(--space-3);
+  background: var(--border);
+}
+
 /* The four interface-style cards. Each paints the style it advertises through `--preview`, so the
  * row stays readable whichever accent is live. */
 /* Shot 02: the tinted preview box carries the selection outline, and the style name sits below it

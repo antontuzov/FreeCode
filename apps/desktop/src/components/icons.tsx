@@ -133,6 +133,11 @@ const PATHS = {
   // inside it, drawn on the same 24 grid as `review`'s box so the two read as one family. They are
   // not the same mark — the panel's square says "the run's changes", this says "this one is done".
   check: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8.3 12.2l2.6 2.6 5-5.4",
+  // The same mark with no circle, for a menu: the option that is live carries a tick in the gutter
+  // where the others carry air, and a ring around it would read as a selected row rather than as the
+  // value a control holds. `check` stays the step row's — a finished step is circled because the
+  // circle is what says *this one*, in a list where every row is equally highlighted.
+  tick: "M4.5 12.5l5 5L19.5 6.5",
   // The reference's outline glyph: one entry on a trunk, and the two it branches to. It is the tree a
   // diff folds to when the hunks are put away, so the boxes stand for the file names rather than for
   // files — `readFile`'s folded corner already owns that.

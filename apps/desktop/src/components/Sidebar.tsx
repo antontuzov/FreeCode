@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { MascotMark } from "./BrandMark";
+import { IdentityMenu } from "./IdentityMenu";
 import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
 import type { SessionSummary } from "../lib/ipc";
@@ -448,24 +449,16 @@ export function Sidebar({
       </div>
 
       <div className="flex items-center gap-1 border-t border-line p-[var(--space-2)]">
-        {/* The reference's footer is an identity row, and the two things it states are the two this
-            app can state truly: the face it wears — the mascot the window and the Dock carry, which
-            Appearance can pin — and the machine the run is on. It is drawn with the same class every
-            other row in this column uses, because a caption that looks like a button is the failure
-            this build already fixed once, and pressing it opens the page that names what is on this
-            machine. */}
-        <button
-          type="button"
-          className="nav-item min-w-0 flex-1"
-          aria-label={translate(locale, "sidebar.localUser")}
-          title={translate(locale, "sidebar.knowledgeAbout")}
-          onClick={() => actions.openKnowledge()}
-        >
-          <span aria-hidden className="grid size-7 shrink-0 place-items-center">
-            <MascotMark size={26} />
-          </span>
-          <span className="truncate">{translate(locale, "sidebar.localUser")}</span>
-        </button>
+        {/* The reference's footer is an identity row, and pressing it opens the menu rather than a
+            page: the six appearance decisions live one click from wherever the person is, and the two
+            rows that leave the menu — the catalog this machine holds, and the full Settings page — are
+            both destinations this build has. The face on the row is the mascot the window and the Dock
+            wear, which Appearance can pin. */}
+        <IdentityMenu
+          locale={locale}
+          onOpenSettings={onOpenSettings}
+          onOpenKnowledge={() => actions.openKnowledge()}
+        />
         <button
           type="button"
           aria-label={translate(locale, "sidebar.settings")}

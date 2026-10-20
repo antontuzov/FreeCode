@@ -115,6 +115,19 @@ export const ACCENTS = [
   "slate",
 ] as const;
 export type Accent = (typeof ACCENTS)[number];
+/** The same eight, with the name printed on each one's card. It lives beside `ACCENTS` rather than in
+ * the Appearance page because the footer's Theme submenu lists them too, and a menu that named a
+ * style the page does not sell — or sells one it cannot name — is the second list-by-hand bug. */
+export const INTERFACE_STYLES: { id: Accent; label: string }[] = [
+  { id: "forest", label: "Forest" },
+  { id: "mint", label: "Mint" },
+  { id: "bee", label: "Bee" },
+  { id: "parchment", label: "Parchment" },
+  { id: "rain", label: "Rain" },
+  { id: "ink", label: "Ink" },
+  { id: "rose", label: "Rose" },
+  { id: "slate", label: "Slate" },
+];
 export type Language = "en" | "zh";
 export type TerminalTheme = "follow_theme" | "light" | "dark" | "custom";
 export type FontStyle = "sans" | "serif" | "mono";
