@@ -115,21 +115,22 @@ mod tests {
         inv.tools.iter().find(|r| r.id == id).expect("tool")
     }
 
-    /// The four reads, the two workspace writes, the two web calls and the one command are what the
+    /// The four reads, the three workspace writes, the two web calls and the one command are what the
     /// Coding control actually offers today, and the page has to say so: a list that showed all thirty
     /// as live would describe an agent this build does not have.
     #[test]
     fn the_reads_the_writes_the_web_calls_and_the_shell_are_what_a_call_can_run_through() {
         let inv = inventory(&Settings::default());
-        assert_eq!(inv.runnable, 9, "{:?}", inv.tools);
+        assert_eq!(inv.runnable, 10, "{:?}", inv.tools);
         for id in ["read_file", "list_dir", "glob", "grep_search"] {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "auto", "{id}");
         }
-        // The two writes are offered, and they are auto under the default dial because the sandbox
-        // bounds them to the workspace — which is the whole reason they can be. What they may not do is
-        // reach a name outside it, and the create cannot take a file that is already there.
-        for id in ["write_file", "edit_file"] {
+        // The writes are offered, and they are auto under the default dial because the sandbox
+        // bounds them to the workspace — which is the whole reason they can be. What they may not do
+        // is reach a name outside it, the create cannot take a file that is already there, and the
+        // patch has to find every line it says it is changing.
+        for id in ["write_file", "edit_file", "apply_patch"] {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "auto", "{id}");
         }
@@ -143,9 +144,8 @@ mod tests {
         // refused rather than merely waiting for the dial.
         assert!(row(&inv, "terminal").runnable);
         assert_eq!(row(&inv, "terminal").decision, "blocked");
-        // And the calls that would take a file away, apply a patch, or run something else are still
-        // declared only.
-        for id in ["delete_path", "apply_patch", "run_tests"] {
+        // And the calls that would take a file away or run something else are still declared only.
+        for id in ["delete_path", "run_tests"] {
             assert!(!row(&inv, id).runnable, "{id}");
         }
     }

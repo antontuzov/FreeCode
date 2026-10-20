@@ -1,7 +1,7 @@
 //! The tool round: run what one answer asked for, and say in the transcript what each call did.
 //!
 //! This is the half of the agent loop that touches the machine. [`smollm_tools::EXECUTABLE`] names the
-//! calls that have executors — four reads of the workspace, two writes inside it, two that reach the
+//! calls that have executors — four reads of the workspace, three writes inside it, two that reach the
 //! internet, and one command; anything else the model asks for is answered with a notice that says so
 //! rather than run, which is why the loop can keep the "Local" badge true and the composer's Coding
 //! control can stay an opt-in. The web calls and the shell are only *offered* while their own switches
@@ -32,7 +32,7 @@ use smollm_core::approvals::{evaluate, ApprovalDecision, Pending};
 use smollm_core::events::{AgentEvent, NoticeCode, ToolOutcome};
 use smollm_core::transcript::{tool_batch, DiffStat, Hunk, StepKind, StepStatus, TranscriptStep};
 use smollm_llama::ToolCall;
-use smollm_tools::{execute, is_executable, SandboxPolicy};
+use smollm_tools::{execute, is_executable, patch_target, SandboxPolicy};
 
 /// One call's answer to the model, with the id the replay has to name.
 #[derive(Debug, Clone)]
@@ -123,10 +123,10 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
             call_id: call.id.clone(),
             result: format!(
                 "{name} is not available in this build: it reads nothing and changes nothing. The \
-                 tools it has are read_file, list_dir, glob, grep_search, write_file and edit_file, \
-                 which reach nothing outside this workspace; web_search and fetch_url, which reach the \
-                 internet only while the Privacy switch is on; and terminal, which runs only while \
-                 Terminal access is on."
+                 tools it has are read_file, list_dir, glob, grep_search, write_file, edit_file and \
+                 apply_patch, which reach nothing outside this workspace; web_search and fetch_url, \
+                 which reach the internet only while the Privacy switch is on; and terminal, which \
+                 runs only while Terminal access is on."
             ),
         };
     }
@@ -242,6 +242,16 @@ fn cleared(
 /// The row's label argument: the path or pattern the call worked on, shown as the chip beside
 /// "Read file" rather than buried in a sentence about it.
 fn subject(name: &str, arguments: &Value) -> String {
+    // A patch carries no path argument; the file it names is in the diff's own `+++` header.
+    if name == "apply_patch" {
+        if let Some(target) = arguments
+            .get("patch")
+            .and_then(Value::as_str)
+            .and_then(patch_target)
+        {
+            return target;
+        }
+    }
     ["path", "pattern", "file", "query", "url", "command"]
         .iter()
         .find_map(|key| arguments.get(*key).and_then(Value::as_str))
@@ -255,6 +265,7 @@ fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
         "grep_search" => StepKind::SearchContent,
         "edit_file" => StepKind::EditFile,
         "write_file" => StepKind::CreateFile,
+        "apply_patch" => StepKind::EditFile,
         "terminal" => StepKind::Terminal,
         "web_search" => StepKind::WebSearch,
         "fetch_url" => StepKind::WebReading,
@@ -302,6 +313,17 @@ mod tests {
             subject("terminal", &json!({ "command": "cargo test" })),
             "cargo test"
         );
+        // A patch has no path argument to read, so its subject comes from the file its own header
+        // names — a row called "apply_patch" would say nothing about what was written.
+        assert_eq!(
+            subject(
+                "apply_patch",
+                &json!({
+                    "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-one\n+ONE\n"
+                })
+            ),
+            "src/lib.rs"
+        );
     }
 
     #[test]
@@ -313,12 +335,21 @@ mod tests {
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(smollm_tools::EXECUTABLE.len(), 9);
-        // The writes are the rows the pill is built from, so neither can silently degrade to a generic
+        assert_eq!(smollm_tools::EXECUTABLE.len(), 10);
+        // The writes are the rows the pill is built from, so none can silently degrade to a generic
         // tool — and a create says create, because a row that reads "Edit file" over a file the run
         // invented would be the transcript contradicting the review under it.
         assert_eq!(
             started_row("edit_file", &json!({ "path": "a/b.rs" })).kind,
+            StepKind::EditFile
+        );
+        // A patch changes a file rather than creating one, so it opens the same row an edit does.
+        assert_eq!(
+            started_row(
+                "apply_patch",
+                &json!({ "patch": "--- a/a/b.rs\n+++ b/a/b.rs\n@@ -1 +1 @@\n-x\n+y\n" })
+            )
+            .kind,
             StepKind::EditFile
         );
         assert_eq!(

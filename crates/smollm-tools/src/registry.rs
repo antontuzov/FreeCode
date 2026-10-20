@@ -176,7 +176,10 @@ pub fn registry() -> Vec<ToolDescriptor> {
         ToolDescriptor {
             id: "apply_patch",
             title: "Apply patch",
-            description: "Apply a unified diff across several workspace files.",
+            description: "Apply one file's unified diff to a file that already exists in the \
+                workspace. Every hunk's original lines must match the file exactly, and every hunk \
+                is applied or nothing is written. One file per call: send a separate patch for each \
+                file. Creating, deleting and renaming a file are not this call.",
             permission: WorkspaceWrite,
             requires_network: false,
             input_schema: s(json!({ "patch": { "type": "string" } }), &["patch"]),
@@ -469,16 +472,18 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
         .collect()
 }
 
-/// The tools this build can actually run: the four workspace reads, the two writes, the command, and
-/// the two calls that reach the internet, whose executors live in [`crate::exec`] and [`crate::web`].
+/// The tools this build can actually run: the four workspace reads, the three writes, the command,
+/// and the two calls that reach the internet, whose executors live in [`crate::exec`] and
+/// [`crate::web`].
 ///
 /// The rest of the registry is a declaration with no verb behind it — a schema, a permission class,
-/// and nothing that touches the disk. Offering one of those would invite the model to ask for a patch
-/// or a delete that can only come back refused, so a run that carries tools hands over this list and
-/// nothing else. The two writes are on it because the sandbox bounds them to the workspace root — one
-/// makes a file that is not there, the other changes text it has to find first. The shell is on it
-/// because the user's Terminal access switch bounds it: the switch is off by default, and
-/// [`executable_specs`] does not hand it over until the switch says so.
+/// and nothing that touches the disk. Offering one of those would invite the model to ask for a
+/// delete that can only come back refused, so a run that carries tools hands over this list and
+/// nothing else. The writes are on it because the sandbox bounds them to the workspace root — one
+/// makes a file that is not there, one changes text it has to find first, and one applies a diff
+/// whose every old line it has to find first. The shell is on it because the user's Terminal access
+/// switch bounds it: the switch is off by default, and [`executable_specs`] does not hand it over
+/// until the switch says so.
 pub const EXECUTABLE: &[&str] = &[
     "read_file",
     "list_dir",
@@ -486,6 +491,7 @@ pub const EXECUTABLE: &[&str] = &[
     "grep_search",
     "write_file",
     "edit_file",
+    "apply_patch",
     "terminal",
     "web_search",
     "fetch_url",
@@ -557,8 +563,9 @@ pub fn summary(tool_id: &str, arguments: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or("<no words>")
         ),
-        // A write is named by its path alone: the whole contents of a new file, or both sides of an
-        // edit, would be quoted back at the person being asked to approve it.
+        // A write is named by its path alone: the whole contents of a new file, both sides of an
+        // edit, or every line of a patch would be quoted back at the person being asked to approve
+        // it.
         "write_file" | "edit_file" => format!(
             "Write {}",
             arguments
@@ -566,8 +573,36 @@ pub fn summary(tool_id: &str, arguments: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or("<no path>")
         ),
+        "apply_patch" => match arguments
+            .get("patch")
+            .and_then(Value::as_str)
+            .and_then(patch_target)
+        {
+            Some(path) => format!("Write {path}"),
+            None => "Apply a patch".to_string(),
+        },
         other => format!("{other} {arguments}"),
     }
+}
+
+/// The file a unified diff names as its target, for the row and the approval sentence that have to
+/// name *what* is about to be written without quoting every line of the patch. `None` when the text
+/// names no target or names `/dev/null` — a create or a delete, which this call does not perform.
+///
+/// The executor parses and validates the patch in full; this only reads the one header, so a patch
+/// this returns a name for can still be refused for every other reason.
+pub fn patch_target(patch: &str) -> Option<String> {
+    let rest = patch.lines().find_map(|line| line.strip_prefix("+++ "))?;
+    let path = rest.split('\t').next().unwrap_or(rest).trim();
+    let path = path
+        .strip_prefix('"')
+        .and_then(|quoted| quoted.strip_suffix('"'))
+        .unwrap_or(path);
+    let path = path
+        .strip_prefix("a/")
+        .or_else(|| path.strip_prefix("b/"))
+        .unwrap_or(path);
+    (!path.is_empty() && path != "/dev/null").then(|| path.to_string())
 }
 
 #[cfg(test)]
@@ -671,16 +706,37 @@ mod tests {
             ),
             "Write my-app/index.html"
         );
+        // A patch is many lines of text, and the person approving it is owed the file it lands on
+        // rather than the diff quoted back at them.
+        assert_eq!(
+            summary(
+                "apply_patch",
+                &json!({
+                    "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,1 +1,1 @@\n-old\n+new\n"
+                })
+            ),
+            "Write src/lib.rs"
+        );
+        assert_eq!(
+            summary("apply_patch", &json!({ "patch": "not a diff" })),
+            "Apply a patch"
+        );
+        // A header naming a create or a delete names no file this call can write.
+        assert_eq!(
+            patch_target("--- /dev/null\n+++ b/new.rs\n"),
+            Some("new.rs".to_string())
+        );
+        assert_eq!(patch_target("--- a/gone.rs\n+++ /dev/null\n"), None);
     }
 
     /// A tool with no executor must not be offered: the model would ask for a command and every round
     /// of that is a refusal the run has to explain.
     ///
     /// The other half of the rule is what the loop promises a run: everything offered either is a
-    /// workspace read the sandbox bounds, or is one of the two writes it bounds, or is a call that
+    /// workspace read the sandbox bounds, or is one of the three writes it bounds, or is a call that
     /// leaves the machine and therefore only stands on the list while the Privacy switch is on, or is
     /// the command — which stands on the list only while Terminal access is on, and is the one offer
-    /// the path sandbox does not bound. A delete or a patch appearing here would mean nothing at all
+    /// the path sandbox does not bound. A delete or a rename appearing here would mean nothing at all
     /// stands between a run and the machine.
     #[test]
     fn only_bounded_reads_the_writes_the_switchable_web_calls_and_the_shell_are_offered() {
@@ -700,8 +756,9 @@ mod tests {
             .collect();
         assert_eq!(
             writes,
-            vec!["write_file", "edit_file"],
-            "the offered writes are a create that cannot overwrite, and an edit that has to match"
+            vec!["write_file", "edit_file", "apply_patch"],
+            "the offered writes are a create that cannot overwrite, an edit that has to match, and \
+             a patch whose every old line has to match"
         );
         assert!(
             !is_executable("delete_path"),
