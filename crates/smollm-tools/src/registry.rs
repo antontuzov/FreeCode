@@ -176,10 +176,11 @@ pub fn registry() -> Vec<ToolDescriptor> {
         ToolDescriptor {
             id: "apply_patch",
             title: "Apply patch",
-            description: "Apply one file's unified diff to a file that already exists in the \
-                workspace. Every hunk's original lines must match the file exactly, and every hunk \
-                is applied or nothing is written. One file per call: send a separate patch for each \
-                file. Creating, deleting and renaming a file are not this call.",
+            description: "Apply a unified diff to files that already exist in the workspace. Each \
+                file's --- / +++ header opens its section, and one call may patch several files. \
+                Every hunk's original lines must match its file exactly, and every file is checked \
+                before anything is written: the whole patch applies or none of it does. Creating, \
+                deleting and renaming a file are not this call.",
             permission: WorkspaceWrite,
             requires_network: false,
             input_schema: s(json!({ "patch": { "type": "string" } }), &["patch"]),
@@ -587,12 +588,18 @@ pub fn summary(tool_id: &str, arguments: &Value) -> String {
 
 /// The file a unified diff names as its target, for the row and the approval sentence that have to
 /// name *what* is about to be written without quoting every line of the patch. `None` when the text
-/// names no target or names `/dev/null` — a create or a delete, which this call does not perform.
+/// names no target or names `/dev/null` — a create or a delete, which this call does not perform — and
+/// when it names more than one file, because a chip or a headline can hold only one name and the
+/// first header would be a fraction of the truth.
 ///
-/// The executor parses and validates the patch in full; this only reads the one header, so a patch
-/// this returns a name for can still be refused for every other reason.
+/// The executor parses and validates the patch in full; this only reads the headers, so a patch this
+/// returns a name for can still be refused for every other reason.
 pub fn patch_target(patch: &str) -> Option<String> {
-    let rest = patch.lines().find_map(|line| line.strip_prefix("+++ "))?;
+    let mut headers = patch.lines().filter_map(|line| line.strip_prefix("+++ "));
+    let rest = headers.next()?;
+    if headers.next().is_some() {
+        return None;
+    }
     let path = rest.split('\t').next().unwrap_or(rest).trim();
     let path = path
         .strip_prefix('"')
@@ -727,6 +734,15 @@ mod tests {
             Some("new.rs".to_string())
         );
         assert_eq!(patch_target("--- a/gone.rs\n+++ /dev/null\n"), None);
+        // Nor does a patch that names several files: one name in the chip would be whichever file
+        // the model happened to write first, and the approval would read as if that were all.
+        let several = "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-a\n+b\n\
+                       --- a/page.html\n+++ b/page.html\n@@ -1 +1 @@\n-c\n+d\n";
+        assert_eq!(patch_target(several), None);
+        assert_eq!(
+            summary("apply_patch", &json!({ "patch": several })),
+            "Apply a patch"
+        );
     }
 
     /// A tool with no executor must not be offered: the model would ask for a command and every round

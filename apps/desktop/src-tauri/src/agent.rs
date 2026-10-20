@@ -30,9 +30,11 @@ use tauri::{AppHandle, Emitter, Manager};
 use smollm_config::Settings;
 use smollm_core::approvals::{evaluate, ApprovalDecision, Pending};
 use smollm_core::events::{AgentEvent, NoticeCode, ToolOutcome};
-use smollm_core::transcript::{tool_batch, DiffStat, Hunk, StepKind, StepStatus, TranscriptStep};
+use smollm_core::transcript::{
+    tool_batch, DiffStat, EditedFile, Hunk, StepKind, StepStatus, TranscriptStep,
+};
 use smollm_llama::ToolCall;
-use smollm_tools::{execute, is_executable, patch_target, SandboxPolicy};
+use smollm_tools::{execute, is_executable, patch_target, Edit, SandboxPolicy};
 
 /// One call's answer to the model, with the id the replay has to name.
 #[derive(Debug, Clone)]
@@ -137,31 +139,17 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
     let staged = match cleared(name, &arguments, &call.id, settings, policy) {
         Ok(()) => match execute(name, &arguments, policy) {
             Ok(done) => {
-                // The executor's own report of what it wrote. Its path is workspace-relative by
+                // The executor's own report of what it wrote. Its paths are workspace-relative by
                 // construction, which is what makes two calls that named one file — one by its
                 // absolute path, one relatively — land on the same ledger row.
-                let staged = done.edit.map(|edit| {
-                    let diff = DiffStat {
-                        lines_added: edit.added,
-                        lines_removed: edit.removed,
-                        files_changed: 1,
-                    };
-                    (
-                        edit.path,
-                        diff,
-                        Hunk {
-                            at: edit.hunk_at,
-                            lines: edit.hunk,
-                        },
-                    )
-                });
+                let written = written(&done.edits);
                 (
                     ToolOutcome {
-                        diff: staged.as_ref().map(|(_, diff, _)| *diff),
+                        diff: written.as_ref().map(|written| written.diff),
                         ..ToolOutcome::ok(done.summary)
                     },
                     done.content,
-                    staged,
+                    written,
                 )
             }
             Err(why) => {
@@ -179,24 +167,29 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
             None,
         ),
     };
-    let (outcome, result, edited) = staged;
+    let (outcome, result, written) = staged;
     row.finish(if outcome.ok {
         StepStatus::Done
     } else {
         StepStatus::Blocked
     });
     let mut total = None;
-    // The executor reports a write's path and line counts together, so one tuple arm is the whole test
-    // that this call changed the tree.
-    if let Some((path, diff, hunk)) = edited {
-        row.diff = Some(diff);
-        row.detail = path.clone();
-        row.hunk = Some(hunk);
-        total = Some(app.state::<crate::chat::ChatState>().stage(
-            &path,
-            diff.lines_added,
-            diff.lines_removed,
-        ));
+    if let Some(written) = written {
+        row.diff = Some(written.diff);
+        row.detail = written.detail;
+        row.hunk = written.hunk;
+        for file in &written.files {
+            total = Some(app.state::<crate::chat::ChatState>().stage(
+                &file.path,
+                file.added,
+                file.removed,
+            ));
+        }
+        // The row lists its files only when one hunk cannot describe the call. A single block keeps
+        // the shape every filed row already has; two files or two places get the breakdown beside it.
+        if row.hunk.is_none() {
+            row.files = written.files;
+        }
     }
     emit(app, AgentEvent::ToolFinished { step: row, outcome });
     // The pill moves while the run is still going rather than arriving only once it ends: an agent
@@ -208,6 +201,59 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
         call_id: call.id.clone(),
         result,
     }
+}
+
+/// What a call wrote, as the row and the ledger need it: the call's totals, the chip when every
+/// change landed in one file, and the per-file list every write is staged from.
+struct Written {
+    diff: DiffStat,
+    detail: String,
+    hunk: Option<Hunk>,
+    files: Vec<EditedFile>,
+}
+
+/// `None` for a call that wrote nothing. A single file with a single hunk keeps the one-`hunk` form
+/// the row has always had; a file changed in two places, or a patch that named two files, is listed
+/// per file so the review can number each block against the file it belongs to.
+fn written(edits: &[Edit]) -> Option<Written> {
+    let first = edits.first()?;
+    let diff = DiffStat {
+        lines_added: edits.iter().map(|edit| edit.added).sum(),
+        lines_removed: edits.iter().map(|edit| edit.removed).sum(),
+        files_changed: edits.len() as u32,
+    };
+    let files: Vec<EditedFile> = edits
+        .iter()
+        .map(|edit| EditedFile {
+            path: edit.path.clone(),
+            added: edit.added,
+            removed: edit.removed,
+            hunks: edit
+                .hunks
+                .iter()
+                .map(|hunk| Hunk {
+                    at: hunk.at,
+                    lines: hunk.lines.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+    let single = (edits.len() == 1 && first.hunks.len() == 1).then(|| Hunk {
+        at: first.hunks[0].at,
+        lines: first.hunks[0].lines.clone(),
+    });
+    Some(Written {
+        diff,
+        // A patch that named several files has no one path to show; the summary and the list say
+        // what it changed, where a chip naming whichever file came first would say only part of it.
+        detail: if edits.len() == 1 {
+            first.path.clone()
+        } else {
+            String::new()
+        },
+        hunk: single,
+        files,
+    })
 }
 
 /// Approval, then the sandbox. `Ok(())` is the only answer that lets a read happen, and everything
@@ -242,15 +288,15 @@ fn cleared(
 /// The row's label argument: the path or pattern the call worked on, shown as the chip beside
 /// "Read file" rather than buried in a sentence about it.
 fn subject(name: &str, arguments: &Value) -> String {
-    // A patch carries no path argument; the file it names is in the diff's own `+++` header.
+    // A patch carries no path argument; the file it names is in the diff's own `+++` header. A patch
+    // that names several files has no single file to show, so the row is labelled by the tool alone
+    // and the summary carries the count.
     if name == "apply_patch" {
-        if let Some(target) = arguments
+        return arguments
             .get("patch")
             .and_then(Value::as_str)
             .and_then(patch_target)
-        {
-            return target;
-        }
+            .unwrap_or_default();
     }
     ["path", "pattern", "file", "query", "url", "command"]
         .iter()
@@ -324,6 +370,67 @@ mod tests {
             ),
             "src/lib.rs"
         );
+        // A patch that names several files has no one path to show; the row is labelled by the tool
+        // and the summary says how many files changed.
+        assert_eq!(
+            subject(
+                "apply_patch",
+                &json!({
+                    "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-one\n+ONE\n\
+                              --- a/page.html\n+++ b/page.html\n@@ -1 +1 @@\n-a\n+b\n"
+                })
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn a_write_that_spanned_two_files_is_reported_per_file() {
+        use smollm_tools::exec::EditHunk;
+        let edits = vec![
+            Edit {
+                path: "a.rs".into(),
+                added: 2,
+                removed: 1,
+                occurrences: 1,
+                hunks: vec![EditHunk {
+                    at: 1,
+                    lines: "+x".into(),
+                }],
+            },
+            Edit {
+                path: "b.rs".into(),
+                added: 3,
+                removed: 0,
+                occurrences: 2,
+                hunks: vec![
+                    EditHunk {
+                        at: 4,
+                        lines: "+y".into(),
+                    },
+                    EditHunk {
+                        at: 9,
+                        lines: "+z".into(),
+                    },
+                ],
+            },
+        ];
+        let row = written(&edits).expect("two writes");
+        assert_eq!(row.diff.files_changed, 2);
+        assert_eq!((row.diff.lines_added, row.diff.lines_removed), (5, 1));
+        assert_eq!(row.detail, "", "no single path can stand in a chip");
+        assert!(row.hunk.is_none(), "one hunk cannot describe two files");
+        assert_eq!(row.files.len(), 2);
+        assert_eq!(row.files[1].path, "b.rs");
+        assert_eq!(row.files[1].hunks.len(), 2);
+
+        // One file and one block is the shape every filed edit row already has.
+        let single = written(&edits[..1]).expect("one write");
+        assert_eq!(single.detail, "a.rs");
+        assert_eq!(single.hunk.expect("one hunk").at, 1);
+        assert!(single.files.len() == 1);
+        assert_eq!(single.diff.files_changed, 1);
+        assert!(written(&[]).is_none());
     }
 
     #[test]

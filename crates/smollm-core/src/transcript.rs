@@ -174,6 +174,22 @@ pub struct Hunk {
     pub lines: String,
 }
 
+/// One file a call changed: the path the sandbox settled on, the lines the call cost that file, and
+/// each block in the order it applied.
+///
+/// A row splits like this when the call wrote more than one file, or wrote one file in more than one
+/// place — a single [`Hunk`] describes one block, and folding several into it would put a line in the
+/// review that is not in the file. A row that made one change in one file keeps its `hunk` instead,
+/// so its shape, and every row filed before this field existed, reads as it always has.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditedFile {
+    pub path: String,
+    pub added: u32,
+    pub removed: u32,
+    pub hunks: Vec<Hunk>,
+}
+
 /// One transcript row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -194,6 +210,10 @@ pub struct TranscriptStep {
     /// for it.
     #[serde(default)]
     pub hunk: Option<Hunk>,
+    /// Every file the call changed, when there is more than one block to report. The row's `diff` is
+    /// the sum over these; `hunk` remains the single-block form. Empty on a row that wrote nothing.
+    #[serde(default)]
+    pub files: Vec<EditedFile>,
     /// Set for tool rows: the registry id whose `title` the UI shows when there is no localized
     /// label.
     #[serde(default)]
@@ -211,6 +231,7 @@ impl TranscriptStep {
             detail: String::new(),
             diff: None,
             hunk: None,
+            files: Vec::new(),
             tool_id: None,
             // Reasoning rows and finished batches start collapsed, as in the reference shot.
             collapsed_by_default: matches!(kind, StepKind::Processed | StepKind::ToolBatch),

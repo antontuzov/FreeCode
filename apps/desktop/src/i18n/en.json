@@ -426,6 +426,7 @@
   "transcript.summary.fileCreated": "1 file created",
   "transcript.summary.hunkApplied": "1 hunk applied",
   "transcript.summary.hunksApplied": "{{count}} hunks applied",
+  "transcript.summary.filesPatched": "{{count}} files patched",
   "transcript.summary.terminalExit": "exit {{code}}",
   "transcript.summary.terminalTimedOut": "stopped after {{seconds}} s",
   "transcript.summary.terminalStopped": "stopped by a signal",

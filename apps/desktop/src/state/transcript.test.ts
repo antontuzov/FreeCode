@@ -234,6 +234,57 @@ describe("derivations off the rows", () => {
     ]);
   });
 
+  it("folds a call that changed several files per file instead of by its total", () => {
+    const patch: Row[] = [
+      {
+        id: "p1",
+        kind: "editFile",
+        diff: { added: 7, removed: 2 },
+        files: [
+          {
+            path: "a.rs",
+            added: 4,
+            removed: 0,
+            hunks: [
+              { at: 2, lines: "+x" },
+              { at: 9, lines: "+y" },
+            ],
+          },
+          { path: "b.rs", added: 3, removed: 2, hunks: [{ at: 1, lines: "-b\n+B" }] },
+        ],
+      },
+      {
+        id: "p2",
+        kind: "editFile",
+        subject: "a.rs",
+        diff: { added: 1, removed: 1 },
+        hunk: { at: 20, lines: "-z\n+Z" },
+      },
+    ];
+    // The patch row's total is 7/2; folding it in beside the per-file entries would count every
+    // changed line twice.
+    expect(changedFiles(patch)).toEqual([
+      {
+        path: "a.rs",
+        added: 5,
+        removed: 1,
+        hunks: [
+          { at: 2, lines: "+x" },
+          { at: 9, lines: "+y" },
+          { at: 20, lines: "-z\n+Z" },
+        ],
+        created: false,
+      },
+      {
+        path: "b.rs",
+        added: 3,
+        removed: 2,
+        hunks: [{ at: 1, lines: "-b\n+B" }],
+        created: false,
+      },
+    ]);
+  });
+
   it("reports only the addresses a call actually read, one per address, in first-seen order", () => {
     const read: Row[] = [
       { id: "w1", kind: "webReading", subject: "https://a", status: "ok" },
@@ -400,6 +451,36 @@ describe("the reducer", () => {
     expect(header).toMatchObject({ kind: "toolBatch", status: "ok", collapsed: true });
     expect(rows()).toHaveLength(1);
     expect(!isTurn(header) && header.children?.map((child) => child.id)).toEqual(["a", "b"]);
+  });
+
+  it("carries a call's per-file breakdown onto its row", () => {
+    const files = [
+      { path: "a.rs", added: 1, removed: 1, hunks: [{ at: 2, lines: "-x\n+X" }] },
+      { path: "b.rs", added: 1, removed: 0, hunks: [{ at: 5, lines: "+y" }] },
+    ];
+    apply({
+      type: "toolFinished",
+      step: hostStep({
+        id: "p1",
+        kind: "editFile",
+        status: "done",
+        diff: { linesAdded: 2, linesRemoved: 1, filesChanged: 2 },
+        files,
+      }),
+      outcome: {
+        ok: true,
+        summary: "2 files patched",
+        summaryKey: "transcript.summary.filesPatched",
+        summaryParams: { count: 2 },
+        diff: { linesAdded: 2, linesRemoved: 1, filesChanged: 2 },
+      },
+    });
+    expect(at(rows(), 0)).toMatchObject({
+      id: "p1",
+      detailKey: "transcript.summary.filesPatched",
+      diff: { added: 2, removed: 1 },
+      files,
+    });
   });
 
   it("leaves a notice where it stands rather than folding it into the batch that followed", () => {

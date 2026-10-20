@@ -79,6 +79,13 @@ export type DiffStat = { added: number; removed: number };
 export type Hunk = { at: number; lines: string };
 
 /**
+ * `smollm_core::transcript::EditedFile`: one file a call changed, with the lines the call cost it and
+ * each block it wrote there. A row carries a list of these when one [`Hunk`] cannot describe the call:
+ * a patch that named two files, or one file changed in two places.
+ */
+export type EditedFile = { path: string; added: number; removed: number; hunks: Hunk[] };
+
+/**
  * What a run has changed so far, as the pill above the composer reads it. `files` is the host's count
  * of *distinct* paths, not the number of edit rows: a model that fixes one file four times changed one
  * file, and saying "4 files" would be a number nobody can check.
@@ -116,6 +123,12 @@ export type Step = {
    * ones.
    */
   hunk?: Hunk;
+  /**
+   * A call that made more than one change lists its files here, one entry per file with that file's
+   * own hunks. A single change in a single file stays in [`hunk`]; the host sends one shape or the
+   * other, never both. The review folds these per path exactly as it folds rows.
+   */
+  files?: EditedFile[];
   /** For `toolBatch` and `running`: the rows nested underneath the header. */
   children?: Step[];
   /**
@@ -337,6 +350,7 @@ function hostRow(step: HostStep, summary?: ToolSummary): Step {
     detailParams: summary?.params,
     diff: step.diff ? { added: step.diff.linesAdded, removed: step.diff.linesRemoved } : undefined,
     hunk: step.hunk ?? undefined,
+    files: step.files?.length ? step.files : undefined,
     collapsed: step.collapsedByDefault || undefined,
     status: hostStatus(step.status),
   };
@@ -448,29 +462,37 @@ function everyStep(rows: Row[]): Step[] {
  * as one it touched, so a run that only created a page still shows up here.
  *
  * Each entry also carries the file's hunks, in the order the run wrote them: two edits to one file
- * make two blocks of diff lines under one path rather than a merge no diff tool could produce. And each
- * says whether the run *made* the file, which a create row can only be reporting about a path that was
- * free — the executor refuses one that already stands — so the mark is the host's fact, not a guess the
- * panel makes from a hunk that happens to hold no removed lines.
+ * make two blocks of diff lines under one path rather than a merge no diff tool could produce. A row
+ * that changed several files at once lists them in `files`, and its `diff` is their total — so the
+ * list is folded in place of the row's number, not beside it. And each entry says whether the run
+ * *made* the file, which a create row can only be reporting about a path that was free — the executor
+ * refuses one that already stands — so the mark is the host's fact, not a guess the panel makes from a
+ * hunk that happens to hold no removed lines.
  */
 export function changedFiles(
   rows: Row[],
 ): (DiffStat & { path: string; hunks: Hunk[]; created: boolean })[] {
   const byPath = new Map<string, { diff: DiffStat; hunks: Hunk[]; created: boolean }>();
-  for (const row of everyStep(rows)) {
-    if ((row.kind !== "editFile" && row.kind !== "createFile") || !row.diff || !row.subject) {
-      continue;
-    }
-    const path = row.subject;
+  const add = (path: string, diff: DiffStat, hunks: Hunk[], created: boolean) => {
     const seen = byPath.get(path);
     byPath.set(path, {
       diff: {
-        added: (seen?.diff.added ?? 0) + row.diff.added,
-        removed: (seen?.diff.removed ?? 0) + row.diff.removed,
+        added: (seen?.diff.added ?? 0) + diff.added,
+        removed: (seen?.diff.removed ?? 0) + diff.removed,
       },
-      hunks: row.hunk ? [...(seen?.hunks ?? []), row.hunk] : (seen?.hunks ?? []),
-      created: (seen?.created ?? false) || row.kind === "createFile",
+      hunks: [...(seen?.hunks ?? []), ...hunks],
+      created: (seen?.created ?? false) || created,
     });
+  };
+  for (const row of everyStep(rows)) {
+    if (row.kind !== "editFile" && row.kind !== "createFile") continue;
+    const created = row.kind === "createFile";
+    if (row.files?.length) {
+      for (const file of row.files) add(file.path, file, file.hunks, created);
+      continue;
+    }
+    if (!row.diff || !row.subject) continue;
+    add(row.subject, row.diff, row.hunk ? [row.hunk] : [], created);
   }
   return [...byPath].map(([path, entry]) => ({
     path,

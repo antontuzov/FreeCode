@@ -426,6 +426,7 @@
   "transcript.summary.fileCreated": "создан 1 файл",
   "transcript.summary.hunkApplied": "применён 1 фрагмент",
   "transcript.summary.hunksApplied": "применено фрагментов: {{count}}",
+  "transcript.summary.filesPatched": "исправлено файлов: {{count}}",
   "transcript.summary.terminalExit": "код {{code}}",
   "transcript.summary.terminalTimedOut": "остановлена через {{seconds}} с",
   "transcript.summary.terminalStopped": "остановлена сигналом",

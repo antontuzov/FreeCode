@@ -281,6 +281,13 @@ export type HostDiff = {
 export type HostHunk = { at: number; lines: string };
 
 /**
+ * `smollm_core::transcript::EditedFile`: one file a call changed, with the lines the call cost it
+ * and each block it wrote there. A row sends a list of these when one hunk cannot describe the call
+ * — several files, or one file changed in several places.
+ */
+export type HostEditedFile = { path: string; added: number; removed: number; hunks: HostHunk[] };
+
+/**
  * `smollm_core::transcript::TranscriptStep`: one row as the host declares it.
  *
  * The host owns which row exists and what it measured; the catalog owns the words around it. `params`
@@ -303,6 +310,12 @@ export type HostStep = {
    * a window draws cannot describe a different change than the answer that asked for it.
    */
   hunk: HostHunk | null;
+  /**
+   * `smollm_core::transcript::TranscriptStep::files`: every file the call changed, when there is
+   * more than one block to report. `diff` is their total and `detail` is empty when no single path
+   * can stand in the chip. Absent on a single-hunk row, which keeps the `hunk` shape.
+   */
+  files?: HostEditedFile[];
   /** The registry id, which is what tells a generic "Ran tool" row which tool it ran. */
   toolId: string | null;
   collapsedByDefault: boolean;

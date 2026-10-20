@@ -78,7 +78,7 @@ const SKIP_DIRS: &[&str] = &[
     "__pycache__",
 ];
 
-/// What one call changed on disk. Only the three writes produce one, and the counts are the
+/// What one call changed on disk, per file. Only the three writes produce one, and the counts are the
 /// replacement's own arithmetic rather than a diff engine's: the lines it took out and the lines it
 /// put back, with the lines it only passed over cancelled from both sides. For a call that swaps one
 /// block of text for another that is exactly what a diff reports for the hunk, not an approximation of
@@ -91,18 +91,24 @@ pub struct Edit {
     pub path: String,
     pub added: u32,
     pub removed: u32,
-    /// How many copies of `old_string` were replaced, or — for a patch — how many hunks it applied.
-    /// More than one on an edit only when the call asked for `replace_all`, which is the difference
-    /// between "fixed a line" and "renamed a symbol".
+    /// How many copies of `old_string` were replaced, or — for a patch — how many hunks it applied to
+    /// this file. More than one on an edit only when the call asked for `replace_all`, which is the
+    /// difference between "fixed a line" and "renamed a symbol".
     pub occurrences: u32,
-    /// The change as diff lines — `+`, `−`, and the two lines of context on either side — without the
-    /// caption the model's copy carries, because the file it names is already this edit's `path`.
-    /// The same text the tool result quotes, so the review a window draws and the answer that wrote it
-    /// cannot disagree about what changed.
-    pub hunk: String,
-    /// The line [`Edit::hunk`] opens on, 1-based, in the file as it stood before the write. The window
-    /// needs it to number a diff's gutter; the model's copy gets it in the caption instead.
-    pub hunk_at: u32,
+    /// Each block of the change as diff lines — `+`, `−`, and the two lines of context on either side
+    /// — without the caption the model's copy carries, because the file it names is already this
+    /// edit's `path`. Every hunk is kept rather than folded into one preview, so the review can number
+    /// each against the line it opens on. The same text the tool result quotes, so the review a window
+    /// draws and the answer that wrote it cannot disagree about what changed.
+    pub hunks: Vec<EditHunk>,
+}
+
+/// One block of a file's change: the diff lines the row's review draws, and the line the block opens
+/// on in the file as it stood before the write.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditHunk {
+    pub at: u32,
+    pub lines: String,
 }
 
 /// Which of the app's own sentences a row's one-line result is.
@@ -165,6 +171,8 @@ pub enum SummaryKey {
     HunkApplied,
     /// `{{count}}` hunks applied, in one or more places in the same file.
     HunksApplied,
+    /// `{{count}}` files changed by one patch.
+    FilesPatched,
     /// A command that finished, with `{{code}}` as its exit status.
     TerminalExit,
     /// A command stopped by its timeout after `{{seconds}}` seconds.
@@ -176,7 +184,7 @@ pub enum SummaryKey {
 impl SummaryKey {
     /// Every key the executors can answer with, so a catalog entry no executor reaches is named as the
     /// dead copy it is.
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 27] = [
         Self::Empty,
         Self::Lines,
         Self::NoRange,
@@ -200,6 +208,7 @@ impl SummaryKey {
         Self::FileCreated,
         Self::HunkApplied,
         Self::HunksApplied,
+        Self::FilesPatched,
         Self::TerminalExit,
         Self::TerminalTimedOut,
         Self::TerminalStopped,
@@ -230,6 +239,7 @@ impl SummaryKey {
             Self::FileCreated => "transcript.summary.fileCreated",
             Self::HunkApplied => "transcript.summary.hunkApplied",
             Self::HunksApplied => "transcript.summary.hunksApplied",
+            Self::FilesPatched => "transcript.summary.filesPatched",
             Self::TerminalExit => "transcript.summary.terminalExit",
             Self::TerminalTimedOut => "transcript.summary.terminalTimedOut",
             Self::TerminalStopped => "transcript.summary.terminalStopped",
@@ -243,7 +253,8 @@ impl SummaryKey {
             | Self::MatchesInFile
             | Self::CopiesReplaced
             | Self::Results
-            | Self::HunksApplied => &["count"],
+            | Self::HunksApplied
+            | Self::FilesPatched => &["count"],
             Self::NoRange => &["from", "to"],
             Self::LineTooLong => &["line"],
             Self::LineRange | Self::LineRangeCapped => &["from", "to", "total"],
@@ -323,9 +334,10 @@ pub struct Executed {
     /// The tool result, as the model sees it. Never longer than [`MAX_RESULT_BYTES`] plus the sentence
     /// that says what was left out.
     pub content: String,
-    /// The file this call changed, for the run's diff. `None` for every read, which is what keeps a
-    /// "+0 −0" pill off a run that touched nothing.
-    pub edit: Option<Edit>,
+    /// The files this call changed, for the run's diff and the review. Empty for every read, which is
+    /// what keeps a "+0 −0" pill off a run that touched nothing. One entry for `edit_file` and
+    /// `write_file`, and one per file for a patch that names several.
+    pub edits: Vec<Edit>,
 }
 
 /// Run one call. The single entry point: authorization, the executable gate, then the work.
@@ -381,7 +393,7 @@ fn read_file(
         return Ok(Executed {
             summary: Summary::said(SummaryKey::Empty, json!({}), "empty"),
             content: format!("{label} is empty."),
-            edit: None,
+            edits: Vec::new(),
         });
     }
 
@@ -397,7 +409,7 @@ fn read_file(
                 "Nothing to show: {label} ends at line {total} and the range asked for starts past line \
                  {total}."
             ),
-            edit: None,
+            edits: Vec::new(),
         });
     }
     let to = number_arg(arguments, "end_line")
@@ -413,7 +425,7 @@ fn read_file(
             content: format!(
                 "Nothing to show: the range ends at line {to}, before it starts at line {from}."
             ),
-            edit: None,
+            edits: Vec::new(),
         });
     }
 
@@ -445,7 +457,7 @@ fn read_file(
                  it is shown. Search for the words instead of reading the line.",
                 MAX_RESULT_BYTES
             ),
-            edit: None,
+            edits: Vec::new(),
         });
     }
     let whole = from == 1 && last >= total;
@@ -465,7 +477,7 @@ fn read_file(
                 )
             },
             content: kept.join("\n"),
-            edit: None,
+            edits: Vec::new(),
         });
     };
     Ok(Executed {
@@ -480,7 +492,7 @@ fn read_file(
             kept.join("\n"),
             MAX_RESULT_BYTES
         ),
-        edit: None,
+        edits: Vec::new(),
     })
 }
 
@@ -550,7 +562,7 @@ fn list_dir(tool: &str, arguments: &Value, policy: &SandboxPolicy) -> Result<Exe
         } else {
             lines.join("\n")
         },
-        edit: None,
+        edits: Vec::new(),
     })
 }
 
@@ -613,7 +625,7 @@ fn find_files(
         } else {
             with_skips(content, skipped)
         },
-        edit: None,
+        edits: Vec::new(),
     })
 }
 
@@ -714,7 +726,7 @@ fn search_content(
         } else {
             with_skips(content, skipped)
         },
-        edit: None,
+        edits: Vec::new(),
     })
 }
 
@@ -782,8 +794,10 @@ fn edit_file(
         added: (added * times) as u32,
         removed: (removed * times) as u32,
         occurrences: times as u32,
-        hunk: hunk.clone(),
-        hunk_at: at as u32,
+        hunks: vec![EditHunk {
+            at: at as u32,
+            lines: hunk.clone(),
+        }],
     };
     let summary = if times > 1 {
         Summary::said(
@@ -800,7 +814,7 @@ fn edit_file(
             edit.path, edit.added, edit.removed, summary.text,
         ),
         summary,
-        edit: Some(edit),
+        edits: vec![edit],
     })
 }
 
@@ -911,7 +925,7 @@ fn terminal(tool: &str, arguments: &Value, policy: &SandboxPolicy) -> Result<Exe
     Ok(Executed {
         summary,
         content,
-        edit: None,
+        edits: Vec::new(),
     })
 }
 
@@ -1051,7 +1065,7 @@ fn web_search(tool: &str, arguments: &Value) -> Result<Executed, ToolsError> {
                 "Nothing was found for “{query}”. Fewer, plainer words find more: an article is titled \
                  for one thing, not for a whole question."
             ),
-            edit: None,
+            edits: Vec::new(),
         });
     }
     let list = hits
@@ -1075,7 +1089,7 @@ fn web_search(tool: &str, arguments: &Value) -> Result<Executed, ToolsError> {
             "{n} result{plural} for “{query}”:\n\n{list}\n\nRead one in full with fetch_url and the \
              address under it, and name that address in the answer.",
         ),
-        edit: None,
+        edits: Vec::new(),
     })
 }
 
@@ -1114,7 +1128,7 @@ fn fetch_url(tool: &str, arguments: &Value) -> Result<Executed, ToolsError> {
             Summary::verbatim(title.clone())
         },
         content: format!("{title} — {url}\n\n{text}"),
-        edit: None,
+        edits: Vec::new(),
     })
 }
 
@@ -1175,23 +1189,25 @@ fn write_file(
         added: added as u32,
         removed: 0,
         occurrences: 1,
-        hunk: fit(contents.lines().map(|line| format!("+{line}")).collect()),
-        hunk_at: 1,
+        hunks: vec![EditHunk {
+            at: 1,
+            lines: fit(contents.lines().map(|line| format!("+{line}")).collect()),
+        }],
     };
     if added == 0 {
         return Ok(Executed {
             summary: Summary::said(SummaryKey::FileCreated, json!({}), "1 file created"),
             content: format!("Created {}: an empty file.", edit.path),
-            edit: Some(edit),
+            edits: vec![edit],
         });
     }
     Ok(Executed {
         summary: Summary::said(SummaryKey::FileCreated, json!({}), "1 file created"),
         content: format!(
             "Created {} (+{} −{}): new file\n{label}:\n{}",
-            edit.path, edit.added, edit.removed, edit.hunk
+            edit.path, edit.added, edit.removed, edit.hunks[0].lines
         ),
-        edit: Some(edit),
+        edits: vec![edit],
     })
 }
 
@@ -1224,7 +1240,7 @@ impl PatchHunk {
     }
 
     /// The line the change opens on, 1-based in the file as it stood before the patch — the number
-    /// [`Edit::hunk_at`] carries and the review's gutter counts back from.
+    /// [`EditHunk::at`] carries and the review's gutter counts back from.
     fn opening_line(&self) -> usize {
         if self.old_count == 0 {
             return self.old_start + 1;
@@ -1332,15 +1348,16 @@ fn render_source(source: &Source, lines: &[String], final_newline: bool) -> Stri
     out
 }
 
-/// Parse a unified diff. One file per call, every hunk's numbers checked against its own body, and
-/// every line the body is not a diff line refused rather than guessed at.
+/// Parse a unified diff. Every hunk's numbers checked against its own body, and every line the body
+/// is not a diff line refused rather than guessed at. A diff may name several files: each `---`/`+++`
+/// pair opens a section of its own, and a path may appear in only one section.
 ///
 /// The tolerated headers are the ones `git diff` and `diff -u` actually write: an optional
 /// `diff --git`, `index` and mode lines, a tab-separated timestamp after either name, quoted names,
 /// and the `a/`/`b/` prefixes. Everything that would change the shape of the call — a rename, a
 /// copy, a binary patch, a create or a delete — is refused with the reason, because applying a
 /// different change than the one asked for is worse than applying none.
-fn parse_patch(tool: &str, raw: &str) -> Result<ParsedPatch, ToolsError> {
+fn parse_patch(tool: &str, raw: &str) -> Result<Vec<ParsedPatch>, ToolsError> {
     let refuse = |reason: String| ToolsError::InvalidArguments {
         tool: tool.to_string(),
         reason,
@@ -1362,22 +1379,19 @@ fn parse_patch(tool: &str, raw: &str) -> Result<ParsedPatch, ToolsError> {
         lines.pop();
     }
 
+    let mut files: Vec<ParsedPatch> = Vec::new();
     let mut target: Option<String> = None;
     let mut hunks: Vec<PatchHunk> = Vec::new();
     let mut i = 0usize;
     while i < lines.len() {
         let line = lines[i];
         if line.starts_with("diff --git ") {
-            if target.is_some() {
-                return Err(refuse(more_than_one_file(target.as_deref().unwrap_or(""))));
-            }
+            close_section(tool, &mut files, &mut target, &mut hunks)?;
             i += 1;
             continue;
         }
         if let Some(rest) = line.strip_prefix("--- ") {
-            if let Some(first) = &target {
-                return Err(refuse(more_than_one_file(first)));
-            }
+            close_section(tool, &mut files, &mut target, &mut hunks)?;
             let old_raw = header_path(rest);
             if old_raw == "/dev/null" {
                 return Err(refuse(
@@ -1409,7 +1423,7 @@ fn parse_patch(tool: &str, raw: &str) -> Result<ParsedPatch, ToolsError> {
             if old != new {
                 return Err(refuse(format!(
                     "the patch's old name ({old}) and new name ({new}) differ, which is a rename; \
-                     apply_patch changes one file whose name stays put."
+                     apply_patch changes files whose names stay put."
                 )));
             }
             if new.is_empty() {
@@ -1449,8 +1463,8 @@ fn parse_patch(tool: &str, raw: &str) -> Result<ParsedPatch, ToolsError> {
         }
         if let Some(what) = unsupported_patch(line) {
             return Err(refuse(format!(
-                "the patch is a {what}, which apply_patch does not do: it changes the text of one \
-                 file whose name stays put."
+                "the patch is a {what}, which apply_patch does not do: it changes the text of files \
+                 whose names stay put."
             )));
         }
         if line.trim().is_empty() {
@@ -1475,25 +1489,47 @@ fn parse_patch(tool: &str, raw: &str) -> Result<ParsedPatch, ToolsError> {
         )));
     }
 
-    let Some(path) = target else {
+    close_section(tool, &mut files, &mut target, &mut hunks)?;
+    if files.is_empty() {
         return Err(refuse(
             "the patch carries no ---/+++ file header, so it names no file to change.".to_string(),
         ));
+    }
+    Ok(files)
+}
+
+/// Close the section a `---`/`+++` pair opened, or do nothing when no section is open. A section
+/// with no hunks and a path that appears twice are both refused, because the first changes nothing
+/// and the second would make one file's line numbers depend on another section's order.
+fn close_section(
+    tool: &str,
+    files: &mut Vec<ParsedPatch>,
+    target: &mut Option<String>,
+    hunks: &mut Vec<PatchHunk>,
+) -> Result<(), ToolsError> {
+    let refuse = |reason: String| ToolsError::InvalidArguments {
+        tool: tool.to_string(),
+        reason,
+    };
+    let Some(path) = target.take() else {
+        return Ok(());
     };
     if hunks.is_empty() {
         return Err(refuse(format!(
             "the patch names {path} but carries no hunks, so nothing was changed."
         )));
     }
-    Ok(ParsedPatch { path, hunks })
-}
-
-/// The one-file refusal, which is the boundary of this call rather than of the diff format.
-fn more_than_one_file(first: &str) -> String {
-    format!(
-        "the patch changes more than one file ({first} comes first), and one apply_patch call \
-         changes one file. Send a separate call for each file."
-    )
+    if files.iter().any(|file| file.path == path) {
+        return Err(refuse(format!(
+            "the patch names {path} in more than one section. Put its hunks in one section so their \
+             line numbers all refer to the file as it was before the patch."
+        )));
+    }
+    files.push(ParsedPatch {
+        path,
+        hunks: std::mem::take(hunks),
+    });
+    Ok(())
 }
 
 /// A header path without the tab-separated timestamp `diff -u` appends or the quotes git puts
@@ -1829,14 +1865,14 @@ fn apply_hunks(
     Ok((out, final_newline))
 }
 
-/// Apply one file's unified diff to a file that is already in the workspace.
+/// Apply a unified diff to files that are already in the workspace.
 ///
-/// The third write, and the one bounded by the most checks: the path comes through the same
-/// `Access::Write` sandbox as the other two, the file has to exist (creation is `write_file`'s job
+/// The third write, and the one bounded by the most checks: every path comes through the same
+/// `Access::Write` sandbox as the other two, every file has to exist (creation is `write_file`'s job
 /// and deletion is not offered at all), every hunk's context has to match the file exactly rather
-/// than by fuzz, and nothing is written until every hunk has passed. One file per call, because the
-/// transcript row, the run ledger and the review panel are each built around one changed file; a
-/// patch spanning several is refused with the way to send it.
+/// than by fuzz, and nothing is written until every hunk of every file has passed. A patch may name
+/// several files; each is reported separately so the row, the ledger and the review can fold it by
+/// the file it touched.
 fn apply_patch(
     tool: &str,
     arguments: &Value,
@@ -1844,74 +1880,213 @@ fn apply_patch(
 ) -> Result<Executed, ToolsError> {
     let raw = required(tool, arguments, "patch")?;
     let parsed = parse_patch(tool, raw)?;
-    let label = parsed.path.clone();
     let refuse = |reason: String| ToolsError::InvalidArguments {
         tool: tool.to_string(),
         reason,
     };
-    let path = resolve(policy, &label, Access::Write)?;
-    if !path.is_file() {
-        return Err(refuse(format!(
-            "{label} is not a file in this workspace, so nothing was applied. apply_patch changes a \
-             file that is already there; write_file creates one."
-        )));
+    let mut staged: Vec<StagedPatch> = Vec::with_capacity(parsed.len());
+    for section in &parsed {
+        let label = section.path.clone();
+        let path = resolve(policy, &label, Access::Write)?;
+        // Two spellings of one path are one file; applying to it twice would make the second
+        // section's line numbers describe a file the first had already changed.
+        if staged.iter().any(|item| item.path == path) {
+            return Err(refuse(format!(
+                "the patch opens {label} twice, once under another spelling. Put its hunks in one \
+                 section so their line numbers all refer to the same file."
+            )));
+        }
+        if !path.is_file() {
+            return Err(refuse(format!(
+                "{label} is not a file in this workspace, so nothing was applied. apply_patch changes \
+                 a file that is already there; write_file creates one."
+            )));
+        }
+        let Some(text) = read_text(tool, &path)? else {
+            return Err(refuse(format!(
+                "{label} is not text this tool can read, so nothing was applied."
+            )));
+        };
+        let source = split_source(tool, &label, &text)?;
+        let (lines, final_newline) = apply_hunks(tool, &label, &source, &section.hunks)?;
+        let patched = render_source(&source, &lines, final_newline);
+        if patched.len() as u64 > MAX_FILE_BYTES {
+            return Err(refuse(format!(
+                "{label} would be {}, past the {} this build reads, so nothing was written.",
+                human_bytes(patched.len() as u64),
+                human_bytes(MAX_FILE_BYTES)
+            )));
+        }
+        let added: usize = section.hunks.iter().map(PatchHunk::added).sum();
+        let removed: usize = section.hunks.iter().map(PatchHunk::removed).sum();
+        let hunks: Vec<EditHunk> = section
+            .hunks
+            .iter()
+            .map(|hunk| EditHunk {
+                at: hunk.opening_line() as u32,
+                lines: fit(hunk.body.clone()),
+            })
+            .collect();
+        staged.push(StagedPatch {
+            label,
+            rendered: patched,
+            edit: Edit {
+                path: relative(policy, &path),
+                added: added as u32,
+                removed: removed as u32,
+                occurrences: section.hunks.len() as u32,
+                hunks,
+            },
+            path,
+        });
     }
-    let Some(text) = read_text(tool, &path)? else {
-        return Err(refuse(format!(
-            "{label} is not text this tool can read, so nothing was applied."
-        )));
-    };
-    let source = split_source(tool, &label, &text)?;
-    let (lines, final_newline) = apply_hunks(tool, &label, &source, &parsed.hunks)?;
-    let patched = render_source(&source, &lines, final_newline);
-    if patched.len() as u64 > MAX_FILE_BYTES {
-        return Err(refuse(format!(
-            "{label} would be {}, past the {} this build reads, so nothing was written.",
-            human_bytes(patched.len() as u64),
-            human_bytes(MAX_FILE_BYTES)
-        )));
-    }
-    fs::write(&path, &patched).map_err(|e| io_error(tool, &label, &e))?;
 
-    let first = &parsed.hunks[0];
-    let added: usize = parsed.hunks.iter().map(PatchHunk::added).sum();
-    let removed: usize = parsed.hunks.iter().map(PatchHunk::removed).sum();
-    let count = parsed.hunks.len();
-    let summary = if count == 1 {
-        Summary::said(SummaryKey::HunkApplied, json!({}), "1 hunk applied")
+    // Every file has been read and every hunk matched; only now is a byte written. An I/O failure
+    // part-way cannot be undone, so it names the file it stopped on rather than claiming the call
+    // was refused.
+    for item in &staged {
+        fs::write(&item.path, &item.rendered).map_err(|e| io_error(tool, &item.label, &e))?;
+    }
+
+    let edits: Vec<Edit> = staged.into_iter().map(|item| item.edit).collect();
+    let hunks: usize = edits.iter().map(|edit| edit.occurrences as usize).sum();
+    let summary = if edits.len() == 1 {
+        if hunks == 1 {
+            Summary::said(SummaryKey::HunkApplied, json!({}), "1 hunk applied")
+        } else {
+            Summary::said(
+                SummaryKey::HunksApplied,
+                json!({ "count": hunks }),
+                format!("{hunks} hunks applied"),
+            )
+        }
     } else {
         Summary::said(
-            SummaryKey::HunksApplied,
-            json!({ "count": count }),
-            format!("{count} hunks applied"),
+            SummaryKey::FilesPatched,
+            json!({ "count": edits.len() }),
+            format!("{} files patched", edits.len()),
         )
     };
-    // The review draws one hunk against one gutter, so the first is the one it can number; the rest
-    // are named as applied rather than left to look absent. On a single hunk this adds nothing.
-    let mut preview = fit(first.body.clone());
-    if count > 1 {
-        let rest = count - 1;
-        preview.push_str(&format!(
-            "\n…{rest} more {} applied, not shown here.",
-            if rest == 1 { "hunk" } else { "hunks" }
-        ));
-    }
-    let edit = Edit {
-        path: relative(policy, &path),
-        added: added as u32,
-        removed: removed as u32,
-        occurrences: count as u32,
-        hunk: preview,
-        hunk_at: first.opening_line() as u32,
-    };
+    let content = patch_content(&edits, &summary);
     Ok(Executed {
-        content: format!(
-            "Patched {} (+{} −{}): {}\n{label}, at line {}:\n{}",
-            edit.path, edit.added, edit.removed, summary.text, edit.hunk_at, edit.hunk
-        ),
         summary,
-        edit: Some(edit),
+        content,
+        edits,
     })
+}
+
+/// One file's patched text, held until every file in the call has passed its checks.
+struct StagedPatch {
+    label: String,
+    path: PathBuf,
+    rendered: String,
+    edit: Edit,
+}
+
+/// The result the model reads for a patch. One file keeps the shape an edit's copy has — the first
+/// hunk in full, the rest named as applied. Several files are listed with their own counts, and the
+/// whole result stays inside [`MAX_RESULT_BYTES`]: a patch that names more files than the budget can
+/// show has them all named, with the ones whose hunks could not be shown counted at the end.
+fn patch_content(edits: &[Edit], summary: &Summary) -> String {
+    if edits.len() == 1 {
+        let edit = &edits[0];
+        let first = &edit.hunks[0];
+        let mut preview = first.lines.clone();
+        if edit.hunks.len() > 1 {
+            let rest = edit.hunks.len() - 1;
+            preview.push_str(&format!(
+                "\n…{rest} more {} applied, not shown here.",
+                if rest == 1 { "hunk" } else { "hunks" }
+            ));
+        }
+        return format!(
+            "Patched {} (+{} −{}): {}\n{}, at line {}:\n{}",
+            edit.path, edit.added, edit.removed, summary.text, edit.path, first.at, preview
+        );
+    }
+    let added: u32 = edits.iter().map(|edit| edit.added).sum();
+    let removed: u32 = edits.iter().map(|edit| edit.removed).sum();
+    let mut out = format!(
+        "Patched {} files (+{added} −{removed}): {}\n",
+        edits.len(),
+        summary.text
+    );
+    // Room for the trailing notes so a budget cut speaks rather than truncating a sentence.
+    const RESERVE: usize = 96;
+    let mut shown = 0;
+    for edit in edits {
+        let first = &edit.hunks[0];
+        let head = format!(
+            "{} (+{} −{}), {} at line {}:\n",
+            edit.path,
+            edit.added,
+            edit.removed,
+            if edit.hunks.len() == 1 {
+                "1 hunk".to_string()
+            } else {
+                format!("{} hunks", edit.hunks.len())
+            },
+            first.at
+        );
+        let rest = edit.hunks.len().saturating_sub(1);
+        let tail = if rest > 0 {
+            format!(
+                "\n…{rest} more {} in this file, not shown here.",
+                if rest == 1 { "hunk" } else { "hunks" }
+            )
+        } else {
+            String::new()
+        };
+        if out.len() + head.len() + tail.len() + RESERVE > MAX_RESULT_BYTES {
+            break;
+        }
+        out.push_str(&head);
+        let room = MAX_RESULT_BYTES - out.len() - tail.len() - RESERVE;
+        out.push_str(&clip_hunk(&first.lines, room));
+        out.push_str(&tail);
+        out.push('\n');
+        shown += 1;
+    }
+    if shown < edits.len() {
+        let rest = edits.len() - shown;
+        out.push_str(&format!(
+            "…{rest} more {} applied, not shown here.",
+            if rest == 1 { "file" } else { "files" }
+        ));
+    } else {
+        out.pop();
+    }
+    out
+}
+
+/// The leading lines of a hunk that fit in `room` bytes, with the rest counted rather than cut in
+/// the middle of a line.
+fn clip_hunk(text: &str, room: usize) -> String {
+    if text.len() <= room {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    let mut held = 0usize;
+    let mut full = false;
+    for (i, line) in text.split('\n').enumerate() {
+        let cost = line.len() + usize::from(i > 0);
+        if !full && out.len() + cost + 40 <= room {
+            if i > 0 {
+                out.push('\n');
+            }
+            out.push_str(line);
+        } else {
+            full = true;
+            held += 1;
+        }
+    }
+    if held > 0 {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&format!("…{held} lines of this hunk are not shown."));
+    }
+    out
 }
 
 /// How many lines at each end of a replacement the replacement shares with what it replaced. The two
@@ -2225,6 +2400,18 @@ mod tests {
 
     fn ran(id: &str, args: &Value, p: &SandboxPolicy) -> Result<Executed, ToolsError> {
         execute(id, args, p)
+    }
+
+    /// The one file a single-file write reports.
+    fn only_edit(got: &Executed) -> &Edit {
+        assert_eq!(got.edits.len(), 1, "one file written");
+        &got.edits[0]
+    }
+
+    /// That file's one hunk, for a write that made a single replacement.
+    fn only_hunk(edit: &Edit) -> &EditHunk {
+        assert_eq!(edit.hunks.len(), 1, "one hunk written");
+        &edit.hunks[0]
     }
 
     /// A file of `lines` readable lines, each labelled with its 1-based number and padded to `width`.
@@ -2652,7 +2839,7 @@ mod tests {
             on_disk(d.path(), "src/lib.rs"),
             "one\nTWO\nand a half\nthree\n"
         );
-        let edit = got.edit.expect("a write reports what it wrote");
+        let edit = only_edit(&got);
         assert_eq!((edit.added, edit.removed, edit.occurrences), (2, 1, 1));
         // The path is the spelling a follow-up `read_file` takes back.
         assert_eq!(edit.path, "src/lib.rs");
@@ -2669,7 +2856,7 @@ mod tests {
         )
         .expect("an edit runs");
         // The line the call kept is not a line it rewrote, so the edit is one line rather than two.
-        let edit = got.edit.unwrap();
+        let edit = only_edit(&got);
         assert_eq!((edit.added, edit.removed), (1, 0));
         assert_eq!(on_disk(d.path(), "src/lib.rs"), "one\ntwo\nfour\nthree\n");
     }
@@ -2689,7 +2876,7 @@ mod tests {
             &p,
         )
         .expect("a multi-line edit runs");
-        let edit = got.edit.unwrap();
+        let edit = only_edit(&got);
         assert_eq!((edit.added, edit.removed), (3, 1));
         assert_eq!(
             on_disk(d.path(), "src/lib.rs"),
@@ -2743,7 +2930,7 @@ mod tests {
         )
         .expect("a call that asks for every copy gets it");
         assert_eq!(on_disk(d.path(), "src/lib.rs"), "new\nnew\nnew\n");
-        let edit = got.edit.unwrap();
+        let edit = only_edit(&got);
         assert_eq!((edit.added, edit.removed, edit.occurrences), (3, 3, 3));
         assert_eq!(got.summary.text, "3 copies replaced");
         // One hunk rather than three: the copies are the same change said three times.
@@ -2777,18 +2964,18 @@ mod tests {
         // The window's row already names the file and the line the caption counts, so the copy that
         // crosses the boundary is the change alone — and it is the same text, not a second rendering
         // of it, which is what keeps the review and the answer from disagreeing.
-        let content = got.content;
-        let edit = got.edit.unwrap();
-        assert_eq!(edit.hunk, " one\n-two\n+TWO\n three");
+        let content = got.content.clone();
+        let edit = only_edit(&got);
+        assert_eq!(only_hunk(edit).lines, " one\n-two\n+TWO\n three");
         assert!(
-            content.ends_with(&format!("at line 2:\n{}", edit.hunk)),
+            content.ends_with(&format!("at line 2:\n{}", only_hunk(edit).lines)),
             "{content}"
         );
         // The gutter the window numbers its diff lines from. It names the *changed* line rather than
         // the first printed one, which is what the caption says too — so the two cannot drift, and the
         // panel steps back over its own context lines to find where the block starts.
-        assert_eq!(edit.hunk_at, 2);
-        assert!(content.contains(&format!("at line {}:\n", edit.hunk_at)));
+        assert_eq!(only_hunk(edit).at, 2);
+        assert!(content.contains(&format!("at line {}:\n", only_hunk(edit).at)));
     }
 
     #[test]
@@ -2849,10 +3036,13 @@ mod tests {
             on_disk(d.path(), "page.html"),
             "<!doctype html>\n<title>hi</title>\n"
         );
-        let edit = got.edit.expect("a write reports what it wrote");
+        let edit = only_edit(&got);
         assert_eq!((edit.added, edit.removed, edit.occurrences), (2, 0, 1));
-        assert_eq!(edit.hunk, "+<!doctype html>\n+<title>hi</title>");
-        assert_eq!(edit.hunk_at, 1);
+        assert_eq!(
+            only_hunk(edit).lines,
+            "+<!doctype html>\n+<title>hi</title>"
+        );
+        assert_eq!(only_hunk(edit).at, 1);
         assert_eq!(got.summary.text, "1 file created");
     }
 
@@ -2933,7 +3123,7 @@ mod tests {
         )
         .expect("an empty file is a file");
         assert_eq!(on_disk(d.path(), "notes.md"), "");
-        assert_eq!(got.edit.unwrap().added, 0);
+        assert_eq!(only_edit(&got).added, 0);
         assert!(got.content.contains("empty"), "{}", got.content);
     }
 
@@ -2958,7 +3148,7 @@ mod tests {
             &got.content[..120.min(got.content.len())]
         );
         // The counts stay the file's real ones even though the hunk is a window onto it.
-        assert_eq!(got.edit.unwrap().added, 2_000);
+        assert_eq!(only_edit(&got).added, 2_000);
         assert_eq!(
             on_disk(d.path(), "long.txt").lines().count(),
             2_000,
@@ -2981,13 +3171,14 @@ mod tests {
         )
         .expect("a patch against the file as it stands applies");
         assert_eq!(on_disk(d.path(), "src/lib.rs"), "one\nTWO\nthree\n");
-        let edit = got.edit.expect("a write reports what it wrote");
+        let edit = only_edit(&got);
         assert_eq!((edit.added, edit.removed, edit.occurrences), (1, 1, 1));
         assert_eq!(edit.path, "src/lib.rs");
         // The review's contract is the same as an edit's: the body is diff lines only (no `@@`
         // header, which its numbering would read as context), and `at` names the changed line.
-        assert_eq!(edit.hunk, " one\n-two\n+TWO\n three");
-        assert_eq!(edit.hunk_at, 2);
+        let hunk = only_hunk(edit);
+        assert_eq!(hunk.lines, " one\n-two\n+TWO\n three");
+        assert_eq!(hunk.at, 2);
         assert_eq!(got.summary.text, "1 hunk applied");
         assert_eq!(
             got.content,
@@ -3012,16 +3203,20 @@ mod tests {
             on_disk(d.path(), "src/lib.rs"),
             "one\nTWO\nthree\nfour\nfour and a half\nfive\n"
         );
-        let edit = got.edit.unwrap();
+        let edit = only_edit(&got);
         assert_eq!((edit.added, edit.removed, edit.occurrences), (2, 1, 2));
         assert_eq!(got.summary.text, "2 hunks applied");
-        // The panel numbers one hunk against one gutter, so the first is drawn and the second is
-        // named rather than left to look absent.
-        assert_eq!(
-            edit.hunk,
-            " one\n-two\n+TWO\n…1 more hunk applied, not shown here."
-        );
-        assert_eq!(edit.hunk_at, 2);
+        // Both hunks are kept, each with the line its gutter starts on, so the review can draw the
+        // change in two places rather than one hunk holding a line that is not in the file.
+        assert_eq!(edit.hunks.len(), 2);
+        assert_eq!(edit.hunks[0].at, 2);
+        assert_eq!(edit.hunks[0].lines, " one\n-two\n+TWO");
+        assert_eq!(edit.hunks[1].at, 5);
+        assert_eq!(edit.hunks[1].lines, " four\n+four and a half\n five");
+        // The model reads the first hunk in full and is told the rest were applied.
+        assert!(got
+            .content
+            .contains("…1 more hunk applied, not shown here."));
     }
 
     #[test]
@@ -3044,22 +3239,116 @@ mod tests {
     }
 
     #[test]
-    fn a_patch_that_changes_more_than_one_file_is_refused_without_touching_either() {
+    fn a_patch_may_change_several_files_and_reports_each_of_them() {
+        let (d, p) = plain();
+        std::fs::write(d.path().join("other.txt"), "x\n").unwrap();
+        let got = ran(
+            "apply_patch",
+            &json!({ "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n\
+                                --- a/other.txt\n+++ b/other.txt\n@@ -1 +1 @@\n-x\n+y\n" }),
+            &p,
+        )
+        .expect("one call may change several files");
+        assert_eq!(on_disk(d.path(), "src/lib.rs"), "one\nTWO\nthree\n");
+        assert_eq!(on_disk(d.path(), "other.txt"), "y\n");
+        assert_eq!(got.summary.text, "2 files patched");
+        assert_eq!(got.edits.len(), 2);
+        let lib = &got.edits[0];
+        assert_eq!(
+            (lib.path.as_str(), lib.added, lib.removed, lib.occurrences),
+            ("src/lib.rs", 1, 1, 1)
+        );
+        assert_eq!(lib.hunks[0].at, 2);
+        let other = &got.edits[1];
+        assert_eq!(
+            (
+                other.path.as_str(),
+                other.added,
+                other.removed,
+                other.occurrences
+            ),
+            ("other.txt", 1, 1, 1)
+        );
+        assert_eq!(other.hunks[0].at, 1);
+        // The model reads every file the call changed, with that file's own counts.
+        assert!(got
+            .content
+            .starts_with("Patched 2 files (+2 −2): 2 files patched\n"));
+        assert!(
+            got.content
+                .contains("src/lib.rs (+1 −1), 1 hunk at line 2:"),
+            "{}",
+            got.content
+        );
+        assert!(
+            got.content.contains("other.txt (+1 −1), 1 hunk at line 1:"),
+            "{}",
+            got.content
+        );
+    }
+
+    #[test]
+    fn a_patch_whose_last_file_does_not_match_writes_none_of_them() {
         let (d, p) = plain();
         std::fs::write(d.path().join("other.txt"), "x\n").unwrap();
         let why = ran(
             "apply_patch",
             &json!({ "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-one\n+ONE\n\
-                                --- a/other.txt\n+++ b/other.txt\n@@ -1 +1 @@\n-x\n+y\n" }),
+                                --- a/other.txt\n+++ b/other.txt\n@@ -1 +1 @@\n-wrong\n+y\n" }),
             &p,
         )
-        .expect_err("one call changes one file");
-        let reason = why.to_string();
-        assert!(reason.contains("more than one file"), "{reason}");
-        // The way out has to be in the sentence, because the model is the reader that can take it.
-        assert!(reason.contains("separate call"), "{reason}");
+        .expect_err("every file is checked before any is written");
+        assert!(
+            why.to_string().contains("does not match other.txt"),
+            "{why}"
+        );
         assert_eq!(on_disk(d.path(), "src/lib.rs"), "one\ntwo\nthree\n");
         assert_eq!(on_disk(d.path(), "other.txt"), "x\n");
+    }
+
+    #[test]
+    fn a_patch_that_opens_one_file_in_two_sections_is_refused() {
+        let (d, p) = plain();
+        std::fs::write(d.path().join("other.txt"), "x\n").unwrap();
+        let same_path = ran(
+            "apply_patch",
+            &json!({ "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-one\n+ONE\n\
+                                --- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -3 +3 @@\n-three\n+THREE\n" }),
+            &p,
+        )
+        .expect_err("the second section's line numbers would describe a changed file");
+        assert!(
+            same_path.to_string().contains("more than one section"),
+            "{same_path}"
+        );
+        // `./src/lib.rs` and `src/lib.rs` are one file; the sandbox settles that, not the spelling.
+        let two_spellings = ran(
+            "apply_patch",
+            &json!({ "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-one\n+ONE\n\
+                                --- a/./src/lib.rs\n+++ b/./src/lib.rs\n@@ -3 +3 @@\n-three\n+THREE\n" }),
+            &p,
+        )
+        .expect_err("two spellings of one path are one file");
+        assert!(
+            two_spellings.to_string().contains("another spelling"),
+            "{two_spellings}"
+        );
+        assert_eq!(on_disk(d.path(), "src/lib.rs"), "one\ntwo\nthree\n");
+        assert_eq!(on_disk(d.path(), "other.txt"), "x\n");
+    }
+
+    #[test]
+    fn a_patch_section_without_hunks_is_refused_and_writes_nothing() {
+        let (d, p) = plain();
+        let why = ran(
+            "apply_patch",
+            &json!({ "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n\
+                               --- a/other.txt\n+++ b/other.txt\n@@ -1 +1 @@\n-one\n+ONE\n" }),
+            &p,
+        )
+        .expect_err("a section with no hunks changes nothing and is a mistake");
+        assert!(why.to_string().contains("carries no hunks"), "{why}");
+        assert_eq!(on_disk(d.path(), "src/lib.rs"), "one\ntwo\nthree\n");
     }
 
     #[test]
@@ -3110,12 +3399,13 @@ mod tests {
             on_disk(d.path(), "src/lib.rs"),
             "one\ntwo\ninserted\nthree\n"
         );
-        let edit = got.edit.unwrap();
+        let edit = only_edit(&got);
         // The change lands after line 2, so the review's gutter has to start numbering at 3 — not
         // at 2, which is the line the header names as the insert's anchor.
-        assert_eq!(edit.hunk_at, 3);
+        let hunk = only_hunk(edit);
+        assert_eq!(hunk.at, 3);
         assert_eq!((edit.added, edit.removed), (1, 0));
-        assert_eq!(edit.hunk, "+inserted");
+        assert_eq!(hunk.lines, "+inserted");
     }
 
     #[test]

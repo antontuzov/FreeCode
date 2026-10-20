@@ -83,11 +83,13 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
   const [open, setOpen] = useState(!step.collapsed);
   const hasChildren = !!step.children?.length;
   const openReviewAt = useNav((s) => s.openReviewAt);
-  // Only a write this window holds the diff for can be jumped to — the file it made or the file it
+  // Only a write this window holds a diff for can be jumped to — the file it made or the file it
   // changed, both of which the review draws the same way. A row whose hunk the result budget never
-  // carried would open a panel with nothing scrolled into view, which is a control that lies.
+  // carried would open a panel with nothing scrolled into view, which is a control that lies. A row
+  // that changed several files carries no one hunk but does carry the list, and each of those paths
+  // is pressable in the breakdown below.
   const jumpFile =
-    (step.kind === "editFile" || step.kind === "createFile") && step.hunk
+    (step.kind === "editFile" || step.kind === "createFile") && (step.hunk || step.files?.length)
       ? step.subject
       : undefined;
   // A notice's line is its catalog sentence with the run's own numbers in it; every other row's line
@@ -177,6 +179,29 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
           </span>
         )}
       </div>
+      {step.files && step.files.length > 1 && (
+        // A patch that named several files would otherwise leave the row's one line saying only how
+        // many: the list is the files themselves, each with its own count, and each is a way into the
+        // review at that file rather than at whichever the panel happens to open first.
+        <ul className="ml-3 border-l border-line py-0.5 pl-3">
+          {step.files.map((file) => (
+            <li key={file.path} className="flex items-center gap-2 py-0.5">
+              <button
+                type="button"
+                onClick={() => openReviewAt(file.path)}
+                title={translate(locale, "transcript.edit.jump")}
+                className={`${CHIP} cursor-pointer hover:bg-sunken hover:text-fg`}
+              >
+                {file.path}
+              </button>
+              <span className="font-mono text-micro">
+                <span className="text-success">+{file.added}</span>{" "}
+                <span className="text-danger">−{file.removed}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       {hasChildren && open && (
         <ul className="disclosure-panel ml-3 border-l border-line pl-3">
           {step.children!.map((child) => (
