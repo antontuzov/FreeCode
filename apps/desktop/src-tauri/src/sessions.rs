@@ -31,6 +31,11 @@ pub const SESSION_SCHEMA_VERSION: u32 = 1;
 /// The directory's name under the app's data dir.
 const DIR: &str = "sessions";
 
+/// Where a deleted conversation waits instead of vanishing: a subdirectory of the conversation
+/// directory, so it lives in the store the app already owns and is measured as part of it on the
+/// Storage page, and so no id can name a path that reaches outside it.
+const TRASH: &str = "trash";
+
 /// How much of the first prompt a conversation is called by. Two words' more than the sidebar's
 /// column shows, so the real limit is the row's own truncation; this one exists so a pasted stack
 /// trace does not become a filename.
@@ -207,6 +212,11 @@ pub fn dir() -> Option<PathBuf> {
     crate::paths::app_data_dir().map(|data| data.join(DIR))
 }
 
+/// The Trash beside the filed conversations, holding the ones the sidebar stopped listing.
+fn trash_dir(dir: &Path) -> PathBuf {
+    dir.join(TRASH)
+}
+
 /// The folder a conversation belongs to, named the way the status card names it: the last component
 /// of the root the host resolved. A checkout gives the repository's directory; an installed app gives
 /// the data directory its catalog was mirrored into.
@@ -269,22 +279,120 @@ pub fn read(id: &str) -> Result<Session, String> {
     read_in(&dir, id)
 }
 
-/// Remove one conversation's file.
+/// Move one conversation's file into the Trash.
 ///
 /// A file that is not there answers `Ok` rather than an error: another window can have deleted the
-/// same row a moment before, and the state the user asked for — that conversation is gone — holds
-/// either way. An error there would be a message about a bookkeeping race the row cannot show.
+/// same row a moment before, and the state the user asked for — that conversation is off the list —
+/// holds either way. An error there would be a message about a bookkeeping race the row cannot show.
 ///
-/// The id is checked by the same rule a read is, so this deletes inside the session directory and
-/// nowhere else, whatever the window sends. A file this build cannot parse is still deleted: the
+/// The id is checked by the same rule a read is, so this moves inside the session directory and
+/// nowhere else, whatever the window sends. A file this build cannot parse is still moved: the
 /// conversation it holds is unreadable here, and "throw this away" is the one instruction that needs
 /// no reading.
+///
+/// It is a move rather than an unlink because the file is the only copy of the exchange, and the
+/// press that throws it away is a glyph that appears on hover with no undo behind it. The Trash is
+/// that undo. The name is kept, and a second copy of a conversation the Trash already holds is
+/// numbered rather than written over — replacing the older copy is the loss this exists to prevent.
 pub fn delete_in(dir: &Path, id: &str) -> Result<(), String> {
     let id = safe_id(id)?;
-    match std::fs::remove_file(dir.join(format!("{id}.json"))) {
+    let from = dir.join(format!("{id}.json"));
+    if !from.exists() {
+        return Ok(());
+    }
+    let to = trash_dir(dir);
+    std::fs::create_dir_all(&to).map_err(|e| format!("creating {} failed: {e}", to.display()))?;
+    let mut target = to.join(format!("{id}.json"));
+    let mut taken = 1;
+    while target.exists() {
+        target = to.join(format!("{id}-{taken}.json"));
+        taken += 1;
+    }
+    std::fs::rename(&from, &target).map_err(|e| format!("deleting {id} failed: {e}"))
+}
+
+/// One conversation waiting in the Trash: the fields a row is named by, the size its file takes on
+/// the machine, and the name that file goes by — which is not always the conversation's id, since a
+/// second deletion of one is numbered.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Trashed {
+    #[serde(flatten)]
+    pub summary: Summary,
+    pub name: String,
+    pub bytes: u64,
+}
+
+/// Everything in the Trash, newest first.
+///
+/// A file that does not parse is skipped by the same rule the live list uses — one bad file must not
+/// empty the section — and is left where it is rather than removed, because this build cannot tell
+/// what it was.
+pub fn list_trashed_in(dir: &Path) -> Vec<Trashed> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(trash_dir(dir)) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(session) = parse(&bytes) else {
+            continue;
+        };
+        found.push(Trashed {
+            summary: session.summary(),
+            name: name.to_string(),
+            bytes: entry.metadata().map(|meta| meta.len()).unwrap_or_default(),
+        });
+    }
+    found.sort_by_key(|held| std::cmp::Reverse(held.summary.updated_at_ms));
+    found
+}
+
+/// Put a trashed conversation back on the list, under the id it was filed with.
+///
+/// The file is read before it moves, so a name the window invents cannot land a conversation in the
+/// list that was never filed, and a conversation that is already back is refused rather than
+/// duplicated — two rows for one exchange is the same file answering twice.
+pub fn restore_in(dir: &Path, name: &str) -> Result<Summary, String> {
+    let name = safe_id(name)?;
+    let from = trash_dir(dir).join(format!("{name}.json"));
+    let bytes = match std::fs::read(&from) {
+        Ok(bytes) => bytes,
+        // The second press lands here: the first moved the file out, so there is nothing left to put
+        // back. That is the state the press asked for, and it says so rather than quoting an errno.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!("{name} is not in the Trash"))
+        }
+        Err(e) => return Err(format!("reading {} failed: {e}", from.display())),
+    };
+    let session = parse(&bytes)
+        .map_err(|why| format!("{} is not a readable conversation: {why}", from.display()))?;
+    let to = dir.join(format!("{}.json", session.id));
+    if to.exists() {
+        return Err(format!("{} is already back on the list", session.title));
+    }
+    std::fs::rename(&from, &to).map_err(|e| format!("restoring {name} failed: {e}"))?;
+    Ok(session.summary())
+}
+
+/// Remove one trashed conversation's file for good. This is the only thing in this module that
+/// unlinks a conversation, and the only way the bytes a delete moved out of the list leave the
+/// machine.
+pub fn purge_in(dir: &Path, name: &str) -> Result<(), String> {
+    let name = safe_id(name)?;
+    match std::fs::remove_file(trash_dir(dir).join(format!("{name}.json"))) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("deleting {id} failed: {e}")),
+        Err(e) => Err(format!("deleting {name} failed: {e}")),
     }
 }
 
@@ -534,7 +642,7 @@ mod tests {
     }
 
     #[test]
-    fn a_deleted_conversation_leaves_no_row_and_no_file() {
+    fn a_deleted_conversation_leaves_the_list_but_not_the_machine() {
         let dir = tempfile::tempdir().unwrap();
         let kept = session("kept");
         let gone = session("deleted");
@@ -549,6 +657,126 @@ mod tests {
         assert!(read_in(dir.path(), &gone.id).is_err());
         // The one that stays is not merely listed; its turns are still the ones that were filed.
         assert_eq!(read_in(dir.path(), &kept.id).unwrap().turns, kept.turns);
+        // And the one that went is off the list rather than off the disk: the press that throws a
+        // conversation away is two clicks, and the file is the only copy of the exchange.
+        let trashed = list_trashed_in(dir.path());
+        assert_eq!(trashed.len(), 1);
+        assert_eq!(trashed[0].summary.id, gone.id);
+        assert_eq!(trashed[0].name, gone.id);
+        assert!(trashed[0].bytes > 0);
+        // The Trash is inside the conversation directory, so the Storage page's walk of that one
+        // directory counts the bytes still held without learning about a fourth place.
+        assert!(dir
+            .path()
+            .join(TRASH)
+            .join(format!("{}.json", gone.id))
+            .exists());
+    }
+
+    #[test]
+    fn a_trashed_conversation_comes_back_whole_and_its_slot_is_freed() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = session("the one that was thrown away");
+        write_in(dir.path(), &gone).unwrap();
+        delete_in(dir.path(), &gone.id).unwrap();
+
+        let back = restore_in(dir.path(), &gone.id).unwrap();
+
+        assert_eq!(back.id, gone.id);
+        assert_eq!(back.turn_count, gone.turns.len());
+        assert_eq!(read_in(dir.path(), &gone.id).unwrap().turns, gone.turns);
+        assert!(list_trashed_in(dir.path()).is_empty());
+        // The second press has nothing left to move — the first took the file out — and says that
+        // rather than quoting the errno it found. The row on the list is still the one it put back.
+        let err = restore_in(dir.path(), &gone.id).unwrap_err();
+        assert!(err.contains("is not in the Trash"), "{err}");
+        assert_eq!(list_in(dir.path()).len(), 1);
+    }
+
+    #[test]
+    fn a_trashed_copy_is_not_restored_onto_a_conversation_that_is_already_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = session("answered in two windows");
+        write_in(dir.path(), &gone).unwrap();
+        delete_in(dir.path(), &gone.id).unwrap();
+        // The older copy is in the bin and the live file exists again: the second window filed a
+        // turn into it. Moving the copy back would replace what that run wrote.
+        write_in(dir.path(), &gone).unwrap();
+
+        let err = restore_in(dir.path(), &gone.id).unwrap_err();
+
+        assert!(err.contains("already back"), "{err}");
+        assert!(dir
+            .path()
+            .join(TRASH)
+            .join(format!("{}.json", gone.id))
+            .exists());
+        assert_eq!(read_in(dir.path(), &gone.id).unwrap().turns, gone.turns);
+    }
+
+    #[test]
+    fn deleting_a_conversation_the_trash_already_holds_keeps_both_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = session("deleted twice");
+        write_in(dir.path(), &gone).unwrap();
+        delete_in(dir.path(), &gone.id).unwrap();
+        // The state that numbers a second copy is not the same row deleted twice — a restore frees
+        // the name — but two windows over one store: this one files a turn into a conversation the
+        // other one had already thrown away, so the id is on the list again while its older copy is
+        // still in the bin.
+        write_in(dir.path(), &gone).unwrap();
+        delete_in(dir.path(), &gone.id).unwrap();
+
+        let trashed = list_trashed_in(dir.path());
+        assert_eq!(trashed.len(), 2, "{trashed:?}");
+        // The older copy is untouched: overwriting it is the loss the numbering exists to prevent.
+        assert!(trashed.iter().any(|held| held.name == gone.id));
+        assert!(trashed.iter().any(|held| held.name != gone.id));
+        for held in &trashed {
+            assert_eq!(held.summary.id, gone.id);
+        }
+    }
+
+    #[test]
+    fn purging_is_the_press_that_actually_loses_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = session("purged");
+        write_in(dir.path(), &gone).unwrap();
+        delete_in(dir.path(), &gone.id).unwrap();
+
+        purge_in(dir.path(), &gone.id).unwrap();
+
+        assert!(list_trashed_in(dir.path()).is_empty());
+        assert!(!dir.path().join(format!("{}.json", gone.id)).exists());
+        // A name already purged answers `Ok` for the same reason a delete of a missing file does.
+        purge_in(dir.path(), &gone.id).unwrap();
+    }
+
+    #[test]
+    fn a_trash_name_carrying_a_path_reaches_nothing_outside_the_session_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().parent().unwrap().join("settings.json");
+        std::fs::write(&outside, b"secret").unwrap();
+
+        for name in ["../../settings", "/etc/passwd", "..", "a/b", ""] {
+            assert!(restore_in(dir.path(), name).is_err(), "{name}");
+            assert!(purge_in(dir.path(), name).is_err(), "{name}");
+        }
+        assert!(outside.exists());
+    }
+
+    #[test]
+    fn the_trash_is_never_listed_as_a_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = session("in the bin");
+        write_in(dir.path(), &gone).unwrap();
+        delete_in(dir.path(), &gone.id).unwrap();
+
+        // The directory is a sibling of the JSON files the list walks, so the list must not read it
+        // as a conversation — and the one that is filed still is.
+        assert_eq!(list_in(dir.path()).len(), 0);
+        write_in(dir.path(), &session("still here")).unwrap();
+        assert_eq!(list_in(dir.path()).len(), 1);
     }
 
     #[test]

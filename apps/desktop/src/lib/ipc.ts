@@ -469,6 +469,15 @@ export type SessionHit = SessionSummary & {
   excerpt: string;
 };
 
+/**
+ * A conversation the Trash holds: the row it came from, the name its file goes by there, and the
+ * bytes it still takes on the machine. Mirrors `sessions::Trashed`.
+ *
+ * `name` rather than `id` because the two differ once a conversation has been deleted twice over —
+ * the older copy is numbered instead of written over, and both parse to the same conversation.
+ */
+export type TrashedSession = SessionSummary & { name: string; bytes: number };
+
 /* ---- the Knowledge Center: the pinned catalog, and this machine's share of it ---- */
 
 /**
@@ -703,12 +712,23 @@ export const ipc = {
    */
   openSession: (id: string) => invoke<Session>("open_session", { id }),
   /**
-   * Delete one for good. When the row is the conversation on screen, the host forgets the history with
-   * the file, so the next prompt is not answered out of a conversation the sidebar no longer lists.
-   * Refused while a reply streams into that conversation, because the run would file its answer back
-   * into the row that has just gone.
+   * Move one off the list. The file is not unlinked — it waits in the Trash under the conversation's
+   * own name, where Settings → Storage lists it and offers it back. When the row is the conversation
+   * on screen, the host forgets the history with the file, so the next prompt is not answered out of
+   * a conversation the sidebar no longer lists. Refused while a reply streams into that conversation,
+   * because the run would file its answer back into the row that has just gone.
    */
   deleteSession: (id: string) => invoke<void>("delete_session", { id }),
+  /** What the Trash holds, newest first. Mirrors `sessions::Trashed`. */
+  listTrashed: () => invoke<TrashedSession[]>("list_trashed"),
+  /**
+   * Put a trashed conversation back on the list. `name` is the name its file goes by in the Trash,
+   * which is the conversation's id unless a second copy of one is waiting there. The press restores
+   * a conversation; it does not open it.
+   */
+  restoreTrashed: (name: string) => invoke<SessionSummary>("restore_trashed", { name }),
+  /** The press that means it: take a trashed conversation's file off the machine. */
+  purgeTrashed: (name: string) => invoke<void>("purge_trashed", { name }),
   /**
    * Stop the reply that is streaming. The engine keeps its weights loaded, so the next message costs
    * nothing — `stopEngine` is the one that releases them, and the composer's Stop is not that.

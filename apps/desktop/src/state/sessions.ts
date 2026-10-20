@@ -84,8 +84,10 @@ export const useSessions = create<SessionStore>((set, get) => ({
     forgetRun();
   },
   /**
-   * Throw a filed conversation away for good. There is no undo and no second copy: the file was the
-   * record, which is why the row asks for the press twice before it comes here.
+   * Move a filed conversation off the list. The host unlinks nothing: the file goes to the Trash
+   * beside the store, where Settings → Storage lists it and offers it back — which is why the row
+   * still asks for the press twice, since what the second one costs is the conversation's place in
+   * this window's history, not the record itself.
    */
   remove: async (id) => {
     set({ error: null });

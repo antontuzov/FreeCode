@@ -265,13 +265,18 @@ pub fn run() {
             chat::chat_send,
             chat::chat_stop,
             chat::new_task,
-            // The conversations the app has filed, and the two controls the sidebar's rows have: reopen
-            // one, or throw one away. The palette searches all of them by what was said in them, which
-            // is why the search reads the files rather than the list.
+            // The conversations the app has filed, and the controls the sidebar's rows have: reopen
+            // one, or move one to the Trash. The palette searches all of them by what was said in
+            // them, which is why the search reads the files rather than the list.
             chat::list_sessions,
             chat::search_sessions,
             chat::open_session,
-            chat::delete_session
+            chat::delete_session,
+            // What the Trash holds, and the two presses it offers: put one back on the list, or take
+            // its file off the machine. Only the second one is a loss.
+            chat::list_trashed,
+            chat::restore_trashed,
+            chat::purge_trashed
         ])
         .setup(|app| {
             // Before this process spawns a server of its own, so a leftover's port is free to be

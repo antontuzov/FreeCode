@@ -25,6 +25,7 @@ import {
   type SettingsDoc,
   type StorageArea,
   type StorageReport,
+  type TrashedSession,
 } from "../lib/ipc";
 import { SHORTCUTS, shortcutLabel } from "../lib/shortcuts";
 import { useModel } from "../state/model";
@@ -1091,7 +1092,110 @@ function Storage({ t }: { t: T }) {
           {figure(formatBytes(report.freeBytes))}
         </Row>
       </Section>
+
+      <Trash t={t} />
     </>
+  );
+}
+
+/**
+ * The conversations the sidebar stopped listing, and the two presses a bin has to offer: put one
+ * back, or take its file off the machine.
+ *
+ * A delete moves the file into `sessions/trash/` rather than unlinking it, because the file is the
+ * only copy of the exchange and the press that throws it away is a glyph that appears on hover. That
+ * makes the bytes still held and still recoverable, which is what this page reports — and it is why
+ * the section renders nothing until there is something in it: an empty bin is not a fact about the
+ * machine, and the figures above already count the directory these files sit in.
+ */
+function Trash({ t }: { t: T }) {
+  const [held, setHeld] = useState<TrashedSession[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Re-read after every press rather than edited here: the host is what moved the file, and a row
+  // that vanished locally before the move landed would be a claim about the disk.
+  const [read, setRead] = useState(0);
+  // The purging press arms, like the sidebar's delete. Restoring needs no second thought; this one
+  // is the only path in the app that loses a conversation.
+  const [armed, setArmed] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void ipc
+      .listTrashed()
+      .then((found) => {
+        if (!live) return;
+        setHeld(found);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (live) setError(String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [read]);
+
+  if (error) {
+    return (
+      <p
+        role="alert"
+        className="rounded-[var(--radius-md)] border border-danger px-[var(--space-3)] py-[var(--space-2)] text-quiet text-danger"
+      >
+        {t("trash.failed", { error })}
+      </p>
+    );
+  }
+  if (!held || held.length === 0) return null;
+
+  const press = (run: () => Promise<unknown>) => {
+    void run().then(
+      () => setRead((n) => n + 1),
+      (e: unknown) => setError(String(e)),
+    );
+  };
+
+  return (
+    <Section
+      label={t("section.trash")}
+      description={t(held.length === 1 ? "section.trash.descOne" : "section.trash.descMany", {
+        count: held.length,
+      })}
+    >
+      {held.map((item) => (
+        <Row
+          key={item.name}
+          title={item.title}
+          description={`${item.workspace} · ${item.model} · ${t(
+            item.turnCount === 1 ? "trash.turnsOne" : "trash.turnsMany",
+            { count: item.turnCount },
+          )} · ${formatBytes(item.bytes)}`}
+        >
+          <span className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              className="field"
+              onClick={() => press(() => ipc.restoreTrashed(item.name))}
+            >
+              {t("trash.restore")}
+            </button>
+            <button
+              type="button"
+              className={`field ${armed === item.name ? "text-danger" : ""}`}
+              onClick={() => {
+                if (armed !== item.name) {
+                  setArmed(item.name);
+                  return;
+                }
+                setArmed(null);
+                press(() => ipc.purgeTrashed(item.name));
+              }}
+            >
+              {t(armed === item.name ? "trash.purgeAgain" : "trash.purge")}
+            </button>
+          </span>
+        </Row>
+      ))}
+    </Section>
   );
 }
 

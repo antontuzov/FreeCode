@@ -17,7 +17,8 @@ engine or the host actually measured.
   searches, edits and — with the Privacy switch on — looks things up on the web. Each round narrates
   itself in the transcript; each edit lands in a review panel with its diff, its line numbers and a find
   control inside it.
-- **Files conversations on this machine.** The sidebar searches them, reopens them, and deletes them.
+- **Files conversations on this machine.** The sidebar searches them, reopens them, and moves deleted
+  ones to a Trash that Settings → Storage can put back.
 - **Reports the run.** Token rates, prompt-cache reuse, the wait, the pages read, the files opened, the
   files changed, and the capabilities the run called on — all derived from the transcript's own rows, so
   the panel and the transcript cannot tell two stories.
@@ -82,6 +83,7 @@ Bonsai 1.7B — and the download happens in the app.
 | --- | --- |
 | Settings | `~/Library/Application Support/smollm-studio/settings.json` (platform standard elsewhere) |
 | Filed conversations | `sessions/` beside it, one JSON file each |
+| Deleted conversations | `sessions/trash/`, until Settings → Storage erases one for good |
 | Server pid registry | `servers.pid` beside it |
 | Catalog and engine contract | `catalog/models.toml`, `engines/lock.toml` |
 | Engine | `engines/<pinned-tag>/<target>/llama-server` |

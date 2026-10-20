@@ -1425,13 +1425,14 @@ pub async fn open_session(app: AppHandle, id: String) -> Result<Session, String>
     Ok(session)
 }
 
-/// Throw one filed conversation away, and take it off the screen too when the row deleted is the one
-/// already open there.
+/// Move one filed conversation to the Trash, and take it off the screen too when the row deleted is
+/// the one already open there.
 ///
 /// The file is the only copy of the exchange — the transcript on screen is a rendering of it, and the
 /// engine's history holds it until the next prompt replaces it — so when the row deleted is the one on
 /// screen the history goes with the file. A window that kept answering out of a conversation the
-/// sidebar no longer lists would be continuing an exchange it just claimed never happened.
+/// sidebar no longer lists would be continuing an exchange it just claimed never happened. The bytes
+/// stay: [`sessions::delete_in`] moves them, and Settings → Storage is what can put them back.
 fn delete_filed(dir: &Path, state: &ChatState, id: &str) -> Result<(), String> {
     let on_screen = lock(&state.session).as_ref().is_some_and(|s| s.id == id);
     if on_screen {
@@ -1461,6 +1462,31 @@ pub async fn delete_session(app: AppHandle, id: String) -> Result<(), String> {
     let state = app.state::<ChatState>();
     let dir = sessions::dir().ok_or("this platform gives the app no conversation directory")?;
     delete_filed(&dir, &state, &id)
+}
+
+/// The conversations the sidebar stopped listing and the machine still holds. What Settings →
+/// Storage lists under the Trash, next to the figure for the bytes they take.
+#[tauri::command]
+pub async fn list_trashed() -> Result<Vec<sessions::Trashed>, String> {
+    Ok(sessions::dir()
+        .map(|dir| sessions::list_trashed_in(&dir))
+        .unwrap_or_default())
+}
+
+/// Put one back on the list. The row appears in the sidebar because the file is where the sidebar
+/// reads, and nothing here opens it — the press restores a conversation, it does not resume one.
+#[tauri::command]
+pub async fn restore_trashed(name: String) -> Result<sessions::Summary, String> {
+    let dir = sessions::dir().ok_or("this platform gives the app no conversation directory")?;
+    sessions::restore_in(&dir, &name)
+}
+
+/// The press that means it: take the file out of the machine. This is the only path in the app that
+/// unlinks a conversation, and the sidebar's own delete does not reach it.
+#[tauri::command]
+pub async fn purge_trashed(name: String) -> Result<(), String> {
+    let dir = sessions::dir().ok_or("this platform gives the app no conversation directory")?;
+    sessions::purge_in(&dir, &name)
 }
 
 /// The history a filed conversation would be answered from, in the order it was said.
