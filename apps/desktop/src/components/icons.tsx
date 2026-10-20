@@ -16,8 +16,6 @@ const PATHS = {
     "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 3v18M16.5 9l-3 3 3 3",
   sidebarExpand:
     "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 3v18M13.5 9l3 3-3 3",
-  panelRight:
-    "M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z",
   back: "M15 5l-7 7 7 7",
   forward: "M9 5l7 7-7 7",
   // A terminal inside a square, not a check: the pill names the mode that edits files, and the
@@ -90,8 +88,10 @@ const PATHS = {
   clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2",
   bolt: "M13 2 4 14h7l-1 8 9-12h-7z",
   diamond: "M6 3h12l3 6-9 12L3 9zM3 9h18M9 3 6 9l6 12 6-12-3-6",
+  // Each track stops at its handle's edge rather than its centre: a line that ends under the
+  // hollow circle is visible through it, which reads as a smudge at the 16px the picker draws.
   sliders:
-    "M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M16 6a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM10 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM18 18a2 2 0 1 0-4 0 2 2 0 0 0 4 0z",
+    "M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2M16 6a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM10 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM18 18a2 2 0 1 0-4 0 2 2 0 0 0 4 0z",
   wand: "M15 4V2M15 10V8M12.5 6h-2M18.5 6h-2M5 20l9-9M13.5 7.5 16.5 10.5",
   shield: "M12 3 4 6v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V6z",
   cube: "M12 2 3 7v10l9 5 9-5V7zM3 7l9 5 9-5M12 12v10",
