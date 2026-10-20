@@ -75,6 +75,8 @@ impl Inventory {
             workspace_root: root.to_path_buf(),
             read_outside_workspace: false,
             network_allowed: settings.privacy.allow_remote_providers,
+            shell_allowed: settings.approvals.shell_enabled,
+            shell_timeout_secs: (settings.approvals.shell_timeout_ms / 1000).max(1),
             extra_denied: Vec::new(),
         };
         let tools: Vec<ToolRow> = registry()
@@ -113,13 +115,13 @@ mod tests {
         inv.tools.iter().find(|r| r.id == id).expect("tool")
     }
 
-    /// The four reads, the two workspace writes and the two web calls are what the Coding control
-    /// actually offers today, and the page has to say so: a list that showed all thirty as live
-    /// would describe an agent this build does not have.
+    /// The four reads, the two workspace writes, the two web calls and the one command are what the
+    /// Coding control actually offers today, and the page has to say so: a list that showed all thirty
+    /// as live would describe an agent this build does not have.
     #[test]
-    fn the_bounded_reads_the_writes_and_the_web_calls_are_what_a_call_can_run_through() {
+    fn the_reads_the_writes_the_web_calls_and_the_shell_are_what_a_call_can_run_through() {
         let inv = inventory(&Settings::default());
-        assert_eq!(inv.runnable, 8, "{:?}", inv.tools);
+        assert_eq!(inv.runnable, 9, "{:?}", inv.tools);
         for id in ["read_file", "list_dir", "glob", "grep_search"] {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "auto", "{id}");
@@ -137,8 +139,13 @@ mod tests {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "blocked", "{id}");
         }
-        // And the calls that would take a file away, or run a command, are still declared only.
-        for id in ["delete_path", "apply_patch", "terminal"] {
+        // The command has an executor too, and its own switch — off by default, so the page shows it
+        // refused rather than merely waiting for the dial.
+        assert!(row(&inv, "terminal").runnable);
+        assert_eq!(row(&inv, "terminal").decision, "blocked");
+        // And the calls that would take a file away, apply a patch, or run something else are still
+        // declared only.
+        for id in ["delete_path", "apply_patch", "run_tests"] {
             assert!(!row(&inv, id).runnable, "{id}");
         }
     }
@@ -155,15 +162,43 @@ mod tests {
         assert_eq!(row(&inv, "web_search").decision, "auto");
         assert_eq!(row(&inv, "fetch_url").decision, "auto");
         // Nothing else on the list changed: the switch opens the network class, not a shell.
-        assert_eq!(row(&inv, "terminal").decision, "ask");
+        assert_eq!(row(&inv, "terminal").decision, "blocked");
     }
 
-    /// A destructive call under the default dial asks rather than running, and the page says "ask" —
-    /// which is the difference between an agent and a script, so it is not something to smooth over.
+    /// The Terminal switch is the shell's consent the way the Privacy switch is the web calls': with
+    /// it on, the default dial runs a command; in Ask mode the command still has to ask, which this
+    /// build cannot show, so the page says the truth for each.
+    #[test]
+    fn the_terminal_switch_is_what_moves_the_shell_from_blocked_to_auto() {
+        let settings = Settings {
+            approvals: smollm_config::agent::Approvals {
+                shell_enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let inv = inventory(&settings);
+        assert_eq!(row(&inv, "terminal").decision, "auto");
+        let asking = Settings {
+            approvals: smollm_config::agent::Approvals {
+                mode: ApprovalMode::AskAlways,
+                shell_enabled: true,
+                ..Default::default()
+            },
+            ..settings
+        };
+        assert_eq!(row(&inventory(&asking), "terminal").decision, "ask");
+    }
+
+    /// A declared side effect under the default dial still asks, and the page says "ask" — which is
+    /// the difference between an agent and a script, so it is not something to smooth over. The shell
+    /// is not that row any more: it has an executor and a switch, and the switch's off position is
+    /// what keeps it out of a run.
     #[test]
     fn a_side_effecting_tool_under_auto_approve_still_has_to_ask() {
         let inv = inventory(&Settings::default());
-        assert_eq!(row(&inv, "terminal").decision, "ask");
+        assert_eq!(row(&inv, "run_tests").decision, "ask");
+        assert!(!row(&inv, "run_tests").runnable);
     }
 
     /// Plan-only is the dial that turns the agent into a reader. The page has to move with it, or it

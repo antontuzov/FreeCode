@@ -112,6 +112,7 @@ const CONTROLS: Record<Page, string[]> = {
   ],
   agent: [
     "approvalMode",
+    "shellEnabled",
     "shellTimeout",
     "compressAt",
     "keepRecentTurns",
@@ -786,6 +787,13 @@ function Agent({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
               label: t(`opt.${v}`),
             }))}
             onChange={(v) => set((d) => void (d.approvals.mode = v))}
+          />
+        </Row>
+        <Row title={t("row.shellEnabled")} description={t("row.shellEnabled.desc")}>
+          <Toggle
+            on={approvals.shellEnabled}
+            label={t("row.shellEnabled")}
+            onChange={(next) => set((d) => void (d.approvals.shellEnabled = next))}
           />
         </Row>
         <Row title={t("row.shellTimeout")} description={t("row.shellTimeout.desc")}>

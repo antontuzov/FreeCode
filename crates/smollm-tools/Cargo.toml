@@ -19,5 +19,9 @@ walkdir = { workspace = true }
 # Already in the tree through the host's downloader, so this adds an edge rather than a package.
 reqwest = { workspace = true, features = ["blocking"] }
 
+[target.'cfg(unix)'.dependencies]
+# Killing a command's whole process group on timeout; `std` can signal the child only.
+libc = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }

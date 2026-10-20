@@ -4,7 +4,7 @@
 //! What lives here is the contract every executor obeys — a tool cannot exist unless it has an id, a
 //! schema, and a declared permission class, because both the approval engine and the sandbox make
 //! their decisions from those two facts alone. Only [`EXECUTABLE`] of them have an executor yet, in
-//! [`crate::exec`]; the rest wait on the shell, patch and git halves of the loop.
+//! [`crate::exec`]; the rest wait on the patch and git halves of the loop.
 //!
 //! One detail from `KNOWN_ISSUES.md` is baked into [`ToolCall::arguments_wire`]: this model emits tool
 //! calls whose `arguments` are empty or non-JSON, and the fork's server answers those with HTTP 500
@@ -206,13 +206,17 @@ pub fn registry() -> Vec<ToolDescriptor> {
         ToolDescriptor {
             id: "terminal",
             title: "Terminal command ran",
-            description: "Run a shell command in the workspace directory.",
+            description: "Run one shell command with the workspace as its starting directory. Only \
+                offered while Terminal access is switched on in Settings. The command runs with the \
+                user's own permissions, so it is not confined to the workspace; it is stopped at the \
+                timeout, and only the tail of its output comes back. Use it to build, run or test what \
+                this workspace contains.",
             permission: SideEffect,
             requires_network: false,
             input_schema: s(
                 json!({
                     "command": { "type": "string" },
-                    "cwd": { "type": "string" },
+                    "cwd": { "type": "string", "description": "Workspace-relative directory" },
                     "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 600 }
                 }),
                 &["command"],
@@ -465,15 +469,16 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
         .collect()
 }
 
-/// The tools this build can actually run: the four workspace reads, the two writes, and the two calls
-/// that reach the internet, whose executors live in [`crate::exec`] and [`crate::web`].
+/// The tools this build can actually run: the four workspace reads, the two writes, the command, and
+/// the two calls that reach the internet, whose executors live in [`crate::exec`] and [`crate::web`].
 ///
 /// The rest of the registry is a declaration with no verb behind it — a schema, a permission class,
-/// and nothing that touches the disk. Offering one of those would invite the model to ask for a shell
-/// command or a delete that can only come back refused, so a run that carries tools hands over this
-/// list and nothing else. The two writes are on it because the sandbox bounds them to the workspace
-/// root — one makes a file that is not there, the other changes text it has to find first; the shell
-/// is not, because nothing bounds it.
+/// and nothing that touches the disk. Offering one of those would invite the model to ask for a patch
+/// or a delete that can only come back refused, so a run that carries tools hands over this list and
+/// nothing else. The two writes are on it because the sandbox bounds them to the workspace root — one
+/// makes a file that is not there, the other changes text it has to find first. The shell is on it
+/// because the user's Terminal access switch bounds it: the switch is off by default, and
+/// [`executable_specs`] does not hand it over until the switch says so.
 pub const EXECUTABLE: &[&str] = &[
     "read_file",
     "list_dir",
@@ -481,6 +486,7 @@ pub const EXECUTABLE: &[&str] = &[
     "grep_search",
     "write_file",
     "edit_file",
+    "terminal",
     "web_search",
     "fetch_url",
 ];
@@ -489,16 +495,18 @@ pub fn is_executable(tool_id: &str) -> bool {
     EXECUTABLE.contains(&tool_id)
 }
 
-/// The declaration side for [`EXECUTABLE`], minus the two web calls while `network` is off.
+/// The declaration side for [`EXECUTABLE`], minus the two web calls while `network` is off and the
+/// command while `shell` is off.
 ///
-/// The gate itself is [`crate::authorize`], which refuses a network tool either way — but a tool that
-/// is offered and then refused is a promise the interface made and broke, and it costs the model a
-/// round to learn so. When the Privacy switch is off, the offer itself has to say that nothing leaves
-/// the machine.
-pub fn executable_specs(network: bool) -> Vec<Value> {
+/// The gate itself is [`crate::authorize`], which refuses either one anyway — but a tool that is
+/// offered and then refused is a promise the interface made and broke, and it costs the model a round
+/// to learn so. When a switch is off, the offer itself has to say what this run cannot reach.
+pub fn executable_specs(network: bool, shell: bool) -> Vec<Value> {
     registry()
         .into_iter()
-        .filter(|t| is_executable(t.id) && (network || !t.requires_network))
+        .filter(|t| {
+            is_executable(t.id) && (network || !t.requires_network) && (shell || t.id != "terminal")
+        })
         .map(spec)
         .collect()
 }
@@ -670,31 +678,20 @@ mod tests {
     ///
     /// The other half of the rule is what the loop promises a run: everything offered either is a
     /// workspace read the sandbox bounds, or is one of the two writes it bounds, or is a call that
-    /// leaves the machine and therefore only stands on the list while the Privacy switch is on. A
-    /// shell or a delete appearing here would mean nothing at all stands between a run and the
-    /// machine.
+    /// leaves the machine and therefore only stands on the list while the Privacy switch is on, or is
+    /// the command — which stands on the list only while Terminal access is on, and is the one offer
+    /// the path sandbox does not bound. A delete or a patch appearing here would mean nothing at all
+    /// stands between a run and the machine.
     #[test]
-    fn only_bounded_reads_the_two_writes_and_the_web_calls_are_offered_to_a_run() {
+    fn only_bounded_reads_the_writes_the_switchable_web_calls_and_the_shell_are_offered() {
         for id in EXECUTABLE {
             let tool = find(id).unwrap_or_else(|| panic!("{id} is offered but not declared"));
-            assert!(
-                matches!(
-                    tool.permission,
-                    PermissionClass::ReadOnly
-                        | PermissionClass::WorkspaceWrite
-                        | PermissionClass::Network
-                ),
-                "{id} is offered with {:?}, which the sandbox does not bound",
-                tool.permission
-            );
-            // And a network-class offer is only ever a web call: nothing that reaches the machine's own
-            // addresses belongs on a list gated by one switch.
-            if tool.permission == PermissionClass::Network {
-                assert!(
-                    matches!(*id, "web_search" | "fetch_url"),
-                    "{id} is a network tool someone else declared"
-                );
-            }
+            let allowed = match tool.permission {
+                PermissionClass::ReadOnly | PermissionClass::WorkspaceWrite => true,
+                PermissionClass::Network => matches!(*id, "web_search" | "fetch_url"),
+                PermissionClass::SideEffect => *id == "terminal",
+            };
+            assert!(allowed, "{id} is offered with {:?}", tool.permission);
         }
         let writes: Vec<&str> = EXECUTABLE
             .iter()
@@ -710,16 +707,19 @@ mod tests {
             !is_executable("delete_path"),
             "a run cannot take a file away"
         );
-        assert!(!is_executable("terminal"));
+        assert!(
+            is_executable("terminal"),
+            "the shell has an executor; the switch is what keeps it out of a run"
+        );
         // `codebase_search` is a declared read with no index behind it, so it stays out too.
         assert!(!is_executable("codebase_search"));
-        assert_eq!(executable_specs(true).len(), EXECUTABLE.len());
-        assert!(executable_specs(true)
+        assert_eq!(executable_specs(true, true).len(), EXECUTABLE.len());
+        assert!(executable_specs(true, true)
             .iter()
             .all(|s| s["type"] == json!("function")));
-        // With the switch off, the two web calls are not offered at all — refused-and-explained would
-        // spend a round of the run to arrive at the same answer.
-        let offline = executable_specs(false);
+        // With the Privacy switch off, the two web calls are not offered at all — refused-and-explained
+        // would spend a round of the run to arrive at the same answer.
+        let offline = executable_specs(false, true);
         let names: Vec<&str> = offline
             .iter()
             .map(|s| s["function"]["name"].as_str().unwrap())
@@ -727,5 +727,16 @@ mod tests {
         assert_eq!(names.len(), EXECUTABLE.len() - 2, "{names:?}");
         assert!(!names.contains(&"web_search"), "{names:?}");
         assert!(!names.contains(&"fetch_url"), "{names:?}");
+        // And with Terminal access off, the command is not offered either, whatever the other switch
+        // says. This is the offer the default settings produce.
+        for network in [true, false] {
+            let specs = executable_specs(network, false);
+            let names: Vec<&str> = specs
+                .iter()
+                .map(|s| s["function"]["name"].as_str().unwrap())
+                .collect();
+            assert!(!names.contains(&"terminal"), "{names:?}");
+            assert_eq!(names.len(), EXECUTABLE.len() - if network { 1 } else { 3 });
+        }
     }
 }

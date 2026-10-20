@@ -42,6 +42,10 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   const toggleReview = useNav((s) => s.toggleReview);
   const [draft, setDraft] = useState("");
   const mode = useSettings((s) => s.doc?.approvals.mode);
+  // The shell's switch changes what the Coding tooltip may promise: with it on, a run can also issue
+  // one command, and that is the one call the tooltip's "nothing else reaches past this machine" would
+  // otherwise be wrong about.
+  const shell = useSettings((s) => s.doc?.approvals.shellEnabled ?? false);
   // The Coding control: whether the next prompt offers the workspace reads. It is per prompt rather
   // than per conversation, because each round costs the context window a tool result, and that is a
   // price the user agrees to one question at a time rather than once per chat.
@@ -260,7 +264,16 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
             className={`icon-btn ${coding ? "bg-accent-soft text-fg-strong" : ""}`}
             aria-label={translate(locale, "composer.coding")}
             aria-pressed={coding}
-            title={translate(locale, coding ? "composer.coding.on" : "composer.coding.off")}
+            title={translate(
+              locale,
+              coding
+                ? shell
+                  ? "composer.coding.onShell"
+                  : "composer.coding.on"
+                : shell
+                  ? "composer.coding.offShell"
+                  : "composer.coding.off",
+            )}
           >
             <Icon name="coding" />
           </button>

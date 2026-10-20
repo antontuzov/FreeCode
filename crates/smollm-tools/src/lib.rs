@@ -9,10 +9,10 @@
 //!     entry point that runs a call after [`authorize`] has cleared it;
 //!   * [`web`] — the search and the guarded page read those network calls run.
 //!
-//! A shell still has no executor here: a loop that offers a tool has to be able to say *why* it refused
-//! one, which is what [`ToolsError::NoExecutor`] is for. The engine's tool-call quirk is already
-//! accounted for here: an empty `arguments` object must be sent as `"{}"`, because the fork answers
-//! HTTP 500 otherwise (llama.cpp#112).
+//! A shell now has an executor, but it is the one capability the path sandbox cannot bound: it runs
+//! only while the user's Terminal access switch is on, and [`authorize`] refuses it otherwise. The
+//! engine's tool-call quirk is already accounted for here: an empty `arguments` object must be sent as
+//! `"{}"`, because the fork answers HTTP 500 otherwise (llama.cpp#112).
 
 pub mod exec;
 pub mod registry;
@@ -43,6 +43,8 @@ pub enum ToolsError {
     NetworkNotConfigured(String),
     #[error("this build has no executor for {0}: it is declared but not implemented")]
     NoExecutor(String),
+    #[error("Terminal access is switched off in Settings, so no command was run")]
+    ShellDisabled,
     #[error("{tool} could not open {path} ({reason})")]
     Io {
         tool: String,
@@ -72,6 +74,9 @@ pub fn authorize(
         policy
             .check_network()
             .map_err(|_| ToolsError::NetworkNotConfigured(tool_id.into()))?;
+    }
+    if tool.id == "terminal" && !policy.shell_allowed {
+        return Err(ToolsError::ShellDisabled);
     }
     let access = if tool.is_read_only() {
         Access::Read

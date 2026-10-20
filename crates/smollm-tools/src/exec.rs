@@ -1,12 +1,13 @@
-//! The executors: four calls that read the workspace, two that change files in it, and two that
-//! reach the internet.
+//! The executors: four calls that read the workspace, two that change files in it, one command, and
+//! two that reach the internet.
 //!
 //! Every one of them takes `(arguments, policy)` and goes through [`authorize`] first, so a call
 //! cannot reach the disk without the sandbox having resolved its path, and the loop has no way to skip
-//! that check. A shell still has none — which is why a run that carries tools offers
-//! [`EXECUTABLE`](crate::registry::EXECUTABLE) and refuses anything else out loud instead of
-//! pretending to try it. The two network calls stand behind the same switch that admits a remote
-//! provider, and [`crate::web`] is where their own rules live.
+//! that check. The shell is the one capability a path check cannot bound, so it is refused outright
+//! unless the user's Terminal access switch is on; when it runs, it starts in the workspace, is killed
+//! as a process group at the configured timeout, and hands back only the tail of its output. The two
+//! network calls stand behind the same switch that admits a remote provider, and [`crate::web`] is
+//! where their own rules live.
 //!
 //! The two writes here are `edit_file` and `write_file`, and they are the reason the sandbox's
 //! `Access::Write` exists: a path outside the workspace root, or onto a protected name, is refused by
@@ -28,6 +29,8 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use walkdir::WalkDir;
@@ -155,12 +158,18 @@ pub enum SummaryKey {
     PageCut,
     /// One file created.
     FileCreated,
+    /// A command that finished, with `{{code}}` as its exit status.
+    TerminalExit,
+    /// A command stopped by its timeout after `{{seconds}}` seconds.
+    TerminalTimedOut,
+    /// A command ended by a signal rather than by an exit status.
+    TerminalStopped,
 }
 
 impl SummaryKey {
     /// Every key the executors can answer with, so a catalog entry no executor reaches is named as the
     /// dead copy it is.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 24] = [
         Self::Empty,
         Self::Lines,
         Self::NoRange,
@@ -182,6 +191,9 @@ impl SummaryKey {
         Self::Results,
         Self::PageCut,
         Self::FileCreated,
+        Self::TerminalExit,
+        Self::TerminalTimedOut,
+        Self::TerminalStopped,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -207,6 +219,9 @@ impl SummaryKey {
             Self::Results => "transcript.summary.results",
             Self::PageCut => "transcript.summary.pageCut",
             Self::FileCreated => "transcript.summary.fileCreated",
+            Self::TerminalExit => "transcript.summary.terminalExit",
+            Self::TerminalTimedOut => "transcript.summary.terminalTimedOut",
+            Self::TerminalStopped => "transcript.summary.terminalStopped",
         }
     }
 
@@ -224,11 +239,14 @@ impl SummaryKey {
             Self::MatchesInFiles => &["count", "files"],
             Self::NoResults => &["query"],
             Self::PageCut => &["title"],
+            Self::TerminalExit => &["code"],
+            Self::TerminalTimedOut => &["seconds"],
             Self::Empty
             | Self::MatchInFile
             | Self::CopyReplaced
             | Self::Result
-            | Self::FileCreated => &[],
+            | Self::FileCreated
+            | Self::TerminalStopped => &[],
         }
     }
 }
@@ -314,6 +332,7 @@ pub fn execute(
         "grep_search" => search_content(tool.id, arguments, policy),
         "edit_file" => edit_file(tool.id, arguments, policy),
         "write_file" => write_file(tool.id, arguments, policy),
+        "terminal" => terminal(tool.id, arguments, policy),
         // The two that leave the machine. Neither takes the policy: `authorize` has already refused
         // them without the Privacy switch, and a URL is not a path the sandbox can resolve.
         "web_search" => web_search(tool.id, arguments),
@@ -766,6 +785,229 @@ fn edit_file(
         summary,
         edit: Some(edit),
     })
+}
+
+/// How much of each stream a command may keep while it runs. Twice the result budget, because stdout
+/// and stderr are merged and then cut to one: the tail of a build is where its errors are, so the
+/// bytes kept have to be the last ones rather than the first.
+const SHELL_KEEP_BYTES: usize = MAX_RESULT_BYTES * 2;
+
+/// Run one command in the workspace, with the switch that admits it already checked in [`authorize`].
+///
+/// This is the one executor whose reach the path sandbox cannot bound: the command runs under the
+/// app's own user, so the only honest statement about it is the toggle that turned it on. What this
+/// function adds is the part the toggle does not: a fixed starting directory, a deadline that kills
+/// the whole process group rather than its first process, and the tail of the output instead of all
+/// of it. A nonzero exit is a result, not a tool failure — the model asked what the command would
+/// say, and the exit status is part of the answer.
+fn terminal(tool: &str, arguments: &Value, policy: &SandboxPolicy) -> Result<Executed, ToolsError> {
+    let command = required(tool, arguments, "command")?.trim().to_string();
+    let refuse = |reason: String| ToolsError::InvalidArguments {
+        tool: tool.to_string(),
+        reason,
+    };
+    if command.is_empty() {
+        return Err(refuse(
+            "\"command\" is empty, so nothing was run".to_string(),
+        ));
+    }
+    let cwd = match text_arg(arguments, "cwd") {
+        Some(raw) => resolve(policy, raw, Access::Write)?,
+        None => policy.workspace_root.clone(),
+    };
+    if !cwd.is_dir() {
+        return Err(refuse(format!(
+            "{} is not a directory in this workspace",
+            relative(policy, &cwd)
+        )));
+    }
+    let seconds = number_arg(arguments, "timeout_seconds")
+        .unwrap_or(policy.shell_timeout_secs as usize)
+        .clamp(1, 600) as u64;
+
+    let mut child = shell_command(&command, &cwd)
+        .spawn()
+        .map_err(|e| io_error(tool, &command, &e))?;
+    // Both pipes drain on their own thread: a command that fills one while the loop waits on the
+    // other would deadlock before it ever reached its deadline.
+    let stdout = child.stdout.take().map(drain);
+    let stderr = child.stderr.take().map(drain);
+    let started = Instant::now();
+    let ended = wait_limited(&mut child, Duration::from_secs(seconds))?;
+    let out = stdout.and_then(|t| t.join().ok()).unwrap_or_default();
+    let err = stderr.and_then(|t| t.join().ok()).unwrap_or_default();
+    let elapsed = started.elapsed();
+
+    let mut body = String::from_utf8_lossy(&out.bytes).to_string();
+    let err_text = String::from_utf8_lossy(&err.bytes);
+    if !err_text.is_empty() {
+        if !body.is_empty() && !body.ends_with('\n') {
+            body.push('\n');
+        }
+        body.push_str(&err_text);
+    }
+    let total = out.total + err.total;
+    let (shown, held) = tail(&body, MAX_RESULT_BYTES);
+    let held = held + (total - body.len().min(total));
+
+    let summary = match ended {
+        Ended::TimedOut => Summary::said(
+            SummaryKey::TerminalTimedOut,
+            json!({ "seconds": seconds }),
+            format!("stopped after {seconds}s"),
+        ),
+        Ended::Exited(status) => match status.code() {
+            Some(code) => Summary::said(
+                SummaryKey::TerminalExit,
+                json!({ "code": code }),
+                format!("exit {code}"),
+            ),
+            None => Summary::said(
+                SummaryKey::TerminalStopped,
+                json!({}),
+                "stopped by a signal",
+            ),
+        },
+    };
+
+    let mut content = format!("$ {command}\n");
+    let dir = relative(policy, &cwd);
+    if dir != "." {
+        content.push_str(&format!("(in {dir})\n"));
+    }
+    if shown.is_empty() {
+        content.push_str("(no output)\n");
+    } else {
+        content.push_str(&shown);
+        if !shown.ends_with('\n') {
+            content.push('\n');
+        }
+    }
+    if held > 0 {
+        content.push_str(&format!("…{held} earlier bytes of output are not shown.\n"));
+    }
+    content.push_str(&format!(
+        "[{} in {:.1}s]",
+        summary.text,
+        elapsed.as_secs_f64()
+    ));
+    Ok(Executed {
+        summary,
+        content,
+        edit: None,
+    })
+}
+
+/// The command as this platform spells a shell: `sh -c` on Unix, where the child is also made its own
+/// group leader so a timeout can kill what it started; `cmd /C` elsewhere.
+fn shell_command(command: &str, cwd: &Path) -> Command {
+    #[cfg(unix)]
+    let mut cmd = {
+        use std::os::unix::process::CommandExt;
+        let mut c = Command::new("sh");
+        c.arg("-c").arg(command);
+        c.process_group(0);
+        c
+    };
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg(command);
+        c
+    };
+    cmd.current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    cmd
+}
+
+/// What the deadline decided.
+enum Ended {
+    Exited(ExitStatus),
+    TimedOut,
+}
+
+fn wait_limited(child: &mut Child, limit: Duration) -> Result<Ended, ToolsError> {
+    let deadline = Instant::now() + limit;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(Ended::Exited(status)),
+            Ok(None) => {}
+            Err(e) => {
+                return Err(ToolsError::Io {
+                    tool: "terminal".into(),
+                    path: "command".into(),
+                    reason: e.to_string(),
+                })
+            }
+        }
+        if Instant::now() >= deadline {
+            kill_group(child);
+            let _ = child.wait();
+            return Ok(Ended::TimedOut);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Take the whole process group down with the shell. The group id is the shell's own pid because
+/// [`shell_command`] started it as a leader; killing only the shell would leave a `sleep` or a build
+/// running after the run had already reported it stopped.
+#[cfg(unix)]
+fn kill_group(child: &mut Child) {
+    let pid = child.id() as i32;
+    // SAFETY: `kill` takes plain integers; the negative id names the process group, and a group that
+    // has already exited fails harmlessly with ESRCH.
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_group(child: &mut Child) {
+    let _ = child.kill();
+}
+
+/// A pipe's bytes, with the head dropped as it overflows and the full count kept, so the answer can
+/// say how much of the output it left out rather than pretending the command printed only this.
+#[derive(Default)]
+struct Drained {
+    bytes: Vec<u8>,
+    total: usize,
+}
+
+fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Drained> {
+    std::thread::spawn(move || {
+        let mut kept = Drained::default();
+        let mut buf = [0u8; 8 * 1024];
+        loop {
+            match pipe.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    kept.total += n;
+                    kept.bytes.extend_from_slice(&buf[..n]);
+                    if kept.bytes.len() > SHELL_KEEP_BYTES {
+                        let cut = kept.bytes.len() - SHELL_KEEP_BYTES;
+                        kept.bytes.drain(..cut);
+                    }
+                }
+            }
+        }
+        kept
+    })
+}
+
+/// The last `max` bytes of a string on a character boundary, and how many bytes were dropped.
+fn tail(text: &str, max: usize) -> (String, usize) {
+    if text.len() <= max {
+        return (text.to_string(), 0);
+    }
+    let mut cut = text.len() - max;
+    while !text.is_char_boundary(cut) {
+        cut += 1;
+    }
+    (text[cut..].to_string(), cut)
 }
 
 /// How much of one search hit's sentence survives. Eight hits at the provider's full length would
@@ -2003,6 +2245,147 @@ mod tests {
                 "{err:?}"
             );
         }
+    }
+
+    /// The workspace with Terminal access on, as the host builds it from the user's switch.
+    fn shell_policy(root: &Path) -> SandboxPolicy {
+        SandboxPolicy {
+            workspace_root: root.to_path_buf(),
+            shell_allowed: true,
+            shell_timeout_secs: 120,
+            ..Default::default()
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_starts_in_the_workspace_and_answers_with_its_output() {
+        let (d, _) = plain();
+        let p = shell_policy(d.path());
+        // The write lands in the workspace root without being told a directory: the cwd is the whole
+        // reason a run's build does not scatter artefacts somewhere else.
+        let got = ran(
+            "terminal",
+            &json!({ "command": "printf hi > made-by-shell.txt" }),
+            &p,
+        )
+        .unwrap();
+        assert_eq!(got.summary.text, "exit 0");
+        assert_eq!(
+            std::fs::read_to_string(d.path().join("made-by-shell.txt")).unwrap(),
+            "hi"
+        );
+        assert!(got.content.starts_with("$ printf hi"), "{}", got.content);
+        assert!(got.content.contains("[exit 0 in "), "{}", got.content);
+        // A silent command says so rather than leaving a blank result.
+        let silent = ran("terminal", &json!({ "command": "true" }), &p).unwrap();
+        assert!(silent.content.contains("(no output)"), "{}", silent.content);
+        // And a `cwd` inside the workspace is where the command starts instead.
+        ran(
+            "terminal",
+            &json!({ "command": "printf x > nested.txt", "cwd": "src" }),
+            &p,
+        )
+        .unwrap();
+        assert!(d.path().join("src/nested.txt").exists());
+    }
+
+    #[test]
+    fn a_command_is_refused_while_terminal_access_is_off() {
+        let (d, p) = plain();
+        assert!(!p.shell_allowed, "the fixture is the default policy");
+        let err = ran("terminal", &json!({ "command": "echo hi" }), &p)
+            .expect_err("a switched-off shell cannot run");
+        assert!(matches!(err, ToolsError::ShellDisabled), "{err:?}");
+        // The refusal is the same one `authorize` gives every other caller of `execute`.
+        assert!(!d.path().join("made-by-shell.txt").exists());
+    }
+
+    #[test]
+    fn a_command_cannot_start_outside_the_workspace() {
+        let (d, p) = plain();
+        let p = SandboxPolicy {
+            shell_allowed: true,
+            ..p
+        };
+        let err = ran("terminal", &json!({ "command": "ls", "cwd": ".." }), &p)
+            .expect_err("the workspace is the command's boundary too");
+        assert!(matches!(err, ToolsError::Sandbox(_)), "{err:?}");
+        // A path inside the workspace that is not a directory names the mistake instead of running.
+        let err = ran(
+            "terminal",
+            &json!({ "command": "ls", "cwd": "src/lib.rs" }),
+            &p,
+        )
+        .expect_err("a file is not a starting directory");
+        assert!(err.to_string().contains("not a directory"), "{err}");
+        let err = ran("terminal", &json!({ "command": "  " }), &p)
+            .expect_err("an empty command is not a command");
+        assert!(err.to_string().contains("empty"), "{err}");
+        let _ = d;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failing_command_answers_its_exit_code_and_its_stderr() {
+        let (d, _) = plain();
+        let p = shell_policy(d.path());
+        let got = ran(
+            "terminal",
+            &json!({ "command": "echo oops >&2; exit 3" }),
+            &p,
+        )
+        .unwrap();
+        // A nonzero exit is the command's answer, not a failed call: the model asked what it would say.
+        assert_eq!(got.summary.text, "exit 3");
+        assert!(got.content.contains("oops"), "{}", got.content);
+        assert!(got.content.contains("[exit 3 in "), "{}", got.content);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_past_its_timeout_is_stopped_and_says_after_how_long() {
+        let (d, _) = plain();
+        let p = shell_policy(d.path());
+        let started = Instant::now();
+        let got = ran(
+            "terminal",
+            &json!({ "command": "sleep 5", "timeout_seconds": 1 }),
+            &p,
+        )
+        .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "the deadline did not stop the command: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(got.summary.text, "stopped after 1s");
+        assert!(
+            got.content.contains("[stopped after 1s in"),
+            "{}",
+            got.content
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_the_tail_of_a_flood_is_kept_and_the_gap_is_named() {
+        let (d, _) = plain();
+        let p = shell_policy(d.path());
+        let got = ran("terminal", &json!({ "command": "seq 1 20000" }), &p).unwrap();
+        assert!(
+            got.content.len() <= MAX_RESULT_BYTES + 300,
+            "{} bytes of answer",
+            got.content.len()
+        );
+        assert!(
+            got.content.contains("are not shown"),
+            "the cut is named: {}",
+            &got.content[..120.min(got.content.len())]
+        );
+        // The tail is what a build's errors are in, so the last number survives the cut.
+        assert!(got.content.contains("20000"), "{}", got.content);
+        assert!(!got.content.contains("\n1\n"), "the head was kept instead");
     }
 
     #[test]

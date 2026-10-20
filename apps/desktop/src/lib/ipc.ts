@@ -431,6 +431,8 @@ export type VoiceDoc = {
 export type ApprovalsDoc = {
   mode: ApprovalMode;
   toolOverrides: Record<string, boolean>;
+  /** Off by default: the one switch that lets the loop run a command, and the consent it stands on. */
+  shellEnabled: boolean;
   shellAllow: string[];
   shellDeny: string[];
   shellTimeoutMs: number;

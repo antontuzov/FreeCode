@@ -2,9 +2,10 @@
 //!
 //! Every side effect passes through here, which is what makes the transcript honest: a call that
 //! runs silently is a call nobody can audit. The rules are the configured [`Approvals`] policy plus
-//! two things the policy cannot express on its own — a mutating tool in Plan-only mode is refused
-//! outright, and a network-class tool is refused whenever no remote provider is configured, so the
-//! "Local" badge keeps reflecting reality.
+//! three things the policy cannot express on its own — a mutating tool in Plan-only mode is refused
+//! outright, a network-class tool is refused whenever no remote provider is configured, so the
+//! "Local" badge keeps reflecting reality, and the terminal is refused whenever its own switch is off,
+//! because no path check bounds a command.
 
 use serde::{Deserialize, Serialize};
 use smollm_config::agent::{ApprovalMode, Approvals, PermissionClass};
@@ -106,6 +107,12 @@ pub fn evaluate(
         return Pending::Decided(ApprovalDecision::BlockedByPolicy);
     }
 
+    // 2b. The command runs with the user's own permissions, so the path sandbox cannot speak for it.
+    // Its switch is the consent, and while it is off the call is refused without asking.
+    if tool.id == "terminal" && !sandbox.shell_allowed {
+        return Pending::Decided(ApprovalDecision::BlockedByPolicy);
+    }
+
     // 3. An explicitly denied shell command is blocked without prompting; an explicitly allowed one
     //    runs without asking. These lists are the user's own words, so they outrank the mode.
     if let Some(cmd) = arguments.get("command").and_then(|v| v.as_str()) {
@@ -167,10 +174,20 @@ mod tests {
     #[test]
     fn side_effects_prompt_with_the_exact_command_in_the_headline() {
         let dir = tempfile::tempdir().unwrap();
-        let approvals = Approvals::default();
+        // Ask mode still asks for a command the switch has admitted; what it cannot do is satisfy the
+        // prompt in this build, which is why the switch — not the mode — is the terminal's consent.
+        let approvals = Approvals {
+            mode: ApprovalMode::AskAlways,
+            shell_enabled: true,
+            ..Default::default()
+        };
+        let shell = SandboxPolicy {
+            shell_allowed: true,
+            ..sandbox(dir.path())
+        };
         let tool = find("terminal").unwrap();
         let args = json!({ "command": "cargo test" });
-        match evaluate(&tool, &args, &approvals, &sandbox(dir.path()), "call-1") {
+        match evaluate(&tool, &args, &approvals, &shell, "call-1") {
             Pending::Prompt(req) => {
                 assert_eq!(req.headline, "Run `cargo test`");
                 assert_eq!(req.command.as_deref(), Some("cargo test"));
@@ -179,6 +196,38 @@ mod tests {
             }
             other => panic!("terminal must prompt: {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_switched_off_shell_is_refused_before_the_mode_can_approve_it() {
+        let dir = tempfile::tempdir().unwrap();
+        // Auto mode approves workspace writes; the shell is the one call it must not approve while the
+        // Terminal switch is off, because the switch is the only place that consent can be given.
+        let tool = find("terminal").unwrap();
+        let args = json!({ "command": "cargo test" });
+        assert_eq!(
+            evaluate(
+                &tool,
+                &args,
+                &Approvals::default(),
+                &sandbox(dir.path()),
+                "c"
+            ),
+            Pending::Decided(ApprovalDecision::BlockedByPolicy)
+        );
+        // And on, in Auto mode, the switch's answer runs it without a prompt.
+        let on = Approvals {
+            shell_enabled: true,
+            ..Default::default()
+        };
+        let shell = SandboxPolicy {
+            shell_allowed: true,
+            ..sandbox(dir.path())
+        };
+        assert_eq!(
+            evaluate(&tool, &args, &on, &shell, "c"),
+            Pending::Decided(ApprovalDecision::AutoAllowed)
+        );
     }
 
     #[test]
@@ -278,10 +327,14 @@ mod tests {
         let approvals = Approvals {
             shell_allow: vec!["cargo test".into()],
             shell_deny: vec!["rm".into()],
+            shell_enabled: true,
             ..Default::default()
         };
         let tool = find("terminal").unwrap();
-        let s = sandbox(dir.path());
+        let s = SandboxPolicy {
+            shell_allowed: true,
+            ..sandbox(dir.path())
+        };
         assert_eq!(
             evaluate(
                 &tool,
@@ -302,11 +355,27 @@ mod tests {
             ),
             Pending::Decided(ApprovalDecision::BlockedByPolicy)
         );
-        // A command that mentions but is not `rm` must not be swept up by the deny entry.
-        assert!(matches!(
+        // A command that mentions but is not `rm` must not be swept up by the deny entry; with the
+        // switch on, Auto mode runs what the lists did not deny.
+        assert_eq!(
             evaluate(&tool, &json!({ "command": "echo rm" }), &approvals, &s, "c"),
-            Pending::Prompt(_)
-        ));
+            Pending::Decided(ApprovalDecision::AutoAllowed)
+        );
+        // The switch outranks the allow list: with it off nothing runs, however the list reads.
+        let off = Approvals {
+            shell_allow: vec!["cargo test".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            evaluate(
+                &tool,
+                &json!({ "command": "cargo test" }),
+                &off,
+                &sandbox(dir.path()),
+                "c"
+            ),
+            Pending::Decided(ApprovalDecision::BlockedByPolicy)
+        );
     }
 
     #[test]

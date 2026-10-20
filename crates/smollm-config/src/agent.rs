@@ -44,6 +44,9 @@ pub struct Approvals {
     /// Per-command allow/deny list for shell.run.
     pub shell_allow: Vec<String>,
     pub shell_deny: Vec<String>,
+    /// Off by default: a command runs with this user's permissions, so the switch is the consent the
+    /// approval prompt would otherwise ask for. Nothing in the loop offers `terminal` while it is off.
+    pub shell_enabled: bool,
     pub shell_timeout_ms: u64,
 }
 
@@ -54,6 +57,7 @@ impl Default for Approvals {
             tool_overrides: BTreeMap::new(),
             shell_allow: Vec::new(),
             shell_deny: Vec::new(),
+            shell_enabled: false,
             shell_timeout_ms: Self::default_timeout_ms(),
         }
     }
@@ -75,6 +79,16 @@ impl Approvals {
     pub fn decide(&self, tool_id: &str, class: PermissionClass) -> Option<bool> {
         if let Some(explicit) = self.tool_overrides.get(tool_id) {
             return Some(*explicit);
+        }
+        // The terminal is the one side effect a switch could stand in for: there is no prompt in this
+        // build to ask with, and the switch says in advance what the prompt would. It only reaches
+        // here while the sandbox's own `shell_allowed` is on — the engine refuses a switched-off shell
+        // before the mode is consulted.
+        if tool_id == "terminal" && self.shell_enabled && self.mode != ApprovalMode::AskAlways {
+            return Some(matches!(
+                self.mode,
+                ApprovalMode::AutoApprove | ApprovalMode::Custom
+            ));
         }
         match self.mode {
             ApprovalMode::AskAlways => None,
@@ -198,6 +212,42 @@ mod tests {
         assert_eq!(
             a.decide("shell.run", PermissionClass::SideEffect),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn the_terminal_is_off_until_its_switch_is_on_and_never_auto_runs_in_ask_mode() {
+        let off = Approvals::default();
+        assert!(!off.shell_enabled);
+        assert_eq!(
+            off.decide("terminal", PermissionClass::SideEffect),
+            None,
+            "a switched-off shell is not approved by the mode"
+        );
+        let on = Approvals {
+            shell_enabled: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            on.decide("terminal", PermissionClass::SideEffect),
+            Some(true)
+        );
+        assert_eq!(
+            Approvals {
+                shell_enabled: true,
+                mode: ApprovalMode::AskAlways,
+                ..Default::default()
+            }
+            .decide("terminal", PermissionClass::SideEffect),
+            None,
+            "Ask still means ask, even with the switch on"
+        );
+        // An explicit override outranks the switch in both directions.
+        let mut blocked = on.clone();
+        blocked.tool_overrides.insert("terminal".into(), false);
+        assert_eq!(
+            blocked.decide("terminal", PermissionClass::SideEffect),
+            Some(false)
         );
     }
 

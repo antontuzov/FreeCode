@@ -74,6 +74,7 @@ function document_(): SettingsDoc {
     approvals: {
       mode: "ask_always",
       toolOverrides: {},
+      shellEnabled: false,
       shellAllow: [],
       shellDeny: [],
       shellTimeoutMs: 30_000,

@@ -44,6 +44,12 @@ pub struct SandboxPolicy {
     pub read_outside_workspace: bool,
     /// True only when the user configured a remote provider; gates the network tool class.
     pub network_allowed: bool,
+    /// True only when the user switched Terminal access on. Gates the shell executor, which is the
+    /// one capability the path sandbox cannot bound: a command may write anywhere this user can.
+    pub shell_allowed: bool,
+    /// How long a command may run before its process group is killed. The model may ask for less,
+    /// never more than the ceiling the registry declares.
+    pub shell_timeout_secs: u64,
     /// Extra denied names on top of [`DENIED_NAMES`].
     pub extra_denied: Vec<String>,
 }
@@ -54,6 +60,8 @@ impl Default for SandboxPolicy {
             workspace_root: PathBuf::from("."),
             read_outside_workspace: false,
             network_allowed: false,
+            shell_allowed: false,
+            shell_timeout_secs: 120,
             extra_denied: Vec::new(),
         }
     }

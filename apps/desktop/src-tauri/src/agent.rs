@@ -1,12 +1,13 @@
 //! The tool round: run what one answer asked for, and say in the transcript what each call did.
 //!
 //! This is the half of the agent loop that touches the machine. [`smollm_tools::EXECUTABLE`] names the
-//! calls that have executors — four reads of the workspace, two writes inside it, and two that reach
-//! the internet; anything else the model asks for is answered with a notice that says so rather than run,
-//! which is why the loop can keep the "Local" badge true and the composer's Coding control can stay an
-//! opt-in. The two web calls are only *offered* while the Privacy switch is on, so a run that can leave
-//! the machine is one the user asked for; the executors themselves are what bound the pair of them, the
-//! way the sandbox bounds the six that touch disk.
+//! calls that have executors — four reads of the workspace, two writes inside it, two that reach the
+//! internet, and one command; anything else the model asks for is answered with a notice that says so
+//! rather than run, which is why the loop can keep the "Local" badge true and the composer's Coding
+//! control can stay an opt-in. The web calls and the shell are only *offered* while their own switches
+//! are on, so a run that can leave the machine, or run with this user's permissions, is one the user
+//! asked for; the executors themselves are what bound them, the way the sandbox bounds the six that
+//! touch disk.
 //!
 //! Every call takes the same road: [`smollm_core::approvals`] decides, [`smollm_tools::authorize`]
 //! resolves its paths against the workspace sandbox inside [`smollm_tools::execute`], and only then
@@ -85,9 +86,11 @@ fn rows_for(calls: &[ToolCall]) -> usize {
         .count()
 }
 
-/// The sandbox every read in this build goes through: the workspace the window is open on, with no
-/// reads outside it, and the network gated on the one privacy setting that could make the "Local"
-/// badge false. Writes are not this module's to allow, and the policy does not claim to.
+/// The sandbox every tool call in this build goes through: the workspace the window is open on, with no
+/// reads outside it, the network gated on the one privacy setting that could make the "Local" badge
+/// false, and the shell gated on its own switch. The shell is the one call the path sandbox cannot
+/// bound — a command runs with this user's permissions — so the switch, off by default, is the consent
+/// rather than a path rule that would only be a promise.
 pub fn policy_for(app: &AppHandle, settings: &Settings) -> Result<SandboxPolicy, String> {
     Ok(SandboxPolicy {
         workspace_root: crate::paths::workspace_root(Some(app))?,
@@ -95,6 +98,10 @@ pub fn policy_for(app: &AppHandle, settings: &Settings) -> Result<SandboxPolicy,
         // answer than the file. The workspace is what the task is about.
         read_outside_workspace: false,
         network_allowed: settings.privacy.allow_remote_providers,
+        shell_allowed: settings.approvals.shell_enabled,
+        // The page already bounds the field at 5–600 s; a document edited by hand is bounded again by
+        // the executor, which clamps to 1–600. A zero here would otherwise mean "kill immediately".
+        shell_timeout_secs: (settings.approvals.shell_timeout_ms / 1000).max(1),
         extra_denied: Vec::new(),
     })
 }
@@ -117,8 +124,9 @@ fn run_one(app: &AppHandle, call: &ToolCall, settings: &Settings, policy: &Sandb
             result: format!(
                 "{name} is not available in this build: it reads nothing and changes nothing. The \
                  tools it has are read_file, list_dir, glob, grep_search, write_file and edit_file, \
-                 which reach nothing outside this workspace, plus web_search and fetch_url, which reach \
-                 the internet only while the Privacy switch is on."
+                 which reach nothing outside this workspace; web_search and fetch_url, which reach the \
+                 internet only while the Privacy switch is on; and terminal, which runs only while \
+                 Terminal access is on."
             ),
         };
     }
@@ -234,7 +242,7 @@ fn cleared(
 /// The row's label argument: the path or pattern the call worked on, shown as the chip beside
 /// "Read file" rather than buried in a sentence about it.
 fn subject(name: &str, arguments: &Value) -> String {
-    ["path", "pattern", "file", "query", "url"]
+    ["path", "pattern", "file", "query", "url", "command"]
         .iter()
         .find_map(|key| arguments.get(*key).and_then(Value::as_str))
         .unwrap_or(name)
@@ -247,6 +255,7 @@ fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
         "grep_search" => StepKind::SearchContent,
         "edit_file" => StepKind::EditFile,
         "write_file" => StepKind::CreateFile,
+        "terminal" => StepKind::Terminal,
         "web_search" => StepKind::WebSearch,
         "fetch_url" => StepKind::WebReading,
         _ => StepKind::Tool,
@@ -287,6 +296,12 @@ mod tests {
         );
         // A call that named neither still gets a label rather than an empty chip.
         assert_eq!(subject("list_dir", &json!({})), "list_dir");
+        // A command is the row's subject too: "cargo test" reads as the thing that ran, where the tool's
+        // own name would only say that something did.
+        assert_eq!(
+            subject("terminal", &json!({ "command": "cargo test" })),
+            "cargo test"
+        );
     }
 
     #[test]
@@ -298,7 +313,7 @@ mod tests {
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(smollm_tools::EXECUTABLE.len(), 8);
+        assert_eq!(smollm_tools::EXECUTABLE.len(), 9);
         // The writes are the rows the pill is built from, so neither can silently degrade to a generic
         // tool — and a create says create, because a row that reads "Edit file" over a file the run
         // invented would be the transcript contradicting the review under it.
@@ -319,6 +334,12 @@ mod tests {
         assert_eq!(
             started_row("fetch_url", &json!({ "url": "https://example.com" })).kind,
             StepKind::WebReading
+        );
+        // A command reads as a command: a row that said "Ran tool" over `rm -rf target` would hide the
+        // one call whose subject is the exact words that ran.
+        assert_eq!(
+            started_row("terminal", &json!({ "command": "cargo test" })).kind,
+            StepKind::Terminal
         );
     }
 

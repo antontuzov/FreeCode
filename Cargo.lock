@@ -3620,6 +3620,7 @@ name = "smollm-tools"
 version = "0.1.0"
 dependencies = [
  "glob",
+ "libc",
  "regex",
  "reqwest 0.12.28",
  "serde",
