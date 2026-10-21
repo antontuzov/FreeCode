@@ -488,6 +488,9 @@ export type SettingsDoc = {
   privacy: { telemetry: boolean; allowRemoteProviders: boolean };
   remoteProvider: RemoteProviderDoc;
   context: { compressAtRatio: number; keepRecentTurns: number };
+  /** The folder a run works in. Empty means the root the host resolved; anything else must be an
+   * absolute path the host can open, or the run is refused by name. */
+  project: { root: string };
   localModel: {
     catalogId: string;
     packing: PackingChoice;
@@ -747,6 +750,12 @@ export const ipc = {
   loadSettings: () => invoke<SettingsDoc>("load_settings"),
   /** Validated by deserialising on the host side; the answer is what actually landed on disk. */
   saveSettings: (settings: SettingsDoc) => invoke<SettingsDoc>("save_settings", { settings }),
+  /**
+   * Show the desktop's folder chooser over the window and answer with the path, or `null` when the
+   * user cancelled. The host shows it, so the webview is never given a filesystem capability; the
+   * title is passed in because the dialog is the interface's language, not the host's.
+   */
+  chooseProjectFolder: (title: string) => invoke<string | null>("choose_project_folder", { title }),
   /**
    * Whether the Keychain holds a remote-provider key. The key itself is never returned: the page can
    * write one, remove it, and learn whether one is saved, which is the whole IPC surface of the secret.

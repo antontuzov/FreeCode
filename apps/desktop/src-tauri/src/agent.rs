@@ -70,14 +70,14 @@ fn rows_for(calls: &[ToolCall]) -> usize {
     calls.iter().filter(|call| is_runnable(&call.name)).count()
 }
 
-/// The sandbox every tool call in this build goes through: the workspace the window is open on, with no
-/// reads outside it, the network gated on the one privacy setting that could make the "Local" badge
-/// false, and the shell gated on its own switch. The shell is the one call the path sandbox cannot
-/// bound — a command runs with this user's permissions — so the switch, off by default, is the consent
-/// rather than a path rule that would only be a promise.
+/// The sandbox every tool call in this build goes through: the project folder chosen in Settings — or
+/// the root the host resolved when none was — with no reads outside it, the network gated on the one
+/// privacy setting that could make the "Local" badge false, and the shell gated on its own switch. The
+/// shell is the one call the path sandbox cannot bound — a command runs with this user's permissions —
+/// so the switch, off by default, is the consent rather than a path rule that would only be a promise.
 pub fn policy_for(app: &AppHandle, settings: &Settings) -> Result<SandboxPolicy, String> {
     Ok(SandboxPolicy {
-        workspace_root: crate::paths::workspace_root(Some(app))?,
+        workspace_root: crate::paths::project_root(Some(app), settings)?,
         // A model that names `/etc/hosts` gets the sandbox's sentence about it, which is a better
         // answer than the file. The workspace is what the task is about.
         read_outside_workspace: false,

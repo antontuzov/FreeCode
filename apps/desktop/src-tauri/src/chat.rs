@@ -1694,7 +1694,7 @@ pub async fn chat_send(
     file_turn(
         &app,
         &state,
-        &sessions::workspace_label(&app),
+        &sessions::workspace_label(&app, &settings),
         &model_label,
         Role::User,
         &text,
@@ -1762,7 +1762,7 @@ pub async fn chat_send(
                 file_turn(
                     &app,
                     &state,
-                    &sessions::workspace_label(&app),
+                    &sessions::workspace_label(&app, &settings),
                     &model_label,
                     Role::Assistant,
                     &reply.text,

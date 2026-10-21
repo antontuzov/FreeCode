@@ -103,6 +103,7 @@ pub struct Settings {
     pub approvals: Approvals,
     pub privacy: Privacy,
     pub context: Context,
+    pub project: Project,
     pub local_model: LocalModel,
     pub remote_provider: RemoteProvider,
 }
@@ -117,10 +118,21 @@ impl Default for Settings {
             approvals: Approvals::default(),
             privacy: Privacy::default(),
             context: Context::default(),
+            project: Project::default(),
             local_model: LocalModel::default(),
             remote_provider: RemoteProvider::default(),
         }
     }
+}
+
+/// The folder a run works in. Empty means the root the host resolved — the checkout in a development
+/// build, the app's data directory once installed — which is the only place a build with no picker
+/// could reach. A chosen folder is stored as the user named it and resolved by the host, never joined
+/// against the process's working directory, because a dev run and a bundle start in different places.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Project {
+    pub root: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

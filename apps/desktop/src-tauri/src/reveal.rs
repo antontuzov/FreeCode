@@ -16,13 +16,14 @@ use tauri::AppHandle;
 
 /// The workspace's own policy, built here rather than borrowed from the agent's.
 ///
-/// A run's reads follow the settings the user last saved, and one of those settings allows reads
-/// outside the workspace. Launching a file is not a read: the desktop hands it to whatever program
-/// claims that kind, so this command keeps the narrower rule and confines the path to the workspace
-/// whatever the rest of the app is configured to allow.
+/// The root is the project folder the run was confined to, so a file the panel names is one this
+/// command can actually reach. Launching a file is not a read though: the desktop hands it to
+/// whatever program claims that kind, so this command keeps the narrower rule and confines the path
+/// to that folder whatever the rest of the app is configured to allow.
 fn policy(app: &AppHandle) -> Result<SandboxPolicy, String> {
+    let settings = crate::appearance::load_settings()?;
     Ok(SandboxPolicy {
-        workspace_root: crate::paths::workspace_root(Some(app))?,
+        workspace_root: crate::paths::project_root(Some(app), &settings)?,
         ..SandboxPolicy::default()
     })
 }

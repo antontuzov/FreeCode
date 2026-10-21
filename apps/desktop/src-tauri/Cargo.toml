@@ -28,6 +28,9 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri-plugin-opener = "2.7.2"
+# The project folder is chosen with the desktop's own chooser. The dialog runs from the host rather
+# than the webview, so the page is handed a path and still holds no filesystem capability of its own.
+tauri-plugin-dialog = "2"
 # A code fence's copy control writes through the host, because the webview is not a place the web
 # Clipboard API can be counted on. Text only, so the image feature stays off.
 arboard = { version = "3", default-features = false }

@@ -26,6 +26,7 @@ mod weights;
 use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager, Theme};
+use tauri_plugin_dialog::DialogExt;
 
 use appearance::AppearanceView;
 use knowledge::Center;
@@ -67,7 +68,10 @@ async fn knowledge_center(app: AppHandle) -> Result<Center, String> {
 /// and sandbox applied to every row by the same engine that decides a call mid-run.
 #[tauri::command]
 async fn extensions_inventory(app: AppHandle) -> Result<extensions::Inventory, String> {
-    let (root, settings) = root_and_settings(&app)?;
+    let settings = appearance::load_settings()?;
+    // The folder a run's file calls are confined to, which is the project picked in Settings and not
+    // necessarily the directory this host unpacks its engine into.
+    let root = paths::project_root(Some(&app), &settings)?;
     tauri::async_runtime::spawn_blocking(move || extensions::Inventory::build(&root, &settings))
         .await
         .map_err(|e| format!("tool inventory failed: {e}"))
@@ -161,6 +165,26 @@ async fn save_settings(app: AppHandle, mut settings: Settings) -> Result<Setting
     appearance::save_settings(&settings)?;
     wear_icon(&app, settings.appearance.app_icon);
     Ok(settings)
+}
+
+/// Open the desktop's folder chooser and hand back the folder the user picked, or nothing when they
+/// cancel. The dialog runs here rather than in the webview, so the page is handed a path and still
+/// holds no filesystem capability of its own. The answer is not stored here: the settings document
+/// belongs to the page, and a write from this side would race the copy the user is editing.
+#[tauri::command]
+async fn choose_project_folder(app: AppHandle, title: String) -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title(title)
+            .set_can_create_directories(false)
+            .blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| format!("the folder chooser stopped: {e}"))?;
+    Ok(picked
+        .and_then(|folder| folder.into_path().ok())
+        .map(|path| path.display().to_string()))
 }
 
 /// Whether the Keychain holds a remote-provider key. The key itself never crosses this boundary.
@@ -274,6 +298,9 @@ pub fn run() {
         // in an answer. The UI cannot reach it directly — the capability scopes it to `http` and
         // `https`, so a `file://` or a `javascript:` address in a model's own text never launches.
         .plugin(tauri_plugin_opener::init())
+        // The project folder is picked with the platform's own chooser. Registered as a Rust plugin,
+        // so no dialog permission is handed to the webview: the only caller is the host command.
+        .plugin(tauri_plugin_dialog::init())
         // The duck this launch wears, handed to the page before any of its own scripts run, so the
         // window and the Dock tile are the same picture from the first frame rather than a moment
         // apart. See `brand`.
@@ -294,6 +321,9 @@ pub fn run() {
             save_appearance,
             load_settings,
             save_settings,
+            // The project folder, chosen with the desktop's own folder dialog. It answers with the
+            // path and stores nothing; the Settings surface writes the document it is editing.
+            choose_project_folder,
             // The remote provider's one secret, held by the macOS Keychain rather than the settings
             // document. The page can ask whether a key is there, replace it, or remove it — never
             // read it back.

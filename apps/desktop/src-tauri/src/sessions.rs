@@ -16,8 +16,9 @@
 //!     only the words would claim the model answered without touching anything. The reasoning stream
 //!     is still deliberately never written back (Bonsai-demo#183), and neither is a picture's bytes
 //!     twice over: a filed row names the turn's image by its place in `turns`, which already holds it.
-//! *   **Nothing invented.** The workspace name is the folder the host resolved its root from, the
-//!     title is the user's own first sentence cut short, and the model is the label the run printed.
+//! *   **Nothing invented.** The workspace name is the folder the run worked in — the project picked in
+//!     Settings, or the root the host resolved with no pick — the title is the user's own first
+//!     sentence cut short, and the model is the label the run printed.
 //!     The rows are the window's own, handed over at the end of a turn rather than reconstructed here.
 //!     A field with no real source is a field this module does not have.
 
@@ -247,11 +248,14 @@ fn trash_dir(dir: &Path) -> PathBuf {
 }
 
 /// The folder a conversation belongs to, named the way the status card names it: the last component
-/// of the root the host resolved. A checkout gives the repository's directory; an installed app gives
-/// the data directory its catalog was mirrored into.
-pub fn workspace_label(app: &AppHandle) -> String {
-    crate::paths::workspace_root(Some(app))
+/// of the folder a run works in. That is the project folder picked in Settings when there is one, and
+/// otherwise the root the host resolved — the checkout's directory in a development build, the data
+/// directory an installed app mirrored its catalog into. Sessions already filed keep the name they
+/// were filed under; picking another folder groups the new work under it rather than rewriting them.
+pub fn workspace_label(app: &AppHandle, settings: &smollm_config::Settings) -> String {
+    crate::paths::project_root(Some(app), settings)
         .ok()
+        .or_else(|| crate::paths::workspace_root(Some(app)).ok())
         .or_else(crate::paths::app_data_dir)
         .and_then(|root| {
             root.file_name()

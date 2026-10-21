@@ -88,6 +88,7 @@ function document_(): SettingsDoc {
       contextTokens: 32_768,
     },
     context: { compressAtRatio: 0.8, keepRecentTurns: 4 },
+    project: { root: "" },
     localModel: {
       catalogId: "ternary-bonsai-1-7b",
       packing: "auto",

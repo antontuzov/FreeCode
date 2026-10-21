@@ -99,7 +99,10 @@ the local engine as a fallback, so "Remote" cannot silently mean "local anyway".
 
 - **The workspace.** Reads (`read_file`, `list_dir`, `glob`, `grep_search`) and the two writes
   (`write_file`, which only ever creates a file that is not there, and `edit_file`) are bounded to the
-  workspace root the app reports on its Extensions page.
+  workspace root the app reports on its Extensions page. That root is the project folder chosen in
+  Settings → Agent → Project, opened with the desktop's own folder dialog; until one is chosen it is
+  the checkout (development) or the app's data directory (installed). A chosen folder that has since
+  moved refuses the run by name instead of falling back to either.
 - **The web, only when you say so.** `web_search` and `fetch_url` are blocked while
   Settings → Agent → Privacy is off, which is the default. When it is on, search goes to Wikipedia's
   keyless REST endpoint — one provider, named in the text the model reads — and `fetch_url` reads a

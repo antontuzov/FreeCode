@@ -43,8 +43,9 @@ pub struct Inventory {
     /// How many of them a call can actually run through. Printed beside the count of what is declared
     /// so the gap is the page's headline rather than a footnote.
     pub runnable: usize,
-    /// The directory a runnable call may read, as the host resolved it. A path the user needs to be
-    /// able to check, which is why it is on the page rather than only in the sandbox.
+    /// The folder a runnable call may read, as the run's sandbox resolves it — the project folder
+    /// picked in Settings when there is one. A path the user needs to be able to check, which is why
+    /// it is on the page rather than only in the sandbox.
     pub workspace_root: String,
     /// The dial in force, as the settings document spells it — the same wire spelling the Settings
     /// surface writes, so the page and the control cannot report different modes.

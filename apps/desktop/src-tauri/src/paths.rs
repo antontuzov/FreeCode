@@ -41,6 +41,41 @@ pub fn workspace_root(app: Option<&AppHandle>) -> Result<PathBuf, String> {
     root_from(std::env::var_os(ROOT_ENV), candidates(app), app_data_dir())
 }
 
+/// The folder a run's file calls are confined to: the one the user picked, or the root this host
+/// resolved when no folder was picked. A picked folder that has since moved is an error, not a cue to
+/// fall back — a run that quietly worked in the app's own directory instead of the project would
+/// report changes the user cannot find in the folder they chose.
+pub fn project_root(
+    app: Option<&AppHandle>,
+    settings: &smollm_config::Settings,
+) -> Result<PathBuf, String> {
+    let chosen = settings.project.root.trim();
+    if chosen.is_empty() {
+        return workspace_root(app);
+    }
+    let path = PathBuf::from(chosen);
+    // A dialog hands back an absolute path. A hand-edited one is resolved against the process's
+    // working directory otherwise, which is the checkout in a dev run and `/` in a bundle.
+    if !path.is_absolute() {
+        return Err(format!(
+            "the project folder {chosen} is not an absolute path. Choose it again from Settings."
+        ));
+    }
+    let root = path.canonicalize().map_err(|why| {
+        format!(
+            "the project folder {} cannot be opened: {why}. Choose another one from Settings.",
+            path.display()
+        )
+    })?;
+    if !root.is_dir() {
+        return Err(format!(
+            "the project folder {} is a file, not a folder. Choose another one from Settings.",
+            root.display()
+        ));
+    }
+    Ok(root)
+}
+
 /// A place the contract files might live, and whether the app is allowed to write there.
 struct Candidate {
     root: PathBuf,
@@ -245,6 +280,52 @@ mod tests {
             .expect("the repo root holds the contract files");
         assert!(root.join(smollm_models::CATALOG_REL).is_file());
         assert!(root.join(smollm_models::ENGINE_LOCK_REL).is_file());
+    }
+
+    #[test]
+    fn a_picked_folder_becomes_the_project_root() {
+        let chosen = tempfile::tempdir().unwrap();
+        let mut settings = smollm_config::Settings::default();
+        settings.project.root = chosen.path().display().to_string();
+        let root = project_root(None, &settings).unwrap();
+        assert_eq!(root, chosen.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn no_pick_keeps_the_root_the_host_resolved() {
+        let root = project_root(None, &smollm_config::Settings::default())
+            .expect("the checkout resolves without a pick");
+        assert!(root.join(smollm_models::CATALOG_REL).is_file());
+    }
+
+    /// A chosen folder that has moved must not quietly send the run to the app's own directory: the
+    /// sentence names the folder and the surface that can replace it.
+    #[test]
+    fn a_vanished_pick_is_refused_instead_of_falling_back() {
+        let chosen = tempfile::tempdir().unwrap();
+        let path = chosen.path().join("gone");
+        let mut settings = smollm_config::Settings::default();
+        settings.project.root = path.display().to_string();
+        let why = project_root(None, &settings).unwrap_err();
+        assert!(why.contains(&path.display().to_string()), "{why}");
+        assert!(why.contains("Settings"), "{why}");
+    }
+
+    #[test]
+    fn a_relative_pick_is_refused_because_a_bundle_starts_elsewhere() {
+        let mut settings = smollm_config::Settings::default();
+        settings.project.root = "my-project".into();
+        let why = project_root(None, &settings).unwrap_err();
+        assert!(why.contains("absolute"), "{why}");
+    }
+
+    #[test]
+    fn a_file_is_not_a_folder_the_run_can_work_in() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let mut settings = smollm_config::Settings::default();
+        settings.project.root = file.path().display().to_string();
+        let why = project_root(None, &settings).unwrap_err();
+        assert!(why.contains("not a folder"), "{why}");
     }
 
     #[test]

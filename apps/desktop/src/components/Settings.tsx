@@ -112,6 +112,7 @@ const CONTROLS: Record<Page, string[]> = {
     "liveVoiceShortcut",
   ],
   agent: [
+    "projectRoot",
     "approvalMode",
     "shellEnabled",
     "subagentsEnabled",
@@ -780,10 +781,87 @@ function Corrections({
   );
 }
 
+/**
+ * The folder runs work in, chosen with the desktop's own folder dialog.
+ *
+ * The dialog is opened by the host, so this control never learns what a filesystem is: it hands over a
+ * translated title and gets back an absolute path or nothing. The path is written into the settings
+ * document like any other field, which is what makes it survive the window and reach the next run's
+ * sandbox. Nothing here checks that the folder still exists — the host does that when it builds the
+ * policy, and says so by name, which is the answer the user can act on.
+ */
+function ProjectFolder({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const chosen = doc.project.root.trim();
+
+  const pick = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const path = await ipc.chooseProjectFolder(t("row.projectRoot.chooseTitle"));
+      if (path) set((d) => void (d.project.root = path));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex w-[260px] shrink-0 flex-col items-end gap-1.5">
+      <span
+        className={`w-full text-right text-fine ${chosen ? "break-all font-mono text-fg" : "text-faint"}`}
+      >
+        {chosen || t("row.projectRoot.default")}
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void pick()}
+          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-md)] bg-accent px-2.5 py-1 text-fine font-medium text-accent-contrast disabled:opacity-60"
+        >
+          {busy
+            ? t("row.projectRoot.choosing")
+            : chosen
+              ? t("row.projectRoot.change")
+              : t("row.projectRoot.choose")}
+        </button>
+        {chosen !== "" && (
+          <button
+            type="button"
+            disabled={busy}
+            aria-label={t("row.projectRoot.resetTitle")}
+            onClick={() => {
+              setError(null);
+              set((d) => void (d.project.root = ""));
+            }}
+            className="whitespace-nowrap text-fine text-muted underline hover:text-fg disabled:opacity-60"
+          >
+            {t("row.projectRoot.reset")}
+          </button>
+        )}
+      </div>
+      {error && (
+        <span role="alert" className="text-right text-fine text-danger">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function Agent({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
   const { approvals, context, privacy } = doc;
   return (
     <>
+      <Section label={t("section.project")}>
+        <Row title={t("row.projectRoot")} description={t("row.projectRoot.desc")}>
+          <ProjectFolder doc={doc} set={set} t={t} />
+        </Row>
+      </Section>
+
       <Section label={t("section.approvals")}>
         <Row title={t("row.approvalMode")} description={t("row.approvalMode.desc")}>
           <Select
