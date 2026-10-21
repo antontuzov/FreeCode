@@ -19,7 +19,9 @@ engine or the host actually measured.
   searches, creates files, edits them and applies a multi-file patch; with the Privacy switch on it looks
   things up on the web, with Terminal access on it runs one command, and with Subagents on it may hand
   one self-contained question to a read-only second model run. That is what lets it lay out a small app
-  from nothing rather than only patch one. Each round narrates itself in the transcript; each write lands
+  from nothing rather than only patch one. The approval dial's **Plan only** mode turns the same run into
+  a proposer: it explores with the read-only calls and answers with a numbered plan instead of touching
+  the workspace. Each round narrates itself in the transcript; each write lands
   in a review panel with its diff, its line numbers, a find control inside it, and a press on its file row
   that hands the page to the desktop's own handler.
 - **Files conversations on this machine.** The sidebar searches them, reopens them, and moves deleted
@@ -113,8 +115,11 @@ the local engine as a fallback, so "Remote" cannot silently mean "local anyway".
 - **Approvals.** The mode the next run is built with — the composer's pill and Settings → Agent both
   edit the same value, which the host re-reads when a prompt is sent. A call it refuses comes back as a
   blocked row naming the policy. Nothing asks: this build has no prompt a run could wait on, so the mode
-  named "Ask every time" runs nothing. The Extensions page computes each tool's answer with the same
-  engine the loop uses mid-run, so the page cannot tell a friendlier story than the agent acts.
+  named "Ask every time" runs nothing. **Plan only** is a mode rather than a refusal alone: a Coding run
+  under it is offered the read-only calls, given a contract that asks for a plan, and its answer carries
+  a Plan mark so it cannot be read as a change that already happened. The Extensions page computes each
+  tool's answer with the same engine the loop uses mid-run, so the page cannot tell a friendlier story
+  than the agent acts.
 
 ## Where things live
 

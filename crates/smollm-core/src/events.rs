@@ -240,6 +240,10 @@ pub enum AgentEvent {
         /// announcement rather than a constant the interface copies, because the cap belongs to the
         /// loop: a window that guessed it would keep guessing after the host changed its budget.
         max_rounds: usize,
+        /// Whether the run may only read and propose. The approval dial's Plan-only mode puts the run
+        /// on the read-only offer and the planning contract, and this is what lets the transcript say
+        /// the answer is a plan rather than a change it decided not to make.
+        plan: bool,
     },
     /// Collapsed reasoning text, streamed.
     ThoughtDelta {
@@ -392,12 +396,14 @@ mod tests {
             model_label: "Ternary Bonsai 2 27B (PQ2_0)".into(),
             local: true,
             max_rounds: 4,
+            plan: true,
         };
         let raw = serde_json::to_value(&e).unwrap();
         assert_eq!(raw["type"], json!("runStarted"), "camelCase discriminator");
         assert_eq!(raw["modelLabel"], json!("Ternary Bonsai 2 27B (PQ2_0)"));
         assert_eq!(raw["local"], json!(true));
         assert_eq!(raw["maxRounds"], json!(4));
+        assert_eq!(raw["plan"], json!(true));
     }
 
     #[test]

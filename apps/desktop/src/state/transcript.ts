@@ -196,6 +196,12 @@ export type Turn = {
   stopped?: boolean;
   /** The refusal badge on an answer that never came: the "Local" badge says what the run was. */
   local?: boolean;
+  /**
+   * The run that wrote this answer was in plan mode: it read the workspace and proposed, and could
+   * not write. A mode is not visible after the run ends unless the answer says so, and an answer that
+   * reads like an offer to change something is exactly the one a reader would take for a change.
+   */
+  plan?: boolean;
 };
 
 export type Row = Step | Turn;
@@ -389,6 +395,7 @@ function pushStep(rows: Row[], step: Step): Row[] {
       text: "",
       streaming: true,
       local: turn.local,
+      plan: turn.plan,
     },
   ];
 }
@@ -597,6 +604,7 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
           text: "",
           streaming: true,
           local: event.local,
+          plan: event.plan || undefined,
         },
       ];
     case "thoughtDelta":

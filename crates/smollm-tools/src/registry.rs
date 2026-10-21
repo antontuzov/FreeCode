@@ -554,15 +554,16 @@ pub fn executable_specs(network: bool, shell: bool, subagents: bool) -> Vec<Valu
         .collect()
 }
 
-/// The read-only workspace calls a subagent is offered: the four workspace reads, the three git
-/// reads, and nothing that writes, runs or reaches the internet.
+/// The read-only calls: the four workspace reads, the three git reads, and nothing that writes,
+/// runs or reaches the internet.
 ///
-/// A subagent that could write would change files the parent's review never saw, which is the one
-/// thing this build's transcript cannot honestly report. Web reads stay out too: one switch already
-/// governs what leaves the machine, and a nested run is not the place to spend it a second time.
-/// The git calls are on the list because they read the repository with a fixed argv, which is the
-/// same bargain `read_file` makes with the sandbox.
-pub fn subagent_specs() -> Vec<Value> {
+/// Two kinds of run are offered exactly this list. A plan-mode run may explore and must propose the
+/// change rather than make it, so a write schema in its offer would be a promise the approval engine
+/// then refuses. A subagent could not write either: it would change files the parent's review never
+/// saw. Web reads stay out of both — one switch already governs what leaves the machine, and a plan
+/// or a nested run is not the place to spend it a second time. The git calls are on the list because
+/// they read the repository with a fixed argv, the same bargain `read_file` makes with the sandbox.
+pub fn read_only_specs() -> Vec<Value> {
     registry()
         .into_iter()
         .filter(|t| is_executable(t.id) && t.is_read_only())
@@ -907,8 +908,8 @@ mod tests {
     }
 
     #[test]
-    fn a_subagent_is_offered_the_reads_and_nothing_that_writes() {
-        let names: Vec<String> = subagent_specs()
+    fn a_read_only_offer_holds_the_reads_and_nothing_that_writes() {
+        let names: Vec<String> = read_only_specs()
             .iter()
             .map(|s| s["function"]["name"].as_str().unwrap().to_string())
             .collect();

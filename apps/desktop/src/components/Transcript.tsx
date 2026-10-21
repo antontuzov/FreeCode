@@ -256,6 +256,20 @@ function TurnRow({
   const waiting = turn.streaming && !turn.text && !turn.thought;
   return (
     <li className="row-enter py-1.5">
+      {turn.plan && (
+        // The mode is a setting on the composer, not a property of the prose: without this the plan
+        // and an answer that made the change read the same, which is the one thing plan mode must not
+        // let them do. The dial's own sentence is the tooltip, so the two cannot drift.
+        <p className="mb-1">
+          <span
+            className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] border border-line px-2 py-0.5 text-micro text-muted"
+            title={translate(locale, "composer.approve.plan_only")}
+          >
+            <Icon name="outline" size={11} />
+            {translate(locale, "transcript.plan")}
+          </span>
+        </p>
+      )}
       {turn.thought && (
         // Open while it is the only thing there, folded once the answer arrives.
         <details className="mb-1.5" open={!turn.text}>

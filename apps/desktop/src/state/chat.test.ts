@@ -264,7 +264,14 @@ describe("the event channel", () => {
 
     const stop = await connectAgentEvents();
     if (!listener) throw new Error("the channel was never subscribed");
-    listener({ type: "runStarted", runId: "r1", modelLabel: "Bonsai", local: true, maxRounds: 2 });
+    listener({
+      type: "runStarted",
+      runId: "r1",
+      modelLabel: "Bonsai",
+      local: true,
+      maxRounds: 2,
+      plan: false,
+    });
 
     expect(useChat.getState().announced).toBe(true);
     expect(useTranscript.getState().running).toBe(true);

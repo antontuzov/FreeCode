@@ -62,6 +62,7 @@ const STARTED: AgentEvent = {
   modelLabel: "Bonsai",
   local: true,
   maxRounds: 4,
+  plan: false,
 };
 
 beforeEach(() => {
@@ -381,6 +382,20 @@ describe("the reducer", () => {
   it("draws no step pill for a run that was never offered a tool", () => {
     apply({ ...STARTED, maxRounds: 0 });
     expect(useTranscript.getState().runRounds).toBeNull();
+  });
+
+  it("keeps the plan mark on every answer a plan run opens, not only the first", () => {
+    useTranscript.getState().pushPrompt("plan the change");
+    apply({ ...STARTED, plan: true });
+    apply({ type: "answerDelta", text: "I will read that." });
+    apply({ type: "toolStarted", step: hostStep({ id: "p1" }) });
+
+    // The tool round closes the spoken answer and opens a fresh one below the read; that answer is
+    // still the plan run's, and losing the mark there would make the plan read as a built change.
+    expect(at(rows(), 1)).toMatchObject({ kind: "turn", streaming: false, plan: true });
+    expect(at(rows(), 3)).toMatchObject({ kind: "turn", streaming: true, plan: true });
+    expect(at(rows(), 0)).toMatchObject({ kind: "turn", role: "user" });
+    expect((at(rows(), 0) as { plan?: boolean }).plan).toBeUndefined();
   });
 
   it("appends deltas to the turn the run opened, and drops one that has no turn to join", () => {

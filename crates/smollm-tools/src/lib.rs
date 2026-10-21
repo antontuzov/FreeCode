@@ -27,8 +27,9 @@ use smollm_config::agent::shell_governed;
 
 pub use exec::{execute, Edit, Executed, Summary, SummaryKey, MAX_RESULT_BYTES};
 pub use registry::{
-    executable_specs, find, is_delegated, is_executable, is_runnable, patch_target, registry,
-    subagent_specs, summary, tool_specs, ToolCall, ToolDescriptor, DELEGATED, EXECUTABLE,
+    executable_specs, find, is_delegated, is_executable, is_runnable, patch_target,
+    read_only_specs, registry, summary, tool_specs, ToolCall, ToolDescriptor, DELEGATED,
+    EXECUTABLE,
 };
 pub use sandbox::{Access, SandboxPolicy, SandboxViolation};
 pub use web::{

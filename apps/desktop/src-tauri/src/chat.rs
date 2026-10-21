@@ -35,7 +35,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-use smollm_config::{ModelSource, PackingChoice, ReasoningEffort, Settings, DEFAULT_SYSTEM_PROMPT};
+use smollm_config::{
+    ApprovalMode, ModelSource, PackingChoice, ReasoningEffort, Settings, DEFAULT_SYSTEM_PROMPT,
+};
 use smollm_core::events::{AgentEvent, NoticeCode, RunReport, ToolOutcome};
 use smollm_core::transcript::{DiffStat, StepStatus, TranscriptStep};
 use smollm_llama::{
@@ -82,6 +84,24 @@ workspace. You can read it with read_file, list_dir, glob and grep_search, and r
 with git_status, git_diff and git_log; you cannot change, create or run anything, and you cannot \
 reach the internet. Use the tools you need, then answer in plain prose: what you found, and which \
 files say so. Keep the answer short; the assistant that delegated the question may act on it.";
+
+/// The contract a plan-mode run is given instead of the shipped coding one, which opens by telling
+/// the model to make the change. Plan mode reads the workspace and answers with the change to make;
+/// a contract that says "make it" under a read-only offer spends the run on refused write calls.
+///
+/// The ending is as load-bearing as the beginning: a 1.7B model asked for a plan will happily start
+/// writing the implementation into the answer, and a plan the user cannot approve or reject without
+/// reading code is not the thing this mode promises.
+const PLAN_SYSTEM: &str = "\
+You are planning inside a local coding assistant, in plan mode. Your job is to decide what should \
+change and write the plan, not the change. You can explore the workspace with read_file, list_dir, \
+glob and grep_search, and read its repository with git_status, git_diff and git_log; you cannot \
+write, create, run or reach the internet, and asking for those tools will be refused. Read enough \
+to be sure — the files the change touches and the tests around them — then answer with a plan: a \
+short paragraph on what you found, then a numbered list of steps, each naming the file it changes \
+and the change it makes there. End with the files the plan touches and what you could not verify. \
+If nothing needs to change, say so. Do not paste the implementation; the user asks for it once the \
+plan reads right.";
 
 /// Sized for the largest pack the catalog offers, not the default one: a cold first load pages 5.95 GB
 /// of weights in from disk, and the observed warm load of that file on an M1 was under 11 s, so this is
@@ -1039,6 +1059,13 @@ async fn stream_turn(
     stream_round(answer, request, on_delta).await
 }
 
+/// Whether this run is the dial's Plan-only mode: it was offered tools and may read, but the answer
+/// is the change to make rather than the change itself. Coding off is a plain chat either way — there
+/// is no workspace to explore, so a planning contract would only make the answer odd.
+fn planning(settings: &Settings, tools: bool) -> bool {
+    tools && settings.approvals.mode == ApprovalMode::PlanOnly
+}
+
 /// The request for one round: the history as the host holds it now, with the run's own budget and the
 /// tools the composer asked for.
 ///
@@ -1050,22 +1077,41 @@ fn request_for(
     answer: &Answer,
     tools: bool,
 ) -> ChatRequest {
-    let mut request = ChatRequest::new(conversation(state, &settings.sampling.system_prompt));
+    let plan = planning(settings, tools);
+    let system = if plan {
+        plan_system(&settings.sampling.system_prompt)
+    } else {
+        settings.sampling.system_prompt.clone()
+    };
+    let mut request = ChatRequest::new(conversation(state, &system));
     request.max_tokens = answer.max_tokens();
     request.reasoning_effort = answer.effort().map(str::to_string);
     if tools {
-        // Only the calls this build has runners for — the four reads, the three workspace writes, the
-        // two web calls when the Privacy switch is on, the shell when Terminal access is on, and
-        // delegation when Subagents is on: a schema the host cannot run, or one that would leave the
-        // machine or start a second run against the user's stated wish, is a promise the model would
-        // be asked to break.
-        request.tools = smollm_tools::executable_specs(
-            settings.privacy.allow_remote_providers,
-            settings.approvals.shell_enabled,
-            settings.approvals.subagents_enabled,
-        );
+        request.tools = tool_offer(settings);
     }
     request
+}
+
+/// The calls a tool-offering run may ask for: every executable one the switches allow, or only the
+/// read-only seven while the dial says Plan only.
+///
+/// The read-only offer is the same list a subagent gets, and for the same reason: a tool offered and
+/// then refused costs the model a round, and the approval engine would refuse every write in this
+/// mode anyway. The planning contract can then name exactly what exists.
+fn tool_offer(settings: &Settings) -> Vec<Value> {
+    if settings.approvals.mode == ApprovalMode::PlanOnly {
+        return smollm_tools::read_only_specs();
+    }
+    // Only the calls this build has runners for — the four reads, the three workspace writes, the
+    // two web calls when the Privacy switch is on, the shell when Terminal access is on, and
+    // delegation when Subagents is on: a schema the host cannot run, or one that would leave the
+    // machine or start a second run against the user's stated wish, is a promise the model would
+    // be asked to break.
+    smollm_tools::executable_specs(
+        settings.privacy.allow_remote_providers,
+        settings.approvals.shell_enabled,
+        settings.approvals.subagents_enabled,
+    )
 }
 
 /// Whether the answer stopped to ask for a tool rather than finishing in prose.
@@ -1098,6 +1144,21 @@ fn subagent_system(parent: &str) -> String {
     }
 }
 
+/// The one system turn a plan-mode run is given: the same bargain as [`subagent_system`], with
+/// [`PLAN_SYSTEM`] in place of the subagent's bounds.
+///
+/// The shipped contract is replaced rather than prefixed, because its first instruction is the act
+/// this mode forbids. A prompt the user wrote still leads: it is their instruction about how work
+/// should be done, and the plan contract only says what this run may do about it.
+fn plan_system(parent: &str) -> String {
+    let parent = parent.trim();
+    if parent.is_empty() || parent == DEFAULT_SYSTEM_PROMPT {
+        PLAN_SYSTEM.to_string()
+    } else {
+        format!("{parent}\n\n{PLAN_SYSTEM}")
+    }
+}
+
 /// What one subagent run produced, for the row and the parent's tool result.
 struct Delegated {
     text: String,
@@ -1126,7 +1187,7 @@ async fn delegate(
     let mut request = ChatRequest::new(history.clone());
     request.max_tokens = answer.max_tokens();
     request.reasoning_effort = answer.effort().map(str::to_string);
-    request.tools = smollm_tools::subagent_specs();
+    request.tools = smollm_tools::read_only_specs();
 
     // Only a local server can count a prompt before it answers: `/apply-template` and `/tokenize`
     // are the fork's endpoints, not the OpenAI contract. A remote provider reports the oversize
@@ -1238,7 +1299,7 @@ async fn delegate(
         request = ChatRequest::new(history.clone());
         request.max_tokens = answer.max_tokens();
         request.reasoning_effort = answer.effort().map(str::to_string);
-        request.tools = smollm_tools::subagent_specs();
+        request.tools = smollm_tools::read_only_specs();
         if let Answer::Local(turn) = answer {
             if let Ok(sent) = prompt_tokens(
                 &turn.view.base_url,
@@ -1627,8 +1688,10 @@ fn is_picture(url: &str) -> bool {
 /// went out, so every later turn of this conversation still has it in front of the model.
 ///
 /// `tools` is the composer's Coding control. Off, this is the chat it has always been: one request,
-/// one streamed answer, and a tool call the model emits anyway becomes a notice. On, the four
-/// read-only tools are offered and [`run_rounds`] answers what the model asks for.
+/// one streamed answer, and a tool call the model emits anyway becomes a notice. On, the calls this
+/// build can run are offered and [`run_rounds`] answers what the model asks for — unless the approval
+/// dial says Plan only, in which case the run explores with the read-only calls and answers with a
+/// plan instead of changing the workspace.
 #[tauri::command]
 pub async fn chat_send(
     app: AppHandle,
@@ -1666,6 +1729,9 @@ pub async fn chat_send(
     }
 
     let settings = appearance::load_settings()?;
+    // Read from the settings this run will use, not from the page, so the announcement and the
+    // request cannot disagree about what the dial said.
+    let plan = planning(&settings, tools);
     let run_id = format!("run-{}", state.runs.fetch_add(1, Ordering::Relaxed) + 1);
     let stopped = AtomicBool::new(false);
     // This run's own tally, opened before its first request: the pill reads it, and a run that
@@ -1685,6 +1751,9 @@ pub async fn chat_send(
             // draw me" — a plain chat does not have a budget, and a pill saying `Step 0 / 0` over it
             // would be a counter of something that cannot happen.
             max_rounds: if tools { MAX_TOOL_ROUNDS } else { 0 },
+            // What the transcript needs to say the answer is a plan rather than a change the run
+            // decided not to make — the mode is a setting, and the dial may move before this run ends.
+            plan,
         },
     );
     lock(&state.history).push(prompt(&text, image.clone()));
@@ -2086,6 +2155,59 @@ mod tests {
         let mine = subagent_system("Answer like a pirate.");
         assert!(mine.starts_with("Answer like a pirate."));
         assert!(mine.ends_with(SUBAGENT_SYSTEM));
+    }
+
+    #[test]
+    fn a_plan_run_proposes_and_is_offered_only_the_reads() {
+        let mut settings = Settings::default();
+        settings.approvals.mode = ApprovalMode::PlanOnly;
+        assert!(planning(&settings, true));
+        // Coding off stays a plain chat: there is no workspace to explore, and a planning contract
+        // would only make a typed question's answer odd.
+        assert!(!planning(&settings, false));
+
+        // The shipped contract tells the model to make the change, which is exactly the act this
+        // mode forbids; the planning one replaces it rather than standing beside it.
+        assert_eq!(plan_system(DEFAULT_SYSTEM_PROMPT), PLAN_SYSTEM);
+        assert!(!PLAN_SYSTEM.contains("make the change"));
+        // A prompt the user wrote still leads, and the plan contract follows it.
+        let mine = plan_system("Answer in short bullets.");
+        assert!(mine.starts_with("Answer in short bullets."));
+        assert!(mine.ends_with(PLAN_SYSTEM));
+
+        let offer = tool_offer(&settings);
+        let names: Vec<&str> = offer
+            .iter()
+            .map(|spec| spec["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "read_file",
+                "list_dir",
+                "glob",
+                "grep_search",
+                "git_status",
+                "git_diff",
+                "git_log"
+            ],
+            "the plan-mode run gets the read-only seven and no write"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_coding_run_keeps_the_coding_contract_and_its_writes() {
+        let settings = Settings::default();
+        assert_eq!(settings.approvals.mode, ApprovalMode::AutoApprove);
+        assert!(!planning(&settings, true));
+        let offer = tool_offer(&settings);
+        let names: Vec<&str> = offer
+            .iter()
+            .map(|spec| spec["function"]["name"].as_str().unwrap())
+            .collect();
+        for id in ["write_file", "edit_file", "apply_patch"] {
+            assert!(names.contains(&id), "{id} is missing: {names:?}");
+        }
     }
 
     #[test]
