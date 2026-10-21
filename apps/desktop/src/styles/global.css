@@ -294,11 +294,15 @@ details[open] > summary .disclosure-icon {
 }
 /* Every `aria-disabled` glyph button is a control with nothing to do yet — an arrow at the front of
  * the history, the composer's mic. It takes the quietest ink in the window and stops answering the
- * pointer, so a pair of arrows reads as a position in a history rather than two identical buttons. */
-.icon-btn[aria-disabled="true"] {
+ * pointer, so a pair of arrows reads as a position in a history rather than two identical buttons.
+ * A `disabled` button is the same quietness for a different reason: its press has been taken and the
+ * answer is on its way, which is not a state to invite a second press into. */
+.icon-btn[aria-disabled="true"],
+.icon-btn:disabled {
   color: var(--text-faint);
 }
-.icon-btn[aria-disabled="true"]:hover {
+.icon-btn[aria-disabled="true"]:hover,
+.icon-btn:disabled:hover {
   background: transparent;
   color: var(--text-faint);
 }
@@ -1252,6 +1256,28 @@ select.field-input {
   margin: 0 var(--space-3) var(--space-2);
   font-size: var(--size-quiet);
   color: var(--danger);
+}
+/* The answer to a revert-all that could not even be asked — a reply still streaming, a workspace
+ * that has since gone — as opposed to one file the host refused, which keeps its sentence under its
+ * own row. */
+.review-revert-error {
+  margin-top: var(--space-3);
+}
+
+/* A file that has been put back keeps its row and its hunks: the run did write those lines, and the
+ * chip corrects the row rather than pretending the change never happened. Quiet ink, and the tick in
+ * the same green the added lines count in, because the row's claim is about the disk, not the diff. */
+.review-reverted {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: var(--space-1);
+  font-size: var(--size-micro);
+  white-space: nowrap;
+  color: var(--text-faint);
+}
+.review-reverted svg {
+  color: var(--success);
 }
 
 /* The change in the column shot 06 gives it: one block per file, its hunks as diff lines, a gutter of

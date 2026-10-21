@@ -143,30 +143,41 @@ pub(crate) fn run_one(
     emit(app, AgentEvent::ToolStarted { step: row.clone() });
 
     let staged = match cleared(name, &arguments, &call.id, settings, policy) {
-        Ok(()) => match execute(name, &arguments, policy) {
-            Ok(done) => {
-                // The executor's own report of what it wrote. Its paths are workspace-relative by
-                // construction, which is what makes two calls that named one file — one by its
-                // absolute path, one relatively — land on the same ledger row.
-                let written = written(&done.edits);
-                (
-                    ToolOutcome {
-                        diff: written.as_ref().map(|written| written.diff),
-                        ..ToolOutcome::ok(done.summary)
-                    },
-                    done.content,
-                    written,
-                )
+        Ok(()) => {
+            // Before the executor touches disk: these are the texts a revert puts back, and reading
+            // them here is what lets the pair of the old and the new state be recorded together.
+            let captured = crate::undo::capture(name, &arguments, policy);
+            match execute(name, &arguments, policy) {
+                Ok(done) => {
+                    // The executor's own report of what it wrote. Its paths are workspace-relative by
+                    // construction, which is what makes two calls that named one file — one by its
+                    // absolute path, one relatively — land on the same ledger row.
+                    app.state::<crate::chat::ChatState>()
+                        .remember(crate::undo::entries(
+                            &captured,
+                            &done.edits,
+                            &policy.workspace_root,
+                        ));
+                    let written = written(&done.edits);
+                    (
+                        ToolOutcome {
+                            diff: written.as_ref().map(|written| written.diff),
+                            ..ToolOutcome::ok(done.summary)
+                        },
+                        done.content,
+                        written,
+                    )
+                }
+                Err(why) => {
+                    let reason = why.to_string();
+                    (
+                        ToolOutcome::blocked(&reason),
+                        format!("{name} did not run: {reason}"),
+                        None,
+                    )
+                }
             }
-            Err(why) => {
-                let reason = why.to_string();
-                (
-                    ToolOutcome::blocked(&reason),
-                    format!("{name} did not run: {reason}"),
-                    None,
-                )
-            }
-        },
+        }
         Err(reason) => (
             ToolOutcome::blocked(&reason),
             format!("{name} did not run: {reason}"),

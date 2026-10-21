@@ -48,7 +48,7 @@ use smollm_models::{gguf, IntegrityStatus, ModelEntry};
 use smollm_tools::{SandboxPolicy, Summary, SummaryKey};
 
 use crate::agent::{self, Ran};
-use crate::{appearance, sessions, status};
+use crate::{appearance, sessions, status, undo};
 use sessions::{Role, Session};
 
 /// Event name the transcript subscribes to for the duration of the window.
@@ -424,6 +424,9 @@ pub struct ChatState {
     /// changed and every one of those lines still counts — which is the one thing [`DiffStat::merge`]
     /// cannot say, since it takes the larger of two files-changed counts rather than the union.
     staged: Mutex<BTreeMap<String, (u32, u32)>>,
+    /// The text each write replaced, for the review panel's revert. Belongs to this conversation, so
+    /// New task and opening a filed one both clear it: their files are not at the states held here.
+    undo: Mutex<undo::Journal>,
     /// Set by [`chat_stop`] and read by the run in flight at the next batch of deltas. A plain
     /// flag rather than a dropped future because the answer streamed so far has to survive: the
     /// request ends at a chunk boundary and returns what it had.
@@ -447,6 +450,11 @@ impl ChatState {
             entry.1 += removed;
         }
         self.staged_diff().expect("the ledger has a row now")
+    }
+
+    /// Hold what one call wrote, so the review can put it back.
+    pub fn remember(&self, entries: Vec<undo::Entry>) {
+        lock(&self.undo).record(entries);
     }
 
     /// The run's diff, or `None` while it has changed nothing — the difference between a pill that
@@ -1933,6 +1941,9 @@ fn forget_conversation(state: &ChatState) -> Result<(), String> {
         }
     }
     lock(&state.history).clear();
+    // The before-images belong to the conversation that was just thrown away, and its files may
+    // already have moved on. A revert is offered only for the run the window is showing.
+    lock(&state.undo).clear();
     // The measurement was of the conversation this just threw away: the next request replays
     // nothing, so there is no overflow left to announce.
     *lock(&state.last_fill) = None;
@@ -2007,8 +2018,39 @@ pub async fn open_session(app: AppHandle, id: String) -> Result<Session, String>
     // Whichever conversation the window was holding, its measurement is now about a different one.
     *lock(&state.history) = history_of(&session);
     *lock(&state.last_fill) = None;
+    // The reopened conversation's writes predate this window, and the states it would restore are
+    // not the ones its files hold now. Revert belongs to the conversation that wrote them here.
+    lock(&state.undo).clear();
     *lock(&state.session) = Some(session.clone());
     Ok(session)
+}
+
+/// Put files a run wrote back to what they held before it first touched them.
+///
+/// The before-images live in this conversation's journal, not in the filed transcript: an undo after
+/// a restart would need snapshots on disk, and this build would rather refuse than restore a state
+/// it cannot prove. Each path is checked before it is written — a file the user has edited since the
+/// run wrote it is reported, not overwritten — and the answer is per path so one refusal does not
+/// hide the files that did go back.
+#[tauri::command]
+pub async fn revert_changes(
+    app: AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<undo::Reverted>, String> {
+    {
+        let state = app.state::<ChatState>();
+        if lock(&state.slot).streaming {
+            return Err(
+                "a reply is still streaming; wait for it to finish before putting files back"
+                    .into(),
+            );
+        }
+    }
+    let settings = appearance::load_settings()?;
+    let root = crate::paths::project_root(Some(&app), &settings)?;
+    let state = app.state::<ChatState>();
+    let mut journal = lock(&state.undo);
+    Ok(journal.revert(&paths, &root))
 }
 
 /// File the transcript the window is holding over the conversation it belongs to.

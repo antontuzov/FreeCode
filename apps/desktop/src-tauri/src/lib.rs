@@ -20,6 +20,7 @@ mod reveal;
 mod sessions;
 mod status;
 mod storage;
+mod undo;
 pub mod verify_native;
 mod weights;
 
@@ -341,6 +342,9 @@ pub fn run() {
             chat::engine_status,
             chat::chat_send,
             chat::chat_stop,
+            // The review's undo: the text each write replaced, held for the conversation that saw it
+            // and put back only while the file still matches what the run left there.
+            chat::revert_changes,
             chat::new_task,
             // The conversations the app has filed, and the controls the sidebar's rows have: reopen
             // one, or move one to the Trash. The palette searches all of them by what was said in

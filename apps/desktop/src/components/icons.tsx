@@ -21,6 +21,9 @@ const PATHS = {
   // 18 units wide, which is why the top row read as two small ticks between two big shapes.
   back: "M20 12H4M10.5 6.5 4 12l6.5 5.5",
   forward: "M4 12h16M13.5 6.5 20 12l-6.5 5.5",
+  // A turn all the way round with its head at the start: the review's revert, which puts a file
+  // back rather than stepping through history. The circle is the change being undone, not a reload.
+  undo: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5",
   // A terminal inside a square, not a check: the pill names the mode that edits files, and the
   // reference draws its prompt rather than its outcome.
   coding: "M4 4h16v16H4zM7 9l3 3-3 3M13 15h4",

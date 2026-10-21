@@ -425,6 +425,30 @@ pub fn execute(
     }
 }
 
+/// The files a write call will change, resolved through the same sandbox the call itself goes
+/// through. Every other tool answers nothing.
+///
+/// The host holds each file's text from before the call so the change can be reverted. A patch names
+/// its files differently from the other two writes, which is why the pairing lives beside the
+/// executors rather than in the window; a patch that does not parse names nothing, because the call
+/// that would have applied it is about to fail anyway.
+pub fn write_targets(tool_id: &str, arguments: &Value, policy: &SandboxPolicy) -> Vec<PathBuf> {
+    let labels: Vec<String> = match tool_id {
+        "edit_file" | "write_file" => text_arg(arguments, "path")
+            .map(|path| vec![path.to_string()])
+            .unwrap_or_default(),
+        "apply_patch" => text_arg(arguments, "patch")
+            .and_then(|raw| parse_patch(tool_id, raw).ok())
+            .map(|sections| sections.into_iter().map(|section| section.path).collect())
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    labels
+        .iter()
+        .filter_map(|label| resolve(policy, label, Access::Write).ok())
+        .collect()
+}
+
 /// Read a text file, optionally a line range of one.
 ///
 /// The whole allowed file is held while the range is picked out of it, which is what makes the answer
@@ -4197,6 +4221,59 @@ mod tests {
             on_disk(d.path(), "my-app/pages/index.html"),
             "<p>hello</p>\n"
         );
+    }
+
+    /// The host holds each target of a write before the call runs, so the pairing has to name
+    /// exactly the files the call will touch — and nothing a refusal or a read would touch.
+    #[test]
+    fn a_write_target_names_the_file_the_call_changes_and_a_read_names_none() {
+        let (d, p) = plain();
+        // The sandbox resolves every path, so the answer is in the root's canonical spelling — on
+        // macOS `/tmp` is a link to `/private/tmp`.
+        let root = d.path().canonicalize().unwrap();
+        assert_eq!(
+            write_targets(
+                "edit_file",
+                &json!({ "path": "src/lib.rs", "old_string": "one", "new_string": "1" }),
+                &p,
+            ),
+            vec![root.join("src/lib.rs")]
+        );
+        assert_eq!(
+            write_targets(
+                "write_file",
+                &json!({ "path": "new.md", "contents": "x\n" }),
+                &p,
+            ),
+            vec![root.join("new.md")]
+        );
+        assert_eq!(
+            write_targets(
+                "apply_patch",
+                &json!({
+                    "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,1 +1,1 @@\n-one\n+1\n"
+                }),
+                &p,
+            ),
+            vec![root.join("src/lib.rs")]
+        );
+        // A read changes nothing, so there is nothing to hold.
+        assert!(write_targets("read_file", &json!({ "path": "src/lib.rs" }), &p).is_empty());
+        // The patch that creates a file belongs to `write_file`: this call is refused, and a file a
+        // refused call does not touch is not one the review may offer to revert.
+        assert!(write_targets(
+            "apply_patch",
+            &json!({ "patch": "--- /dev/null\n+++ b/new.rs\n@@ -0,0 +1 @@\n+x\n" }),
+            &p
+        )
+        .is_empty());
+        // A target the sandbox refuses resolves to nothing rather than to a path outside the root.
+        assert!(write_targets(
+            "write_file",
+            &json!({ "path": "../escape.md", "contents": "x\n" }),
+            &p
+        )
+        .is_empty());
     }
 
     #[test]

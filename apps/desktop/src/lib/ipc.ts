@@ -576,6 +576,20 @@ export type SessionHit = SessionSummary & {
  */
 export type TrashedSession = SessionSummary & { name: string; bytes: number };
 
+/**
+ * What became of one path's revert. Mirrors `undo::Reverted`.
+ *
+ * A refusal is per path rather than per press: the other files in the same request can still go back,
+ * and this one carries the reason it did not. `removed` says the file did not exist before the run,
+ * so putting it back took it off disk.
+ */
+export type RevertResult = {
+  path: string;
+  ok: boolean;
+  removed: boolean;
+  why?: string;
+};
+
 /* ---- the Knowledge Center: the pinned catalog, and this machine's share of it ---- */
 
 /**
@@ -789,6 +803,15 @@ export const ipc = {
    * that just said this file changed shows it rather than going quiet.
    */
   openFile: (path: string) => invoke<void>("open_file", { path }),
+  /**
+   * Put files a run wrote back to the text they held before it touched them.
+   *
+   * The before-images live in the host's journal for the conversation on screen, so a reopened
+   * conversation is answered per path with a refusal rather than a restore it cannot prove. The host
+   * checks each file still holds what the run left there: a file edited since is reported, not
+   * silently overwritten.
+   */
+  revertChanges: (paths: string[]) => invoke<RevertResult[]>("revert_changes", { paths }),
   /** Launch the supervised fork server, or refuse with the load guard's own reason. */
   startEngine: () => invoke<EngineView>("start_engine"),
   stopEngine: () => invoke<void>("stop_engine"),

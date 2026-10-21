@@ -188,6 +188,60 @@ export function Review({ locale }: { locale: Locale }) {
     }
   };
 
+  // A press that put a file back leaves the change on screen, because the run did write those lines,
+  // and marks the row instead of erasing it: the diff is also the thing the user just undid, and a
+  // section that vanished would leave the press with only the disk to vouch for it. The host answers
+  // per path because one file whose text changed since the run is its own refusal, not a failed undo
+  // of the other five.
+  const [reverted, setReverted] = useState<Record<string, boolean>>({});
+  const [revertWhy, setRevertWhy] = useState<Record<string, string>>({});
+  const [reverting, setReverting] = useState<Record<string, boolean>>({});
+  const [revertError, setRevertError] = useState<string | null>(null);
+  const revert = async (paths: string[]) => {
+    if (paths.length === 0) return;
+    setRevertError(null);
+    setReverting((held) => ({
+      ...held,
+      ...Object.fromEntries(paths.map((path) => [path, true])),
+    }));
+    // The reason the last press gave is about a file that is being tried again; keeping it on screen
+    // while the answer is on its way would be the panel answering a question it has not asked yet.
+    setRevertWhy((held) => {
+      const rest = { ...held };
+      for (const path of paths) delete rest[path];
+      return rest;
+    });
+    try {
+      const results = await ipc.revertChanges(paths);
+      setReverted((held) => {
+        const next = { ...held };
+        for (const result of results) if (result.ok) next[result.path] = true;
+        return next;
+      });
+      setRevertWhy((held) => {
+        const next = { ...held };
+        for (const result of results) {
+          if (result.ok) delete next[result.path];
+          else next[result.path] = result.why ?? "";
+        }
+        return next;
+      });
+    } catch (why) {
+      // The whole call, not one file: a reply still streaming, a workspace that could not be found.
+      setRevertError(String(why));
+    } finally {
+      setReverting((held) => {
+        const rest = { ...held };
+        for (const path of paths) delete rest[path];
+        return rest;
+      });
+    }
+  };
+  // What the header's control would act on. A file already put back stays in the list but leaves the
+  // set, so pressing the header after undoing one file does not try to undo it twice.
+  const pending = files.filter((file) => !reverted[file.path]).map((file) => file.path);
+  const revertingAny = pending.some((path) => reverting[path]);
+
   // The reference's other header control: a query over the change itself. A run that touched six
   // files puts a wall of hunks in this column, and what a reader does with a wall is look something
   // in it for a line.
@@ -256,6 +310,18 @@ export function Review({ locale }: { locale: Locale }) {
         <Icon name="review" size={14} />
         <span className="text-quiet">{translate(locale, "review.title")}</span>
         <span className="flex-1" />
+        {files.length > 0 && pending.length > 0 && (
+          <button
+            type="button"
+            onClick={() => void revert(pending)}
+            disabled={revertingAny}
+            className="icon-btn"
+            aria-label={translate(locale, "review.revertAll")}
+            title={translate(locale, "review.revertAll")}
+          >
+            <Icon name="undo" size={13} />
+          </button>
+        )}
         {files.length > 0 && (
           <button
             type="button"
@@ -352,6 +418,11 @@ export function Review({ locale }: { locale: Locale }) {
       )}
 
       <div ref={body} className="min-h-0 flex-1 overflow-y-auto">
+        {revertError && (
+          <p className="review-open-failed review-revert-error">
+            {translate(locale, "review.revertFailed", { why: revertError })}
+          </p>
+        )}
         {files.length === 0 ? (
           <p className="px-[var(--space-4)] py-[var(--space-3)] text-fine text-faint">
             {translate(locale, "review.empty")}
@@ -360,6 +431,7 @@ export function Review({ locale }: { locale: Locale }) {
           sections.map(({ file, printed, hits }) => {
             const folded = foldedBy(file.path, hits);
             const why = refused[file.path];
+            const undoWhy = revertWhy[file.path];
             return (
               <section
                 key={file.path}
@@ -403,6 +475,23 @@ export function Review({ locale }: { locale: Locale }) {
                       <span className="text-danger">−{file.removed}</span>
                     </span>
                   </button>
+                  {reverted[file.path] ? (
+                    <span className="review-reverted">
+                      <Icon name="tick" size={11} />
+                      {translate(locale, "review.reverted")}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void revert([file.path])}
+                      disabled={reverting[file.path] === true}
+                      className="icon-btn shrink-0"
+                      aria-label={translate(locale, "review.revert")}
+                      title={translate(locale, "review.revert")}
+                    >
+                      <Icon name="undo" size={13} />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => void open(file.path)}
@@ -416,6 +505,11 @@ export function Review({ locale }: { locale: Locale }) {
                 {why && (
                   <p className="review-open-failed">
                     {translate(locale, "review.openFailed", { why })}
+                  </p>
+                )}
+                {undoWhy && (
+                  <p className="review-open-failed">
+                    {translate(locale, "review.revertFailed", { why: undoWhy })}
                   </p>
                 )}
                 {!folded &&
