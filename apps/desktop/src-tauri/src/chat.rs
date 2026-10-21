@@ -35,7 +35,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-use smollm_config::{ModelSource, PackingChoice, ReasoningEffort, Settings};
+use smollm_config::{ModelSource, PackingChoice, ReasoningEffort, Settings, DEFAULT_SYSTEM_PROMPT};
 use smollm_core::events::{AgentEvent, NoticeCode, RunReport, ToolOutcome};
 use smollm_core::transcript::{DiffStat, StepStatus, TranscriptStep};
 use smollm_llama::{
@@ -52,19 +52,19 @@ use sessions::{Role, Session};
 /// Event name the transcript subscribes to for the duration of the window.
 pub const EVENT: &str = "agent-event";
 
-/// How many rounds of tool calls one answer may take before the run answers without more reading.
+/// How many rounds of tool calls one answer may take before the loop stops asking.
 ///
-/// The bound is about cost rather than about correctness: every round replays the whole conversation
-/// plus everything the round before it read, so the window fills by one tool result per round no
-/// matter what the model does with it, and a 1.7B model that has decided to keep looking needs to be
-/// stopped out loud rather than left to page the context full. Four is the number of reads a question
-/// about this workspace can be answered with — list it, find the file, read it, search the rest.
-const MAX_TOOL_ROUNDS: usize = 4;
+/// This bound is a backstop against a model that never answers, not a description of a task. Four
+/// was a description: list, find, read, search — which ran out in the middle of an ordinary change
+/// (read the test, edit, run it, fix, run it again). The window is the first guard, because every
+/// round replays the conversation plus everything the round before read and the prompt is measured
+/// before each follow-up; this is the second, set high enough that a working loop ends by answering.
+const MAX_TOOL_ROUNDS: usize = 24;
 
-/// How many times a subagent may ask the engine before it has to answer. Two requests is one round of
-/// reading and one answer — the shape a self-contained "find X and tell me where" needs, and half the
-/// parent's budget because a delegation is already a second run against the same weights.
-const SUBAGENT_ROUNDS: usize = 2;
+/// How many times a subagent may ask the engine before it has to answer. Six is a few reads and an
+/// answer: a delegated "find where X is implemented" has to list, grep, read two or three files and
+/// report. Two was one read and an answer, which left no room to follow a reference it found.
+const SUBAGENT_ROUNDS: usize = 6;
 
 /// How much of one read a subagent may bring into its own context. The parent's window is not the
 /// subagent's, but both are the same 32k slot: four uncut files could spend it in one round.
@@ -1085,9 +1085,13 @@ fn clip_chars(text: &str, max: usize) -> String {
 }
 
 /// The one system turn a subagent is given: the user's own instructions, then the subagent's bounds.
+///
+/// The shipped coding contract is not repeated here: it tells the model to make the change, which is
+/// the one thing a read-only subagent cannot do. A prompt the user wrote still leads, because that is
+/// their instruction about how work should be done; the offer below then says what this run may do.
 fn subagent_system(parent: &str) -> String {
     let parent = parent.trim();
-    if parent.is_empty() {
+    if parent.is_empty() || parent == DEFAULT_SYSTEM_PROMPT {
         SUBAGENT_SYSTEM.to_string()
     } else {
         format!("{parent}\n\n{SUBAGENT_SYSTEM}")
@@ -1187,7 +1191,7 @@ async fn delegate(
             // No request left to answer with. Whatever prose came beside the calls is the report, and
             // the row says the rounds were spent rather than pretending the subagent concluded.
             let text = if reply.text.trim().is_empty() {
-                "The subagent spent its two rounds asking for tools and did not answer.".to_string()
+                "The subagent spent all its rounds asking for tools and did not answer.".to_string()
             } else {
                 reply.text.trim().to_string()
             };
@@ -2070,6 +2074,18 @@ mod tests {
         lock(&state.slot).streaming = true;
         assert!(request_stop(&state));
         assert!(state.stop_requested.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_subagent_is_not_told_to_make_the_change_it_cannot_make() {
+        // The shipped contract opens with "make the change"; a read-only run must not inherit it.
+        let shipped = subagent_system(DEFAULT_SYSTEM_PROMPT);
+        assert_eq!(shipped, SUBAGENT_SYSTEM);
+        assert!(!shipped.contains("make the change"));
+        // A user's own words still lead, because that is how they asked for work to be done.
+        let mine = subagent_system("Answer like a pirate.");
+        assert!(mine.starts_with("Answer like a pirate."));
+        assert!(mine.ends_with(SUBAGENT_SYSTEM));
     }
 
     #[test]

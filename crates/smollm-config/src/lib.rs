@@ -34,7 +34,33 @@ pub use voice::{InputDevice, Shortcut, Voice};
 pub const DEFAULT_MODEL_ID: &str = "ternary-bonsai-1-7b";
 
 /// Bump when a stored document must be migrated rather than silently defaulted.
-pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
+pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
+
+/// The system turn every conversation starts with unless the user has written their own.
+///
+/// A small model given "You are a helpful assistant" answers like a chatbot: it describes changes
+/// instead of making them, writes files it has not read, and stops before checking its work. The
+/// contract below is written for the loop this app actually runs — read-only tools, sandboxed
+/// writes, an optional shell — and stays short enough that a 1.7B can hold it.
+pub const DEFAULT_SYSTEM_PROMPT: &str = "\
+You are SmoLLM Studio, a coding assistant running locally on the user's machine.
+
+Your job is to make the change the user asked for, correctly, in their workspace — not to describe how it could be made.
+
+Rules:
+1. Read before you write. Never invent a file, path, symbol or API. Use the workspace tools to see what is actually there.
+2. If a task has more than one step, state a short plan, then work through it. Update the plan if what you find changes it.
+3. Make the smallest change that solves the problem, and match the style of the code around it.
+4. After you edit, check your work: re-read the changed file, and run the project's tests, build or linter when a shell is available. If you cannot check something, say so.
+5. If a tool fails, read the error and try a different approach. Never repeat a call that already failed the same way.
+6. Stay inside the workspace. Never print secrets. Ask before anything destructive or irreversible.
+7. Finish by saying what you changed, which files, and how you checked it. If you are blocked, say exactly what blocked you.
+
+When a question needs no tools, answer it directly and briefly. Put code in fenced blocks with a language tag. Do not claim something is done unless a tool result shows it.";
+
+/// The default v1 shipped. Kept only to move a stored document that never changed it forward; a
+/// prompt the user wrote is never touched.
+const LEGACY_SYSTEM_PROMPT: &str = "You are a helpful assistant";
 
 pub const APP_CONFIG_DIR: &str = "smollm-studio";
 
@@ -117,7 +143,7 @@ impl Default for SamplingSettings {
             instruct: SamplingProfile::INSTRUCT,
             effort: ReasoningEffort::default(),
             budget: GenerationBudget::default(),
-            system_prompt: "You are a helpful assistant".into(),
+            system_prompt: DEFAULT_SYSTEM_PROMPT.into(),
             non_thinking_mode: false,
         }
     }
@@ -191,12 +217,15 @@ impl Settings {
         Ok(())
     }
 
-    fn migrated(self) -> Self {
-        // v0 documents predate the schema version field; serde defaults already filled them in.
-        Self {
-            schema_version: SETTINGS_SCHEMA_VERSION,
-            ..self
+    fn migrated(mut self) -> Self {
+        // v1 shipped the chatbot default. Replace it only when the stored turn is still exactly that
+        // default: trimming is deliberate, because a document that never carried user words should
+        // move forward, while a prompt someone wrote stays theirs even if it is short.
+        if self.sampling.system_prompt.trim() == LEGACY_SYSTEM_PROMPT {
+            self.sampling.system_prompt = DEFAULT_SYSTEM_PROMPT.to_string();
         }
+        self.schema_version = SETTINGS_SCHEMA_VERSION;
+        self
     }
 }
 
@@ -237,6 +266,44 @@ mod tests {
             ..s
         };
         assert_eq!(s.active(), SamplingProfile::INSTRUCT);
+    }
+
+    #[test]
+    fn the_default_system_prompt_is_a_coding_contract() {
+        let prompt = SamplingSettings::default().system_prompt;
+        assert_eq!(prompt, DEFAULT_SYSTEM_PROMPT);
+        assert!(!prompt.contains(LEGACY_SYSTEM_PROMPT));
+        assert!(prompt.contains("Read before you write"));
+    }
+
+    #[test]
+    fn the_shipped_prompt_is_migrated_and_a_users_own_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+
+        let mut old = Settings {
+            schema_version: 1,
+            ..Settings::default()
+        };
+        old.sampling.system_prompt = LEGACY_SYSTEM_PROMPT.into();
+        old.save(&path).unwrap();
+        let back = Settings::load(&path).unwrap();
+        assert_eq!(back.sampling.system_prompt, DEFAULT_SYSTEM_PROMPT);
+        assert_eq!(back.schema_version, SETTINGS_SCHEMA_VERSION);
+
+        let mut mine = Settings::default();
+        mine.sampling.system_prompt = "Answer like a pirate.".into();
+        mine.save(&path).unwrap();
+        assert_eq!(
+            Settings::load(&path).unwrap().sampling.system_prompt,
+            "Answer like a pirate."
+        );
+
+        // A cleared prompt is a choice too: the run sends no system turn, and loading must not
+        // quietly fill the field back in.
+        mine.sampling.system_prompt = String::new();
+        mine.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap().sampling.system_prompt, "");
     }
 
     #[test]
