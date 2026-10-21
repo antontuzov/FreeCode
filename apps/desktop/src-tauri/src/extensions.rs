@@ -115,15 +115,21 @@ mod tests {
         inv.tools.iter().find(|r| r.id == id).expect("tool")
     }
 
-    /// The four reads, the three workspace writes, the two web calls, the one command and the one
-    /// delegation are what the Coding control actually offers today, and the page has to say so: a
-    /// list that showed all thirty as live would describe an agent this build does not have.
+    /// The four workspace reads, the three repository reads, the three workspace writes, the two web
+    /// calls, the one command, its three runners and the one delegation are what the Coding control
+    /// actually offers today, and the page has to say so: a list that showed all thirty as live would
+    /// describe an agent this build does not have.
     #[test]
     fn the_reads_the_writes_the_web_calls_the_shell_and_the_delegation_are_what_a_call_can_run_through(
     ) {
         let inv = inventory(&Settings::default());
-        assert_eq!(inv.runnable, 11, "{:?}", inv.tools);
+        assert_eq!(inv.runnable, 17, "{:?}", inv.tools);
         for id in ["read_file", "list_dir", "glob", "grep_search"] {
+            assert!(row(&inv, id).runnable, "{id}");
+            assert_eq!(row(&inv, id).decision, "auto", "{id}");
+        }
+        // A repository read is a read: it runs a fixed argv against the index and asks for no switch.
+        for id in ["git_status", "git_diff", "git_log"] {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "auto", "{id}");
         }
@@ -141,17 +147,19 @@ mod tests {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "blocked", "{id}");
         }
-        // The command has an executor too, and its own switch — off by default, so the page shows it
-        // refused rather than merely waiting for the dial.
-        assert!(row(&inv, "terminal").runnable);
-        assert_eq!(row(&inv, "terminal").decision, "blocked");
+        // The command and the three project runners have executors too, and one shared switch — off
+        // by default, so the page shows them refused rather than merely waiting for the dial.
+        for id in ["terminal", "run_tests", "run_build", "run_linter"] {
+            assert!(row(&inv, id).runnable, "{id}");
+            assert_eq!(row(&inv, id).decision, "blocked", "{id}");
+        }
         // The delegation is answered by the run loop rather than an executor, so it is runnable in
         // this build — but a second model run costs the same context as the first, and the switch
         // that pays for it starts off.
         assert!(row(&inv, "spawn_subagent").runnable);
         assert_eq!(row(&inv, "spawn_subagent").decision, "blocked");
-        // And the calls that would take a file away or run something else are still declared only.
-        for id in ["delete_path", "run_tests"] {
+        // And the calls that would take a file away, commit it or run something else are declared only.
+        for id in ["delete_path", "git_commit", "git_stage"] {
             assert!(!row(&inv, id).runnable, "{id}");
         }
     }
@@ -201,8 +209,8 @@ mod tests {
     }
 
     /// The Terminal switch is the shell's consent the way the Privacy switch is the web calls': with
-    /// it on, the default dial runs a command; in Ask mode the command still has to ask, which this
-    /// build cannot show, so the page says the truth for each.
+    /// it on, the default dial runs a command and the three runners built on the same consent; in Ask
+    /// mode they still have to ask, which this build cannot show, so the page says the truth for each.
     #[test]
     fn the_terminal_switch_is_what_moves_the_shell_from_blocked_to_auto() {
         let settings = Settings {
@@ -213,7 +221,11 @@ mod tests {
             ..Default::default()
         };
         let inv = inventory(&settings);
-        assert_eq!(row(&inv, "terminal").decision, "auto");
+        for id in ["terminal", "run_tests", "run_build", "run_linter"] {
+            assert_eq!(row(&inv, id).decision, "auto", "{id}");
+        }
+        // The repository reads were never behind it.
+        assert_eq!(row(&inv, "git_status").decision, "auto");
         let asking = Settings {
             approvals: smollm_config::agent::Approvals {
                 mode: ApprovalMode::AskAlways,
@@ -222,18 +234,21 @@ mod tests {
             },
             ..settings
         };
-        assert_eq!(row(&inventory(&asking), "terminal").decision, "ask");
+        for id in ["terminal", "run_tests", "run_build", "run_linter"] {
+            assert_eq!(row(&inventory(&asking), id).decision, "ask", "{id}");
+        }
     }
 
     /// A declared side effect under the default dial still asks, and the page says "ask" — which is
-    /// the difference between an agent and a script, so it is not something to smooth over. The shell
-    /// is not that row any more: it has an executor and a switch, and the switch's off position is
-    /// what keeps it out of a run.
+    /// the difference between an agent and a script, so it is not something to smooth over. A commit
+    /// is that row: declared so the model can ask, with no executor behind it yet. The command rows
+    /// are not it any more; they have executors and a switch, and the switch's off position is what
+    /// keeps them out of a run.
     #[test]
     fn a_side_effecting_tool_under_auto_approve_still_has_to_ask() {
         let inv = inventory(&Settings::default());
-        assert_eq!(row(&inv, "run_tests").decision, "ask");
-        assert!(!row(&inv, "run_tests").runnable);
+        assert_eq!(row(&inv, "git_commit").decision, "ask");
+        assert!(!row(&inv, "git_commit").runnable);
     }
 
     /// Plan-only is the dial that turns the agent into a reader. The page has to move with it, or it

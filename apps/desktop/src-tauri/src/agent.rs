@@ -1,13 +1,13 @@
 //! The tool round: run what one answer asked for, and say in the transcript what each call did.
 //!
 //! This is the half of the agent loop that touches the machine. [`smollm_tools::EXECUTABLE`] names the
-//! calls that have executors — four reads of the workspace, three writes inside it, two that reach the
-//! internet, and one command; anything else the model asks for is answered with a notice that says so
-//! rather than run, which is why the loop can keep the "Local" badge true and the composer's Coding
-//! control can stay an opt-in. The web calls and the shell are only *offered* while their own switches
-//! are on, so a run that can leave the machine, or run with this user's permissions, is one the user
-//! asked for; the executors themselves are what bound them, the way the sandbox bounds the six that
-//! touch disk.
+//! calls that have executors — four reads of the workspace, three reads of its repository, three writes
+//! inside it, two that reach the internet, one command, and the three project runners built on the same
+//! consent; anything else the model asks for is answered with a notice that says so rather than run,
+//! which is why the loop can keep the "Local" badge true and the composer's Coding control can stay an
+//! opt-in. The web calls, the shell and its runners are only *offered* while their own switches are on,
+//! so a run that can leave the machine, or run with this user's permissions, is one the user asked for;
+//! the executors themselves are what bound them, the way the sandbox bounds the six that touch disk.
 //!
 //! Every call takes the same road: [`smollm_core::approvals`] decides, [`smollm_tools::authorize`]
 //! resolves its paths against the workspace sandbox inside [`smollm_tools::execute`], and only then
@@ -128,12 +128,13 @@ pub(crate) fn run_one(
         return Ran {
             call_id: call.id.clone(),
             result: format!(
-                "{name} is not available in this build: it reads nothing and changes nothing. The \
-                 tools it has are read_file, list_dir, glob, grep_search, write_file, edit_file and \
-                 apply_patch, which reach nothing outside this workspace; web_search and fetch_url, \
-                 which reach the internet only while the Privacy switch is on; terminal, which \
-                 runs only while Terminal access is on; and spawn_subagent, which delegates only \
-                 while Subagents is on."
+                "{name} is not available in this build: it has no executor. The calls it can make \
+                 are read_file, list_dir, glob, grep_search, write_file, edit_file and apply_patch, \
+                 which reach nothing outside this workspace; git_status, git_diff and git_log, which \
+                 only read the repository; web_search and fetch_url, which reach the internet only \
+                 while the Privacy switch is on; terminal, run_tests, run_build and run_linter, which \
+                 run only while Terminal access is on; and spawn_subagent, which delegates only while \
+                 Subagents is on."
             ),
         };
     }
@@ -327,6 +328,34 @@ fn subject(name: &str, arguments: &Value) -> String {
                 .unwrap_or_default(),
         );
     }
+    // A runner's label already says what ran, and its summary carries the measured line; the one
+    // argument that reads as a subject is the filter or package the model narrowed to. A repository
+    // status has no subject at all, and a chip repeating the tool name would only take up the row.
+    match name {
+        "run_tests" => {
+            return arguments
+                .get("filter")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        }
+        "run_build" => {
+            return arguments
+                .get("target")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        }
+        "run_linter" | "git_status" => return String::new(),
+        "git_diff" | "git_log" => {
+            return arguments
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        }
+        _ => {}
+    }
     ["path", "pattern", "file", "query", "url", "command"]
         .iter()
         .find_map(|key| arguments.get(*key).and_then(Value::as_str))
@@ -342,6 +371,10 @@ pub(crate) fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
         "write_file" => StepKind::CreateFile,
         "apply_patch" => StepKind::EditFile,
         "terminal" => StepKind::Terminal,
+        "run_tests" => StepKind::Tests,
+        "run_build" => StepKind::Build,
+        "run_linter" => StepKind::Linter,
+        "git_status" | "git_diff" | "git_log" => StepKind::Git,
         "web_search" => StepKind::WebSearch,
         "fetch_url" => StepKind::WebReading,
         "spawn_subagent" => StepKind::Subagent,
@@ -484,7 +517,7 @@ mod tests {
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(smollm_tools::EXECUTABLE.len(), 10);
+        assert_eq!(smollm_tools::EXECUTABLE.len(), 16);
         // The writes are the rows the pill is built from, so none can silently degrade to a generic
         // tool — and a create says create, because a row that reads "Edit file" over a file the run
         // invented would be the transcript contradicting the review under it.
@@ -520,6 +553,26 @@ mod tests {
         assert_eq!(
             started_row("terminal", &json!({ "command": "cargo test" })).kind,
             StepKind::Terminal
+        );
+        // The runners and the repository reads are steps of their own: a transcript that said "Ran
+        // tool" over the call which decided whether the change works would hide the answer.
+        for (id, kind) in [
+            ("run_tests", StepKind::Tests),
+            ("run_build", StepKind::Build),
+            ("run_linter", StepKind::Linter),
+            ("git_status", StepKind::Git),
+            ("git_diff", StepKind::Git),
+            ("git_log", StepKind::Git),
+        ] {
+            assert_eq!(started_row(id, &json!({})).kind, kind, "{id}");
+        }
+        // Their chips carry the argument that narrowed the call, and stay empty when nothing did.
+        assert_eq!(subject("run_tests", &json!({ "filter": "auth" })), "auth");
+        assert_eq!(subject("run_build", &json!({ "target": "core" })), "core");
+        assert_eq!(subject("git_status", &json!({})), "");
+        assert_eq!(
+            subject("git_diff", &json!({ "path": "src/lib.rs" })),
+            "src/lib.rs"
         );
         // Delegation has its own glyph in the inspector, so its row cannot be a generic tool.
         assert!(is_delegated("spawn_subagent"));

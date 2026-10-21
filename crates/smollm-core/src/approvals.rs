@@ -4,11 +4,12 @@
 //! runs silently is a call nobody can audit. The rules are the configured [`Approvals`] policy plus
 //! three things the policy cannot express on its own — a mutating tool in Plan-only mode is refused
 //! outright, a network-class tool is refused whenever no remote provider is configured, so the
-//! "Local" badge keeps reflecting reality, and the terminal is refused whenever its own switch is off,
-//! because no path check bounds a command.
+//! "Local" badge keeps reflecting reality, and the calls that run project code (the shell and its
+//! tests/build/linter runners) are refused whenever their switch is off, because no path check bounds
+//! a command.
 
 use serde::{Deserialize, Serialize};
-use smollm_config::agent::{ApprovalMode, Approvals, PermissionClass};
+use smollm_config::agent::{shell_governed, ApprovalMode, Approvals, PermissionClass};
 use smollm_tools::{summary, SandboxPolicy, ToolDescriptor};
 
 /// What the composer/inline prompt shows before a call runs.
@@ -107,9 +108,10 @@ pub fn evaluate(
         return Pending::Decided(ApprovalDecision::BlockedByPolicy);
     }
 
-    // 2b. The command runs with the user's own permissions, so the path sandbox cannot speak for it.
-    // Its switch is the consent, and while it is off the call is refused without asking.
-    if tool.id == "terminal" && !sandbox.shell_allowed {
+    // 2b. The command runs with the user's own permissions, so the path sandbox cannot speak for it —
+    // and the runners that execute the project's tests, build and lint are the same code by another
+    // name. Their switch is the consent, and while it is off the call is refused without asking.
+    if shell_governed(tool.id) && !sandbox.shell_allowed {
         return Pending::Decided(ApprovalDecision::BlockedByPolicy);
     }
 
@@ -221,6 +223,35 @@ mod tests {
                 "c"
             ),
             Pending::Decided(ApprovalDecision::BlockedByPolicy)
+        );
+        // The project runners are the same consent: a switched-off shell does not execute the
+        // workspace's own tests either, whatever permission class the registry gives them.
+        for id in ["run_tests", "run_build", "run_linter"] {
+            let runner = find(id).unwrap();
+            assert_eq!(
+                evaluate(
+                    &runner,
+                    &json!({}),
+                    &Approvals::default(),
+                    &sandbox(dir.path()),
+                    "c"
+                ),
+                Pending::Decided(ApprovalDecision::BlockedByPolicy),
+                "{id}"
+            );
+        }
+        // A git read is not project code: it reports what the repository already holds, and the
+        // switch has nothing to admit.
+        let git = find("git_status").unwrap();
+        assert_eq!(
+            evaluate(
+                &git,
+                &json!({}),
+                &Approvals::default(),
+                &sandbox(dir.path()),
+                "c"
+            ),
+            Pending::Decided(ApprovalDecision::AutoAllowed)
         );
         // And on, in Auto mode, the switch's answer runs it without a prompt.
         let on = Approvals {

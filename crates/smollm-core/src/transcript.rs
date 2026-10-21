@@ -28,6 +28,14 @@ pub enum StepKind {
     Thought,
     /// "Terminal command ran".
     Terminal,
+    /// "Ran tests" — the workspace's own test runner, found through its manifest.
+    Tests,
+    /// "Built the project" — the workspace's own build command.
+    Build,
+    /// "Ran the linter" — clippy, a `lint` script, `go vet`, ruff or a `lint` target.
+    Linter,
+    /// "Checked the repository" — a read of status, diff or log.
+    Git,
     /// "Edit file" with a +N −M pill.
     EditFile,
     /// "Create file" — a write that made a file that was not there, so every line is an addition.
@@ -63,6 +71,10 @@ impl StepKind {
             StepKind::Running => "transcript.step.running",
             StepKind::Thought => "transcript.step.thought",
             StepKind::Terminal => "transcript.step.terminal",
+            StepKind::Tests => "transcript.step.tests",
+            StepKind::Build => "transcript.step.build",
+            StepKind::Linter => "transcript.step.linter",
+            StepKind::Git => "transcript.step.git",
             StepKind::EditFile => "transcript.step.editFile",
             StepKind::CreateFile => "transcript.step.createFile",
             StepKind::ReadFile => "transcript.step.readFile",
@@ -98,6 +110,10 @@ pub fn all_i18n_keys() -> Vec<&'static str> {
         Running,
         Thought,
         Terminal,
+        Tests,
+        Build,
+        Linter,
+        Git,
         EditFile,
         CreateFile,
         ReadFile,

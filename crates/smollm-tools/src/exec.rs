@@ -181,12 +181,28 @@ pub enum SummaryKey {
     TerminalStopped,
     /// A subagent that answered, with the `{{rounds}}` it spent and the `{{reads}}` it made.
     SubagentReport,
+    /// A working tree with nothing in it to report: a clean status, or a diff with no lines.
+    GitClean,
+    /// The workspace is not inside a git repository, so there is nothing to report about one.
+    GitNotRepo,
+    /// One path changed in the working tree.
+    ChangedFile,
+    /// `{{count}}` paths changed in the working tree.
+    ChangedFiles,
+    /// One file in the diff, with the lines it adds and takes away.
+    GitDiffFile,
+    /// `{{files}}` files in the diff, with the lines they add and take away.
+    GitDiff,
+    /// One commit in the log.
+    GitCommit,
+    /// `{{count}}` commits in the log.
+    GitCommits,
 }
 
 impl SummaryKey {
     /// Every key the executors can answer with, so a catalog entry no executor reaches is named as the
     /// dead copy it is.
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 36] = [
         Self::Empty,
         Self::Lines,
         Self::NoRange,
@@ -215,6 +231,14 @@ impl SummaryKey {
         Self::TerminalTimedOut,
         Self::TerminalStopped,
         Self::SubagentReport,
+        Self::GitClean,
+        Self::GitNotRepo,
+        Self::ChangedFile,
+        Self::ChangedFiles,
+        Self::GitDiffFile,
+        Self::GitDiff,
+        Self::GitCommit,
+        Self::GitCommits,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -247,6 +271,16 @@ impl SummaryKey {
             Self::TerminalTimedOut => "transcript.summary.terminalTimedOut",
             Self::TerminalStopped => "transcript.summary.terminalStopped",
             Self::SubagentReport => "transcript.summary.subagentReport",
+            Self::GitClean => "transcript.summary.gitClean",
+            Self::GitNotRepo => "transcript.summary.gitNotRepo",
+            // The diff pill and a git count are the same sentence; reusing its key keeps one wording
+            // for "N files changed" rather than a second copy that could drift from it.
+            Self::ChangedFile => "transcript.diff.fileChanged",
+            Self::ChangedFiles => "transcript.diff.filesChanged",
+            Self::GitDiffFile => "transcript.summary.gitDiffFile",
+            Self::GitDiff => "transcript.summary.gitDiff",
+            Self::GitCommit => "transcript.summary.gitCommit",
+            Self::GitCommits => "transcript.summary.gitCommits",
         }
     }
 
@@ -258,7 +292,10 @@ impl SummaryKey {
             | Self::CopiesReplaced
             | Self::Results
             | Self::HunksApplied
-            | Self::FilesPatched => &["count"],
+            | Self::FilesPatched
+            | Self::ChangedFile
+            | Self::ChangedFiles
+            | Self::GitCommits => &["count"],
             Self::NoRange => &["from", "to"],
             Self::LineTooLong => &["line"],
             Self::LineRange | Self::LineRangeCapped => &["from", "to", "total"],
@@ -272,13 +309,18 @@ impl SummaryKey {
             Self::TerminalExit => &["code"],
             Self::TerminalTimedOut => &["seconds"],
             Self::SubagentReport => &["rounds", "reads"],
+            Self::GitDiffFile => &["added", "removed"],
+            Self::GitDiff => &["files", "added", "removed"],
             Self::Empty
             | Self::MatchInFile
             | Self::CopyReplaced
             | Self::Result
             | Self::FileCreated
             | Self::HunkApplied
-            | Self::TerminalStopped => &[],
+            | Self::TerminalStopped
+            | Self::GitClean
+            | Self::GitNotRepo
+            | Self::GitCommit => &[],
         }
     }
 }
@@ -367,6 +409,12 @@ pub fn execute(
         "write_file" => write_file(tool.id, arguments, policy),
         "apply_patch" => apply_patch(tool.id, arguments, policy),
         "terminal" => terminal(tool.id, arguments, policy),
+        "run_tests" => run_project(tool.id, arguments, policy, ProjectKind::Tests),
+        "run_build" => run_project(tool.id, arguments, policy, ProjectKind::Build),
+        "run_linter" => run_project(tool.id, arguments, policy, ProjectKind::Lint),
+        "git_status" => git_read(tool.id, arguments, policy, GitRead::Status),
+        "git_diff" => git_read(tool.id, arguments, policy, GitRead::Diff),
+        "git_log" => git_read(tool.id, arguments, policy, GitRead::Log),
         // The two that leave the machine. Neither takes the policy: `authorize` has already refused
         // them without the Privacy switch, and a URL is not a path the sandbox can resolve.
         "web_search" => web_search(tool.id, arguments),
@@ -869,7 +917,7 @@ fn terminal(tool: &str, arguments: &Value, policy: &SandboxPolicy) -> Result<Exe
     let stdout = child.stdout.take().map(drain);
     let stderr = child.stderr.take().map(drain);
     let started = Instant::now();
-    let ended = wait_limited(&mut child, Duration::from_secs(seconds))?;
+    let ended = wait_limited(&mut child, Duration::from_secs(seconds), tool)?;
     let out = stdout.and_then(|t| t.join().ok()).unwrap_or_default();
     let err = stderr.and_then(|t| t.join().ok()).unwrap_or_default();
     let elapsed = started.elapsed();
@@ -886,25 +934,7 @@ fn terminal(tool: &str, arguments: &Value, policy: &SandboxPolicy) -> Result<Exe
     let (shown, held) = tail(&body, MAX_RESULT_BYTES);
     let held = held + (total - body.len().min(total));
 
-    let summary = match ended {
-        Ended::TimedOut => Summary::said(
-            SummaryKey::TerminalTimedOut,
-            json!({ "seconds": seconds }),
-            format!("stopped after {seconds}s"),
-        ),
-        Ended::Exited(status) => match status.code() {
-            Some(code) => Summary::said(
-                SummaryKey::TerminalExit,
-                json!({ "code": code }),
-                format!("exit {code}"),
-            ),
-            None => Summary::said(
-                SummaryKey::TerminalStopped,
-                json!({}),
-                "stopped by a signal",
-            ),
-        },
-    };
+    let summary = ended_summary(&ended, seconds);
 
     let mut content = format!("$ {command}\n");
     let dir = relative(policy, &cwd);
@@ -964,7 +994,7 @@ enum Ended {
     TimedOut,
 }
 
-fn wait_limited(child: &mut Child, limit: Duration) -> Result<Ended, ToolsError> {
+fn wait_limited(child: &mut Child, limit: Duration, tool: &str) -> Result<Ended, ToolsError> {
     let deadline = Instant::now() + limit;
     loop {
         match child.try_wait() {
@@ -972,7 +1002,7 @@ fn wait_limited(child: &mut Child, limit: Duration) -> Result<Ended, ToolsError>
             Ok(None) => {}
             Err(e) => {
                 return Err(ToolsError::Io {
-                    tool: "terminal".into(),
+                    tool: tool.into(),
                     path: "command".into(),
                     reason: e.to_string(),
                 })
@@ -984,6 +1014,30 @@ fn wait_limited(child: &mut Child, limit: Duration) -> Result<Ended, ToolsError>
             return Ok(Ended::TimedOut);
         }
         std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The one sentence a run's exit leaves: a code, a deadline, or the signal that ended it. Shared so a
+/// project runner and the shell cannot describe the same ending two different ways.
+fn ended_summary(ended: &Ended, seconds: u64) -> Summary {
+    match ended {
+        Ended::TimedOut => Summary::said(
+            SummaryKey::TerminalTimedOut,
+            json!({ "seconds": seconds }),
+            format!("stopped after {seconds}s"),
+        ),
+        Ended::Exited(status) => match status.code() {
+            Some(code) => Summary::said(
+                SummaryKey::TerminalExit,
+                json!({ "code": code }),
+                format!("exit {code}"),
+            ),
+            None => Summary::said(
+                SummaryKey::TerminalStopped,
+                json!({}),
+                "stopped by a signal",
+            ),
+        },
     }
 }
 
@@ -1013,7 +1067,23 @@ struct Drained {
     total: usize,
 }
 
-fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Drained> {
+/// Which end of a stream the capture window keeps. A command's errors are at its end, so a terminal
+/// or a build keeps the tail; a git payload is a list whose header names the files, so a read keeps
+/// the head.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Capture {
+    Head,
+    Tail,
+}
+
+fn drain(pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Drained> {
+    drain_mode(pipe, Capture::Tail)
+}
+
+fn drain_mode(
+    mut pipe: impl Read + Send + 'static,
+    capture: Capture,
+) -> std::thread::JoinHandle<Drained> {
     std::thread::spawn(move || {
         let mut kept = Drained::default();
         let mut buf = [0u8; 8 * 1024];
@@ -1022,10 +1092,19 @@ fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Draine
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     kept.total += n;
-                    kept.bytes.extend_from_slice(&buf[..n]);
-                    if kept.bytes.len() > SHELL_KEEP_BYTES {
-                        let cut = kept.bytes.len() - SHELL_KEEP_BYTES;
-                        kept.bytes.drain(..cut);
+                    match capture {
+                        Capture::Tail => {
+                            kept.bytes.extend_from_slice(&buf[..n]);
+                            if kept.bytes.len() > SHELL_KEEP_BYTES {
+                                let cut = kept.bytes.len() - SHELL_KEEP_BYTES;
+                                kept.bytes.drain(..cut);
+                            }
+                        }
+                        Capture::Head if kept.bytes.len() >= SHELL_KEEP_BYTES => {}
+                        Capture::Head => {
+                            let room = SHELL_KEEP_BYTES - kept.bytes.len();
+                            kept.bytes.extend_from_slice(&buf[..n.min(room)]);
+                        }
                     }
                 }
             }
@@ -1044,6 +1123,1059 @@ fn tail(text: &str, max: usize) -> (String, usize) {
         cut += 1;
     }
     (text[cut..].to_string(), cut)
+}
+
+/// The first `max` bytes of a string on a character boundary, and how many bytes were dropped.
+fn head(text: &str, max: usize) -> (String, usize) {
+    if text.len() <= max {
+        return (text.to_string(), 0);
+    }
+    let mut cut = max;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    (text[..cut].to_string(), text.len() - cut)
+}
+
+/// How long a project's own tests or build may run. A cold dependency build is minutes of work rather
+/// than seconds, so this is sized for a first build; the deadline still takes the whole process group
+/// down, and the answer says it was stopped rather than pretending it finished.
+const PROJECT_BUILD_TIMEOUT_SECS: u64 = 300;
+const PROJECT_LINT_TIMEOUT_SECS: u64 = 180;
+
+/// How long a git read may take. These read the index and the object store rather than the network,
+/// so a minute is a ceiling, not a budget to spend.
+const GIT_TIMEOUT_SECS: u64 = 60;
+
+/// What the three project runners ask a workspace to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProjectKind {
+    Tests,
+    Build,
+    Lint,
+}
+
+impl ProjectKind {
+    fn timeout(self) -> u64 {
+        match self {
+            Self::Lint => PROJECT_LINT_TIMEOUT_SECS,
+            _ => PROJECT_BUILD_TIMEOUT_SECS,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Tests => "tests",
+            Self::Build => "build",
+            Self::Lint => "lint",
+        }
+    }
+}
+
+/// One argument set a manifest earned: the program, its argv, and the file that chose it. `argv` is
+/// the whole point of this shape — nothing here is ever handed to `sh -c`, so a package name or a
+/// filter the model typed remains one argument rather than becoming syntax.
+#[derive(Debug)]
+struct Project {
+    manifest: &'static str,
+    program: String,
+    args: Vec<String>,
+}
+
+/// What the call asked the manifest for. A field the chosen toolchain cannot honour is refused rather
+/// than dropped: a model that asked for a filtered run and silently got the whole suite would report
+/// the wrong thing as checked.
+struct Wanted<'a> {
+    kind: ProjectKind,
+    target: Option<&'a str>,
+    filter: Option<&'a str>,
+    release: bool,
+    paths: &'a [String],
+}
+
+/// Run the workspace's tests, build or lint through the manifest at its root.
+///
+/// The command is derived, never typed by the model: the model asks for "the tests", and this reads
+/// Cargo.toml, package.json, go.mod, the Python manifests or the Makefile to find what that means
+/// here. The one switch that admits it is the user's Terminal access — declared code runs with their
+/// permissions — and [`crate::authorize`] has already refused the call if it is off.
+fn run_project(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+    kind: ProjectKind,
+) -> Result<Executed, ToolsError> {
+    let target = word(tool, arguments, "target")?;
+    let filter = word(tool, arguments, "filter")?;
+    let paths = paths_argument(tool, arguments, policy)?;
+    let wanted = Wanted {
+        kind,
+        target: target.as_deref(),
+        filter: filter.as_deref(),
+        release: flag_arg(arguments, "release"),
+        paths: &paths,
+    };
+    let project = detect(&policy.workspace_root, &wanted).map_err(ToolsError::NotConfigured)?;
+    let shown = display_command(&project.program, &project.args);
+    let seconds = kind.timeout();
+    let finished = run_argv(
+        tool,
+        &project.program,
+        &project.args,
+        &policy.workspace_root,
+        seconds,
+        Capture::Tail,
+        &[],
+    )?;
+    let summary = ended_summary(&finished.ended, seconds);
+    let (body, lost) = captured_text(&finished);
+    let (output, held) = tail(&body, MAX_RESULT_BYTES);
+    let content = command_report(
+        &shown,
+        project.manifest,
+        &output,
+        held + lost,
+        finished.elapsed,
+        &summary.text,
+    );
+    Ok(Executed {
+        summary,
+        content,
+        edits: Vec::new(),
+    })
+}
+
+/// Choose the runner the workspace's own manifest names. Root manifests only: a workspace can hold a
+/// dozen packages, and a command guessed from the wrong one is a round spent on the wrong answer.
+fn detect(root: &Path, want: &Wanted) -> Result<Project, String> {
+    if root.join("Cargo.toml").is_file() {
+        return cargo_project(want);
+    }
+    if root.join("package.json").is_file() {
+        return node_project(root, want);
+    }
+    if root.join("go.mod").is_file() {
+        return go_project(want);
+    }
+    if python_manifest(root) {
+        return python_project(root, want);
+    }
+    if root.join("Makefile").is_file() {
+        return make_project(root, want);
+    }
+    Err(format!(
+        "no Cargo.toml, package.json, go.mod, pyproject.toml or Makefile at the workspace root, so \
+         nothing there says how to run its {}",
+        want.kind.name()
+    ))
+}
+
+fn cargo_project(want: &Wanted) -> Result<Project, String> {
+    let mut args = match want.kind {
+        ProjectKind::Tests => vec!["test".to_string()],
+        ProjectKind::Build => vec!["build".to_string()],
+        ProjectKind::Lint => vec!["clippy".to_string(), "--all-targets".to_string()],
+    };
+    if let Some(target) = want.target {
+        args.push("-p".into());
+        args.push(target.to_string());
+    }
+    match want.kind {
+        ProjectKind::Tests => {
+            refuse_option(
+                want.release,
+                "\"release\" applies to run_build; tests run in the profile \
+                                         the manifest names",
+            )?;
+            refuse_paths(
+                want,
+                "the Cargo test runner takes a `filter`, not file paths",
+            )?;
+            if let Some(filter) = want.filter {
+                args.push(filter.to_string());
+            }
+        }
+        ProjectKind::Build => {
+            refuse_paths(want, "the Cargo build runner takes no file paths")?;
+            if want.release {
+                args.push("--release".into());
+            }
+            if want.filter.is_some() {
+                return Err("\"filter\" picks a test, and run_build runs no tests".into());
+            }
+        }
+        ProjectKind::Lint => {
+            refuse_paths(
+                want,
+                "the Cargo linter checks the whole workspace package by package; leave \"paths\" out",
+            )?;
+            if want.filter.is_some() || want.release {
+                return Err(
+                    "\"filter\" and \"release\" are for tests and builds; the linter takes \
+                            neither"
+                        .into(),
+                );
+            }
+        }
+    }
+    Ok(Project {
+        manifest: "Cargo.toml",
+        program: "cargo".into(),
+        args,
+    })
+}
+
+fn node_project(root: &Path, want: &Wanted) -> Result<Project, String> {
+    let raw = fs::read_to_string(root.join("package.json"))
+        .map_err(|e| format!("package.json could not be read ({e})"))?;
+    let manifest: Value =
+        serde_json::from_str(&raw).map_err(|e| format!("package.json is not valid JSON ({e})"))?;
+    let script = match want.kind {
+        ProjectKind::Tests => "test",
+        ProjectKind::Build => "build",
+        ProjectKind::Lint => "lint",
+    };
+    let declared = manifest
+        .get("scripts")
+        .and_then(|scripts| scripts.get(script))
+        .and_then(Value::as_str)
+        .is_some();
+    if !declared {
+        return Err(format!(
+            "package.json declares no \"{script}\" script, so there is no command to run"
+        ));
+    }
+    if want.target.is_some() {
+        return Err(
+            "\"target\" names a Cargo package; a package.json project runs the script it \
+                    declares"
+                .into(),
+        );
+    }
+    refuse_option(
+        want.release,
+        "\"release\" is a Cargo profile; a package.json project builds what its script builds",
+    )?;
+    let mut args = vec!["run".to_string(), script.to_string()];
+    match want.kind {
+        ProjectKind::Tests => {
+            if !want.paths.is_empty() {
+                return Err("\"paths\" narrows a lint run; a test script takes a `filter`".into());
+            }
+            if let Some(filter) = want.filter {
+                args.push("--".into());
+                args.push(filter.to_string());
+            }
+        }
+        ProjectKind::Lint => {
+            if want.filter.is_some() {
+                return Err("\"filter\" narrows a test run, and this call is not one".into());
+            }
+            if !want.paths.is_empty() {
+                args.push("--".into());
+                args.extend(want.paths.iter().cloned());
+            }
+        }
+        ProjectKind::Build => {
+            if want.filter.is_some() || !want.paths.is_empty() {
+                return Err(
+                    "\"filter\" and \"paths\" narrow a test or lint run; run_build takes \
+                            neither"
+                        .into(),
+                );
+            }
+        }
+    }
+    Ok(Project {
+        manifest: "package.json",
+        program: program(package_manager(root)),
+        args,
+    })
+}
+
+fn go_project(want: &Wanted) -> Result<Project, String> {
+    if want.target.is_some() {
+        return Err(
+            "\"target\" names a Cargo package; a Go module is named by its import path".into(),
+        );
+    }
+    refuse_option(
+        want.release,
+        "\"release\" is a Cargo profile; go build has no release flag",
+    )?;
+    let mut args: Vec<String> = match want.kind {
+        ProjectKind::Tests => vec!["test".to_string()],
+        ProjectKind::Build => vec!["build".to_string()],
+        ProjectKind::Lint => vec!["vet".to_string()],
+    };
+    match want.kind {
+        ProjectKind::Tests => {
+            if let Some(filter) = want.filter {
+                args.push("-run".into());
+                args.push(filter.to_string());
+            }
+            args.push("./...".into());
+        }
+        ProjectKind::Build => {
+            if want.filter.is_some() || !want.paths.is_empty() {
+                return Err(
+                    "\"filter\" and \"paths\" are for tests and lint; go build takes \
+                            neither"
+                        .into(),
+                );
+            }
+            args.push("./...".into());
+        }
+        ProjectKind::Lint => {
+            if want.filter.is_some() {
+                return Err("\"filter\" narrows a test run, and this call is not one".into());
+            }
+            if want.paths.is_empty() {
+                args.push("./...".into());
+            } else {
+                args.extend(want.paths.iter().cloned());
+            }
+        }
+    }
+    Ok(Project {
+        manifest: "go.mod",
+        program: "go".into(),
+        args,
+    })
+}
+
+fn python_manifest(root: &Path) -> bool {
+    [
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "requirements.txt",
+        "pytest.ini",
+        "tox.ini",
+        "conftest.py",
+    ]
+    .iter()
+    .any(|name| root.join(name).is_file())
+}
+
+fn ruff_configured(root: &Path) -> bool {
+    if root.join("ruff.toml").is_file() || root.join(".ruff.toml").is_file() {
+        return true;
+    }
+    fs::read_to_string(root.join("pyproject.toml"))
+        .map(|text| text.contains("[tool.ruff]"))
+        .unwrap_or(false)
+}
+
+fn python_project(root: &Path, want: &Wanted) -> Result<Project, String> {
+    if want.target.is_some() {
+        return Err("\"target\" names a Cargo package; a pytest run takes a `filter`".into());
+    }
+    refuse_option(
+        want.release,
+        "\"release\" is a Cargo profile; pytest has no release flag",
+    )?;
+    match want.kind {
+        ProjectKind::Tests => {
+            let mut args = vec!["-m".to_string(), "pytest".to_string()];
+            if let Some(filter) = want.filter {
+                args.push("-k".into());
+                args.push(filter.to_string());
+            }
+            args.extend(want.paths.iter().cloned());
+            Ok(Project {
+                manifest: "pyproject.toml",
+                program: python_program().into(),
+                args,
+            })
+        }
+        ProjectKind::Build => Err(
+            "this workspace is Python, which has no single build command to \
+                                   run"
+            .into(),
+        ),
+        ProjectKind::Lint => {
+            if want.filter.is_some() {
+                return Err("\"filter\" narrows a test run, and this call is not one".into());
+            }
+            if !ruff_configured(root) {
+                return Err(
+                    "this workspace is Python and configures no linter: no ruff.toml and no \
+                            [tool.ruff] in pyproject.toml"
+                        .into(),
+                );
+            }
+            let mut args = vec!["-m".to_string(), "ruff".to_string(), "check".to_string()];
+            if want.paths.is_empty() {
+                args.push(".".into());
+            } else {
+                args.extend(want.paths.iter().cloned());
+            }
+            Ok(Project {
+                manifest: "pyproject.toml",
+                program: python_program().into(),
+                args,
+            })
+        }
+    }
+}
+
+fn make_project(root: &Path, want: &Wanted) -> Result<Project, String> {
+    if want.target.is_some() || want.release || want.filter.is_some() || !want.paths.is_empty() {
+        return Err(
+            "a Makefile target takes no filter, target, release or paths; its recipe decides \
+                    what to run"
+                .into(),
+        );
+    }
+    let text = fs::read_to_string(root.join("Makefile"))
+        .map_err(|e| format!("Makefile could not be read ({e})"))?;
+    let targets = make_targets(&text);
+    let target = match want.kind {
+        ProjectKind::Tests => "test",
+        ProjectKind::Lint => "lint",
+        ProjectKind::Build => {
+            if targets.iter().any(|name| name == "build") {
+                "build"
+            } else {
+                "all"
+            }
+        }
+    };
+    if !targets.iter().any(|name| name == target) {
+        return Err(format!("the Makefile declares no \"{target}\" target"));
+    }
+    Ok(Project {
+        manifest: "Makefile",
+        program: "make".into(),
+        args: vec![target.to_string()],
+    })
+}
+
+/// The names a Makefile declares as targets. A recipe line is indented with a tab and is not one, and
+/// a variable assignment is not one either — which is all the certainty a runner needs to avoid
+/// invoking `make` on a target that does not exist.
+fn make_targets(text: &str) -> Vec<String> {
+    text.lines()
+        .filter(|line| !line.starts_with('\t') && !line.trim_start().starts_with('#'))
+        .filter_map(|line| line.split_once(':'))
+        .map(|(head, _)| head.trim())
+        .filter(|name| {
+            !name.is_empty() && !name.contains(char::is_whitespace) && !name.contains('=')
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+fn package_manager(root: &Path) -> &'static str {
+    let has = |name: &str| root.join(name).is_file();
+    if has("pnpm-lock.yaml") {
+        "pnpm"
+    } else if has("yarn.lock") {
+        "yarn"
+    } else if has("bun.lockb") || has("bun.lock") {
+        "bun"
+    } else {
+        "npm"
+    }
+}
+
+/// The program name as this platform spells it. The JavaScript package managers are `.cmd` shims on
+/// Windows, and `Command` does not go through a shell to find them.
+fn program(name: &str) -> String {
+    #[cfg(windows)]
+    if matches!(name, "npm" | "pnpm" | "yarn" | "bun") {
+        return format!("{name}.cmd");
+    }
+    name.to_string()
+}
+
+fn python_program() -> &'static str {
+    if cfg!(windows) {
+        "python"
+    } else {
+        "python3"
+    }
+}
+
+/// One argument in the model's own words. It has to stay one argument: a value that starts with `-`
+/// would become a flag, and whitespace or a quote in a name would only matter to a shell this never
+/// uses. The set is the characters a package, test or path name actually needs.
+fn word(tool: &str, arguments: &Value, key: &str) -> Result<Option<String>, ToolsError> {
+    let Some(value) = arguments.get(key) else {
+        return Ok(None);
+    };
+    let Some(raw) = value.as_str() else {
+        return Err(bad_arguments(tool, format!("\"{key}\" must be a string")));
+    };
+    let word = raw.trim();
+    if word.is_empty() {
+        return Ok(None);
+    }
+    if word.len() > 120
+        || word.starts_with('-')
+        || !word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':' | '/'))
+    {
+        return Err(bad_arguments(
+            tool,
+            format!(
+                "\"{key}\" must be one plain word — letters, digits, `_ - . : /` — and may not start \
+                 with `-`"
+            ),
+        ));
+    }
+    Ok(Some(word.to_string()))
+}
+
+/// The `paths` array, each entry resolved against the sandbox before it can reach an argv. The paths
+/// are handed back workspace-relative, which is the spelling a linter run from the root expects.
+fn paths_argument(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+) -> Result<Vec<String>, ToolsError> {
+    let Some(value) = arguments.get("paths") else {
+        return Ok(Vec::new());
+    };
+    let Some(list) = value.as_array() else {
+        return Err(bad_arguments(tool, "\"paths\" must be an array of strings"));
+    };
+    if list.len() > 32 {
+        return Err(bad_arguments(
+            tool,
+            format!(
+                "\"paths\" names {} entries; one call may name at most 32",
+                list.len()
+            ),
+        ));
+    }
+    list.iter()
+        .map(|entry| {
+            let Some(raw) = entry.as_str() else {
+                return Err(bad_arguments(tool, "\"paths\" must be an array of strings"));
+            };
+            let raw = raw.trim();
+            if raw.is_empty() || raw.starts_with('-') {
+                return Err(bad_arguments(
+                    tool,
+                    "\"paths\" entries must name a path and may not start with `-`",
+                ));
+            }
+            let resolved = policy.resolve_path(Path::new(raw), Access::Read)?;
+            Ok(policy.display_path(&resolved))
+        })
+        .collect()
+}
+
+fn bad_arguments(tool: &str, reason: impl Into<String>) -> ToolsError {
+    ToolsError::InvalidArguments {
+        tool: tool.to_string(),
+        reason: reason.into(),
+    }
+}
+
+fn refuse_option(asked: bool, reason: &str) -> Result<(), String> {
+    if asked {
+        Err(reason.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn refuse_paths(want: &Wanted, reason: &str) -> Result<(), String> {
+    if want.paths.is_empty() {
+        Ok(())
+    } else {
+        Err(reason.to_string())
+    }
+}
+
+/// A program, its argv, and the environment every runner shares: no pager, no colour escapes, and
+/// `CI=1` so a test script that watches by default exits instead of hanging until its deadline.
+fn structured_command(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    envs: &[(&str, &str)],
+) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Its own group, so a deadline takes the compiler and the test binaries down with the runner.
+        cmd.process_group(0);
+    }
+    cmd.current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("CI", "1")
+        .env("NO_COLOR", "1");
+    for (key, value) in envs {
+        cmd.env(key, value);
+    }
+    cmd
+}
+
+/// What one structured command left behind.
+struct Finished {
+    ended: Ended,
+    out: Drained,
+    err: Drained,
+    elapsed: Duration,
+}
+
+fn run_argv(
+    tool: &str,
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    seconds: u64,
+    capture: Capture,
+    envs: &[(&str, &str)],
+) -> Result<Finished, ToolsError> {
+    let shown = display_command(program, args);
+    let mut child = structured_command(program, args, cwd, envs)
+        .spawn()
+        .map_err(|e| {
+            ToolsError::NotConfigured(format!(
+                "{shown} could not be started ({e}); {program} may not be installed on this machine"
+            ))
+        })?;
+    let out = child.stdout.take().map(|pipe| drain_mode(pipe, capture));
+    let err = child.stderr.take().map(|pipe| drain_mode(pipe, capture));
+    let started = Instant::now();
+    let ended = wait_limited(&mut child, Duration::from_secs(seconds), tool)?;
+    let out = out
+        .and_then(|thread| thread.join().ok())
+        .unwrap_or_default();
+    let err = err
+        .and_then(|thread| thread.join().ok())
+        .unwrap_or_default();
+    Ok(Finished {
+        ended,
+        out,
+        err,
+        elapsed: started.elapsed(),
+    })
+}
+
+/// A command line for the model and the row: the program and each argument, with an argument that
+/// carries a space quoted so the line reads the way it ran rather than as two arguments.
+fn display_command(program: &str, args: &[String]) -> String {
+    let mut parts = vec![program.to_string()];
+    for arg in args {
+        if arg.chars().any(char::is_whitespace) {
+            parts.push(format!("\"{arg}\""));
+        } else {
+            parts.push(arg.clone());
+        }
+    }
+    parts.join(" ")
+}
+
+/// Both streams as one text, and how many bytes the capture window dropped. The two are merged
+/// because a compiler puts its errors on one and its progress on the other, and the model has to see
+/// them in one answer.
+fn captured_text(finished: &Finished) -> (String, usize) {
+    let mut body = String::from_utf8_lossy(&finished.out.bytes).to_string();
+    let err = String::from_utf8_lossy(&finished.err.bytes);
+    if !err.is_empty() {
+        if !body.is_empty() && !body.ends_with('\n') {
+            body.push('\n');
+        }
+        body.push_str(&err);
+    }
+    let total = finished.out.total + finished.err.total;
+    let dropped = total.saturating_sub(body.len());
+    (body, dropped)
+}
+
+/// The report a structured command leaves: the line that ran, what chose it, its output, what was
+/// left out, and the exit that ended it.
+fn command_report(
+    command: &str,
+    note: &str,
+    output: &str,
+    held: usize,
+    elapsed: Duration,
+    status: &str,
+) -> String {
+    let mut text = format!("$ {command}\n");
+    if !note.is_empty() {
+        text.push_str(&format!("({note})\n"));
+    }
+    if output.is_empty() {
+        text.push_str("(no output)\n");
+    } else {
+        text.push_str(output);
+        if !output.ends_with('\n') {
+            text.push('\n');
+        }
+    }
+    if held > 0 {
+        text.push_str(&format!("…{held} bytes of output are not shown.\n"));
+    }
+    text.push_str(&format!("[{status} in {:.1}s]", elapsed.as_secs_f64()));
+    text
+}
+
+/// The three reads of the repository: what is changed, what changed, and what was committed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GitRead {
+    Status,
+    Diff,
+    Log,
+}
+
+/// Read the repository with a fixed argv and no switch of its own.
+///
+/// None of these three can write: `status`, `diff` and `log` report the index and the object store.
+/// The flags are the ones that keep a read a read — no external diff driver, no textconv filter, no
+/// pager, no optional index lock — so what comes back is git's own text rather than a program the
+/// repository named.
+fn git_read(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+    kind: GitRead,
+) -> Result<Executed, ToolsError> {
+    let path = match text_arg(arguments, "path") {
+        Some(raw) => {
+            let resolved = resolve(policy, raw, Access::Read)?;
+            Some(policy.display_path(&resolved))
+        }
+        None => None,
+    };
+    let global = [
+        "--no-pager",
+        "-c",
+        "color.ui=false",
+        "-c",
+        "core.quotepath=false",
+    ];
+    let mut args: Vec<String> = global.iter().map(|s| s.to_string()).collect();
+    match kind {
+        GitRead::Status => args.extend(["status", "--porcelain=v1", "--branch"].map(String::from)),
+        GitRead::Diff | GitRead::Log => {}
+    }
+    let envs = [
+        ("GIT_OPTIONAL_LOCKS", "0"),
+        ("GIT_TERMINAL_PROMPT", "0"),
+        ("GIT_PAGER", "cat"),
+    ];
+    let detail = match kind {
+        GitRead::Status => None,
+        GitRead::Diff => {
+            let mut diff = args.clone();
+            diff.extend(["diff", "--no-ext-diff", "--no-textconv"].map(String::from));
+            if flag_arg(arguments, "staged") {
+                diff.push("--cached".into());
+            }
+            if let Some(path) = &path {
+                diff.push("--".into());
+                diff.push(path.clone());
+            }
+            Some(diff)
+        }
+        GitRead::Log => {
+            let limit = number_arg(arguments, "limit").unwrap_or(20).clamp(1, 200);
+            let mut log = args.clone();
+            log.extend(["log", "--oneline", "--decorate", "-n"].map(String::from));
+            log.push(limit.to_string());
+            if let Some(path) = &path {
+                log.push("--".into());
+                log.push(path.clone());
+            }
+            Some(log)
+        }
+    };
+    let (run_args, summary_kind) = match &detail {
+        Some(diff) => (diff.clone(), kind),
+        None => {
+            if let Some(path) = &path {
+                args.push("--".into());
+                args.push(path.clone());
+            }
+            (args.clone(), kind)
+        }
+    };
+    // A diff's counts come from a second, tiny read: the patch is capped to what fits in an answer,
+    // and counting the visible lines would under-report a change the answer had to cut.
+    let counts = if summary_kind == GitRead::Diff {
+        let mut numstat = run_args.clone();
+        // `--numstat` sits with the flags, before any `--` separator a path introduced.
+        let at = numstat
+            .iter()
+            .position(|arg| arg == "--")
+            .unwrap_or(numstat.len());
+        numstat.insert(at, "--numstat".into());
+        Some(run_argv(
+            tool,
+            "git",
+            &numstat,
+            &policy.workspace_root,
+            GIT_TIMEOUT_SECS,
+            Capture::Head,
+            &envs,
+        )?)
+    } else {
+        None
+    };
+    let shown = display_command("git", &run_args);
+    let finished = run_argv(
+        tool,
+        "git",
+        &run_args,
+        &policy.workspace_root,
+        GIT_TIMEOUT_SECS,
+        Capture::Head,
+        &envs,
+    )?;
+    let stdout = String::from_utf8_lossy(&finished.out.bytes).to_string();
+    let (body, lost) = captured_text(&finished);
+
+    if let Ended::Exited(status) = &finished.ended {
+        // What git prints is localised, so the workspace's state is asked for directly instead of
+        // being read out of stderr: a read that failed is explained only after we know what it was
+        // reading. Both probes are asked the way the read itself is, and only after a failure.
+        if !status.success() && !git_answers(tool, policy, &["rev-parse", "--is-inside-work-tree"])
+        {
+            return Ok(Executed {
+                summary: Summary::said(SummaryKey::GitNotRepo, json!({}), "not a git repository"),
+                content: format!(
+                    "{shown}\n\nThis workspace is not inside a git repository, so there is nothing \
+                     for git to report."
+                ),
+                edits: Vec::new(),
+            });
+        }
+        // A repository with no commits has a status and an empty log, not a broken log.
+        if !status.success()
+            && kind == GitRead::Log
+            && !git_answers(tool, policy, &["rev-parse", "--verify", "--quiet", "HEAD"])
+        {
+            return Ok(Executed {
+                summary: Summary::said(SummaryKey::GitCommits, json!({ "count": 0 }), "0 commits"),
+                content: format!("{shown}\n\nThe repository has no commits yet."),
+                edits: Vec::new(),
+            });
+        }
+        if !status.success() {
+            let summary = ended_summary(&finished.ended, GIT_TIMEOUT_SECS);
+            let (output, held) = head(&body, MAX_RESULT_BYTES);
+            let content = command_report(
+                &shown,
+                "",
+                &output,
+                held + lost,
+                finished.elapsed,
+                &summary.text,
+            );
+            return Ok(Executed {
+                summary,
+                content,
+                edits: Vec::new(),
+            });
+        }
+    } else {
+        let summary = ended_summary(&finished.ended, GIT_TIMEOUT_SECS);
+        return Ok(Executed {
+            summary: summary.clone(),
+            content: format!(
+                "{shown}\n\ngit did not answer within {GIT_TIMEOUT_SECS}s and was stopped. The \
+                 repository may be very large; a narrower path can answer sooner."
+            ),
+            edits: Vec::new(),
+        });
+    }
+
+    match kind {
+        GitRead::Status => {
+            let changed = stdout
+                .lines()
+                .filter(|line| !line.trim().is_empty() && !line.starts_with("## "))
+                .count();
+            let summary = match changed {
+                0 => Summary::said(SummaryKey::GitClean, json!({}), "nothing uncommitted"),
+                1 => Summary::said(
+                    SummaryKey::ChangedFile,
+                    json!({ "count": 1 }),
+                    "1 file changed",
+                ),
+                n => Summary::said(
+                    SummaryKey::ChangedFiles,
+                    json!({ "count": n }),
+                    format!("{n} files changed"),
+                ),
+            };
+            let (output, held) = head(&stdout, MAX_RESULT_BYTES);
+            let content = if changed == 0 {
+                format!(
+                    "{shown}\n\nWorking tree clean: no staged, unstaged or untracked changes.\n\
+                     [{} in {:.1}s]",
+                    summary.text,
+                    finished.elapsed.as_secs_f64()
+                )
+            } else {
+                format!(
+                    "{}Columns: index then working tree — M modified, A added, D deleted, R \
+                     renamed, ?? untracked.\n[{} in {:.1}s]",
+                    command_report_body(&shown, &output, held + lost),
+                    summary.text,
+                    finished.elapsed.as_secs_f64()
+                )
+            };
+            Ok(Executed {
+                summary,
+                content,
+                edits: Vec::new(),
+            })
+        }
+        GitRead::Diff => {
+            let counts = counts.expect("a diff's counts were read before its patch");
+            let (files, added, removed) = if counts.ended_is_failure() {
+                (0, 0, 0)
+            } else {
+                numstat_counts(&String::from_utf8_lossy(&counts.out.bytes))
+            };
+            if files == 0 {
+                let side = if flag_arg(arguments, "staged") {
+                    "staged"
+                } else {
+                    "unstaged"
+                };
+                return Ok(Executed {
+                    summary: Summary::said(SummaryKey::GitClean, json!({}), "nothing uncommitted"),
+                    content: format!("{shown}\n\nNo {side} changes."),
+                    edits: Vec::new(),
+                });
+            }
+            let summary = if files == 1 {
+                Summary::said(
+                    SummaryKey::GitDiffFile,
+                    json!({ "added": added, "removed": removed }),
+                    format!("1 file, +{added} −{removed}"),
+                )
+            } else {
+                Summary::said(
+                    SummaryKey::GitDiff,
+                    json!({ "files": files, "added": added, "removed": removed }),
+                    format!("{files} files, +{added} −{removed}"),
+                )
+            };
+            let (output, held) = head(&body, MAX_RESULT_BYTES);
+            let content = command_report(
+                &shown,
+                "",
+                &output,
+                held + lost,
+                finished.elapsed,
+                &summary.text,
+            );
+            Ok(Executed {
+                summary,
+                content,
+                edits: Vec::new(),
+            })
+        }
+        GitRead::Log => {
+            let count = stdout
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count();
+            let summary = if count == 1 {
+                Summary::said(SummaryKey::GitCommit, json!({}), "1 commit")
+            } else {
+                Summary::said(
+                    SummaryKey::GitCommits,
+                    json!({ "count": count }),
+                    format!("{count} commits"),
+                )
+            };
+            let (output, held) = head(&body, MAX_RESULT_BYTES);
+            let content = command_report(
+                &shown,
+                "",
+                &output,
+                held + lost,
+                finished.elapsed,
+                &summary.text,
+            );
+            Ok(Executed {
+                summary,
+                content,
+                edits: Vec::new(),
+            })
+        }
+    }
+}
+
+/// A yes/no question for git, asked with the same flags and environment as the read it is explaining.
+/// Only used after a read fails, so an ordinary read costs one process rather than two.
+fn git_answers(tool: &str, policy: &SandboxPolicy, args: &[&str]) -> bool {
+    let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let envs = [
+        ("GIT_OPTIONAL_LOCKS", "0"),
+        ("GIT_TERMINAL_PROMPT", "0"),
+        ("GIT_PAGER", "cat"),
+    ];
+    run_argv(
+        tool,
+        "git",
+        &argv,
+        &policy.workspace_root,
+        GIT_TIMEOUT_SECS,
+        Capture::Head,
+        &envs,
+    )
+    .map(|finished| !finished.ended_is_failure())
+    .unwrap_or(false)
+}
+
+/// The body of a report without its trailing exit line, for a caller that appends its own legend
+/// before the same line.
+fn command_report_body(command: &str, output: &str, held: usize) -> String {
+    let mut text = format!("$ {command}\n\n");
+    if output.is_empty() {
+        text.push_str("(no output)\n");
+    } else {
+        text.push_str(output);
+        if !output.ends_with('\n') {
+            text.push('\n');
+        }
+    }
+    if held > 0 {
+        text.push_str(&format!("…{held} bytes of output are not shown.\n"));
+    }
+    text
+}
+
+impl Finished {
+    fn ended_is_failure(&self) -> bool {
+        matches!(&self.ended, Ended::Exited(status) if !status.success())
+    }
+}
+
+/// Per-file line counts from `git diff --numstat`: `added<TAB>removed<TAB>path`, with `-` for a
+/// binary file. Every line is one file, so the count is exact even when the patch itself was cut.
+fn numstat_counts(output: &str) -> (usize, u32, u32) {
+    let mut files = 0;
+    let mut added = 0u32;
+    let mut removed = 0u32;
+    for line in output.lines().filter(|line| !line.trim().is_empty()) {
+        let mut fields = line.splitn(3, '\t');
+        let (Some(a), Some(r), Some(_path)) = (fields.next(), fields.next(), fields.next()) else {
+            continue;
+        };
+        files += 1;
+        added = added.saturating_add(a.trim().parse().unwrap_or(0));
+        removed = removed.saturating_add(r.trim().parse().unwrap_or(0));
+    }
+    (files, added, removed)
 }
 
 /// How much of one search hit's sentence survives. Eight hits at the provider's full length would
@@ -2729,9 +3861,10 @@ mod tests {
     #[test]
     fn a_declared_tool_without_an_executor_is_refused_rather_than_run() {
         let (_d, p) = fixture();
-        // `git_status` is a read the registry declares and nothing implements: offering it would be a
-        // promise this file cannot keep.
-        let err = ran("git_status", &json!({}), &p).expect_err("no executor exists");
+        // `codebase_search` is a read the registry declares and nothing implements: offering it would
+        // be a promise this file cannot keep.
+        let err = ran("codebase_search", &json!({ "query": "where is auth" }), &p)
+            .expect_err("no executor exists");
         assert!(matches!(err, ToolsError::NoExecutor(_)), "{err:?}");
         // And the calls that could take a file away or move it stay unimplemented, so no argument
         // shape can reach them.
@@ -3693,6 +4826,306 @@ mod tests {
         // The tail is what a build's errors are in, so the last number survives the cut.
         assert!(got.content.contains("20000"), "{}", got.content);
         assert!(!got.content.contains("\n1\n"), "the head was kept instead");
+    }
+
+    /// The three project runners are the same consent as the shell: they execute code the workspace
+    /// already carries, so while Terminal access is off they are refused before a manifest is read.
+    #[test]
+    fn a_project_runner_is_refused_while_terminal_access_is_off() {
+        let (d, _) = plain();
+        let p = policy(d.path());
+        assert!(!p.shell_allowed);
+        for id in ["run_tests", "run_build", "run_linter"] {
+            let err = ran(id, &json!({}), &p).expect_err("a runner executes project code");
+            assert!(matches!(err, ToolsError::ShellDisabled), "{id}: {err:?}");
+        }
+        // The repository reads are not commands: they run a fixed argv and stay available.
+        let status = ran("git_status", &json!({}), &p).expect("a git read needs no switch");
+        assert_eq!(status.summary.key, Some(SummaryKey::GitNotRepo));
+    }
+
+    #[test]
+    fn a_workspace_with_no_manifest_says_what_the_runner_looked_for() {
+        let (d, _) = plain();
+        let p = shell_policy(d.path());
+        let err = ran("run_tests", &json!({}), &p).expect_err("nothing says how to test this");
+        assert!(matches!(err, ToolsError::NotConfigured(_)), "{err:?}");
+        let text = err.to_string();
+        for name in [
+            "Cargo.toml",
+            "package.json",
+            "go.mod",
+            "pyproject.toml",
+            "Makefile",
+        ] {
+            assert!(text.contains(name), "{name} missing from: {text}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_makefile_workspace_runs_the_target_it_declares() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Makefile"),
+            "test:\n\t@printf 'SPECIALS PASS\\n'\n",
+        )
+        .unwrap();
+        let p = shell_policy(dir.path());
+        let got = ran("run_tests", &json!({}), &p).unwrap();
+        assert_eq!(got.summary.text, "exit 0");
+        assert!(got.content.contains("SPECIALS PASS"), "{}", got.content);
+        // The report names the file that chose the command, so the model can change it.
+        assert!(got.content.contains("(Makefile)"), "{}", got.content);
+        // A target the file does not declare is a refusal, not a `make` error the model has to decode.
+        let err = ran("run_linter", &json!({}), &p).expect_err("no lint target");
+        assert!(err.to_string().contains("no \"lint\" target"), "{err}");
+    }
+
+    #[test]
+    fn each_manifest_names_the_command_its_project_runs() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+        std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        let tests = Wanted {
+            kind: ProjectKind::Tests,
+            target: Some("core"),
+            filter: Some("auth"),
+            release: false,
+            paths: &[],
+        };
+        let cargo = detect(dir, &tests).unwrap();
+        assert_eq!(cargo.program, "cargo");
+        assert_eq!(cargo.args, ["test", "-p", "core", "auth"]);
+        let lint = Wanted {
+            kind: ProjectKind::Lint,
+            target: None,
+            filter: None,
+            release: false,
+            paths: &[],
+        };
+        assert_eq!(
+            detect(dir, &lint).unwrap().args,
+            ["clippy", "--all-targets"]
+        );
+        // A field the chosen toolchain cannot honour is refused rather than dropped, so a model that
+        // asked for a narrow run cannot be told the whole suite passed.
+        let release = Wanted {
+            kind: ProjectKind::Tests,
+            release: true,
+            ..tests
+        };
+        assert!(detect(dir, &release).unwrap_err().contains("run_build"));
+
+        let node = tempfile::tempdir().unwrap();
+        std::fs::write(
+            node.path().join("package.json"),
+            r#"{"scripts":{"test":"x","build":"y","lint":"z"}}"#,
+        )
+        .unwrap();
+        std::fs::write(node.path().join("pnpm-lock.yaml"), "").unwrap();
+        let node_lint = detect(
+            node.path(),
+            &Wanted {
+                kind: ProjectKind::Lint,
+                target: None,
+                filter: None,
+                release: false,
+                paths: &["src".to_string()],
+            },
+        )
+        .unwrap();
+        assert_eq!(node_lint.program, "pnpm");
+        assert_eq!(node_lint.args, ["run", "lint", "--", "src"]);
+
+        let go = tempfile::tempdir().unwrap();
+        std::fs::write(go.path().join("go.mod"), "module x\n").unwrap();
+        assert_eq!(
+            detect(go.path(), &lint).unwrap().args,
+            ["vet", "./..."],
+            "go lint is vet over the module"
+        );
+
+        let python = tempfile::tempdir().unwrap();
+        std::fs::write(
+            python.path().join("pyproject.toml"),
+            "[tool.ruff]\nline-length = 88\n",
+        )
+        .unwrap();
+        let ruff = detect(python.path(), &lint).unwrap();
+        assert_eq!(ruff.program, python_program());
+        assert_eq!(ruff.args, ["-m", "ruff", "check", "."]);
+
+        let make = tempfile::tempdir().unwrap();
+        std::fs::write(make.path().join("Makefile"), "all:\n\t@true\n").unwrap();
+        let build = Wanted {
+            kind: ProjectKind::Build,
+            target: None,
+            filter: None,
+            release: false,
+            paths: &[],
+        };
+        assert_eq!(detect(make.path(), &build).unwrap().args, ["all"]);
+    }
+
+    /// A workspace in a git repository, with the files committed so a later change is a real diff.
+    #[cfg(unix)]
+    fn committed_workspace(files: &[(&str, &str)]) -> (tempfile::TempDir, SandboxPolicy) {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, body) in files {
+            std::fs::write(dir.path().join(name), body).unwrap();
+        }
+        let home = dir.path().join(".home");
+        std::fs::create_dir_all(&home).unwrap();
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .env("HOME", &home)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&["init", "-q"]);
+        run(&["add", "-A"]);
+        run(&[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "first",
+        ]);
+        let p = shell_policy(dir.path());
+        (dir, p)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_git_status_says_clean_or_how_many_files_changed() {
+        let (d, p) = committed_workspace(&[("a.txt", "one\ntwo\n")]);
+        let clean = ran("git_status", &json!({}), &p).unwrap();
+        assert_eq!(clean.summary.key, Some(SummaryKey::GitClean));
+        assert!(
+            clean.content.contains("Working tree clean"),
+            "{}",
+            clean.content
+        );
+        std::fs::write(d.path().join("a.txt"), "one\nTWO\n").unwrap();
+        std::fs::write(d.path().join("b.txt"), "new\n").unwrap();
+        let dirty = ran("git_status", &json!({}), &p).unwrap();
+        assert_eq!(dirty.summary.key, Some(SummaryKey::ChangedFiles));
+        assert_eq!(dirty.summary.params["count"], json!(2));
+        assert!(dirty.content.contains("?? b.txt"), "{}", dirty.content);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_git_diff_counts_lines_from_the_numstat_read() {
+        let (d, p) = committed_workspace(&[("a.txt", "one\ntwo\nthree\n")]);
+        let clean = ran("git_diff", &json!({}), &p).unwrap();
+        assert_eq!(clean.summary.key, Some(SummaryKey::GitClean));
+        std::fs::write(d.path().join("a.txt"), "one\nTWO\nthree\nfour\n").unwrap();
+        let got = ran("git_diff", &json!({}), &p).unwrap();
+        assert_eq!(got.summary.key, Some(SummaryKey::GitDiffFile));
+        assert_eq!(got.summary.params["added"], json!(2));
+        assert_eq!(got.summary.params["removed"], json!(1));
+        assert!(got.content.contains("@@"), "{}", got.content);
+        // The staged view is a different read: nothing is staged yet.
+        let staged = ran("git_diff", &json!({ "staged": true }), &p).unwrap();
+        assert_eq!(staged.summary.key, Some(SummaryKey::GitClean));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_git_log_counts_the_commits_and_says_when_there_are_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".home");
+        std::fs::create_dir_all(&home).unwrap();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .env("HOME", &home)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
+        let p = shell_policy(dir.path());
+        let none = ran("git_log", &json!({}), &p).unwrap();
+        assert_eq!(none.summary.key, Some(SummaryKey::GitCommits));
+        assert_eq!(none.summary.params["count"], json!(0));
+        assert!(none.content.contains("no commits yet"), "{}", none.content);
+        git(&["add", "-A"]);
+        git(&[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "first",
+        ]);
+        let one = ran("git_log", &json!({}), &p).unwrap();
+        assert_eq!(one.summary.key, Some(SummaryKey::GitCommit));
+        std::fs::write(dir.path().join("b.txt"), "two\n").unwrap();
+        git(&["add", "-A"]);
+        git(&[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "second",
+        ]);
+        let two = ran("git_log", &json!({ "limit": 1 }), &p).unwrap();
+        assert_eq!(
+            two.summary.key,
+            Some(SummaryKey::GitCommit),
+            "the limit bounds the read"
+        );
+        let both = ran("git_log", &json!({}), &p).unwrap();
+        assert_eq!(both.summary.params["count"], json!(2));
+    }
+
+    /// The values a runner passes on are argv entries, never shell syntax: a flag-shaped filter, a
+    /// path that climbs out, and a name with a space are all refused before a process exists.
+    #[test]
+    fn a_runner_argument_that_could_become_syntax_never_reaches_an_argv() {
+        let (d, _) = plain();
+        let p = shell_policy(d.path());
+        let err = ran("run_tests", &json!({ "filter": "--all" }), &p).expect_err("a flag");
+        assert!(
+            matches!(err, ToolsError::InvalidArguments { .. }),
+            "{err:?}"
+        );
+        let err = ran("run_tests", &json!({ "paths": ["../outside"] }), &p).expect_err("escape");
+        assert!(matches!(err, ToolsError::Sandbox(_)), "{err:?}");
+        let err = ran("run_linter", &json!({ "paths": ["--force"] }), &p)
+            .expect_err("a path shaped like a flag");
+        assert!(
+            matches!(err, ToolsError::InvalidArguments { .. }),
+            "{err:?}"
+        );
+        let err = ran("run_build", &json!({ "target": "my crate" }), &p).expect_err("a space");
+        assert!(
+            matches!(err, ToolsError::InvalidArguments { .. }),
+            "{err:?}"
+        );
     }
 
     #[test]

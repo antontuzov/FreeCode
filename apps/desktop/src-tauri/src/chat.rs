@@ -78,10 +78,10 @@ const SUBAGENT_RESULT_CHARS: usize = 6_000;
 /// because a 1.7B model will otherwise ask for a write the loop does not offer and spend a round.
 const SUBAGENT_SYSTEM: &str = "\
 You are a subagent inside a local coding assistant. You answer one delegated question about this \
-workspace. You can read it with read_file, list_dir, glob and grep_search; you cannot change, create \
-or run anything, and you cannot reach the internet. Use the tools you need, then answer in plain \
-prose: what you found, and which files say so. Keep the answer short; the assistant that delegated \
-the question may act on it.";
+workspace. You can read it with read_file, list_dir, glob and grep_search, and read its repository \
+with git_status, git_diff and git_log; you cannot change, create or run anything, and you cannot \
+reach the internet. Use the tools you need, then answer in plain prose: what you found, and which \
+files say so. Keep the answer short; the assistant that delegated the question may act on it.";
 
 /// Sized for the largest pack the catalog offers, not the default one: a cold first load pages 5.95 GB
 /// of weights in from disk, and the observed warm load of that file on an M1 was under 11 s, so this is
@@ -1221,8 +1221,8 @@ async fn delegate(
                     }
                 }
                 _ => format!(
-                    "{name} is not available to a subagent. It can use read_file, list_dir, glob and \
-                     grep_search."
+                    "{name} is not available to a subagent. It can use read_file, list_dir, glob, \
+                     grep_search, git_status, git_diff and git_log."
                 ),
             };
             results.push((call.id.clone(), result));

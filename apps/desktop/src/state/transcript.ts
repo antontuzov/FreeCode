@@ -18,6 +18,10 @@ export type StepKind =
   | "running"
   | "thought"
   | "terminal"
+  | "tests"
+  | "build"
+  | "linter"
+  | "git"
   | "editFile"
   | "createFile"
   | "readFile"
@@ -37,6 +41,10 @@ const I18N_KEYS: Record<StepKind, string> = {
   running: "transcript.step.running",
   thought: "transcript.step.thought",
   terminal: "transcript.step.terminal",
+  tests: "transcript.step.tests",
+  build: "transcript.step.build",
+  linter: "transcript.step.linter",
+  git: "transcript.step.git",
   editFile: "transcript.step.editFile",
   createFile: "transcript.step.createFile",
   readFile: "transcript.step.readFile",
@@ -545,6 +553,10 @@ const CAPABILITIES = new Set<StepKind>([
   "readFile",
   "searchContent",
   "terminal",
+  "tests",
+  "build",
+  "linter",
+  "git",
   "editFile",
   "createFile",
   "webSearch",

@@ -37,9 +37,13 @@ engine or the host actually measured.
 Said plainly, because the interface says it too — a control that is not built is disabled and names the
 reason on hover:
 
-- Ten of the thirty declared tools have executors, and one more — `spawn_subagent` — is answered by the
-  run loop rather than an executor. `delete_path`, `run_tests`, `codebase_search`, `git_*` and the rest
-  are declared so the model can ask, and a call to one is answered with a row that says it was not run.
+- Sixteen of the thirty declared tools have executors, and one more — `spawn_subagent` — is answered by
+  the run loop rather than an executor. `delete_path`, `move_path`, `format_code`, `codebase_search`,
+  `git_stage`, `git_commit`, `git_push`, `http_request`, `install_extension`, `mcp_call`,
+  `create_artifact`, `ask_user` and `wait_for_port` are declared so the model can ask, and a call to one
+  is answered with a row that says it was not run. The runners and the three `git` reads are real: they
+  execute the workspace's own manifest through argv, and they are offered only while Terminal access is
+  on (the `git` reads need no switch — they change nothing and run a fixed command).
 - Nothing produces an artifact yet, so that inspector group is the one still scripted under
   `?fixture=1`. The Subagents group is fed by the run's own delegation rows; a real run leaves it empty
   while the Subagents switch is off.
@@ -188,6 +192,23 @@ The dev URL therefore accepts seeds that no shipped control ever sets:
 
 `pnpm app:dev:fixture`, `app:dev:settings` and `app:dev:chat` are the three pre-wired ones.
 
+## Shipping
+
+`pnpm app:build` produces an unsigned `.app` and a `.dmg` under `target/release/bundle/`. The disk image
+puts the app and an Applications alias where the bundled background's arrow points; a second launch never
+starts a second app, because the new process hands over and the open window comes forward — one process
+owns the engine, the conversation and the saved key.
+
+Two release steps are not wired yet, and this build makes no claim to have them:
+
+- **Signing and notarisation.** The bundle is ad-hoc signed, so a copy downloaded from the internet is
+  blocked by Gatekeeper until it is allowed in System Settings → Privacy & Security. A Developer ID
+  Application certificate and notarisation credentials are not in this repository; they are supplied to
+  Tauri through its `APPLE_*` environment at build time.
+- **The updater.** It needs a published update endpoint and a signing key pair whose public half ships in
+  the app. Neither exists here, so the app does not check for updates. A placeholder endpoint or key would
+  look like a working update path while being none.
+
 ## Layout
 
 ```
@@ -212,5 +233,5 @@ docs/KNOWN_ISSUES.md    every model limit the code defends against, and where th
   trademarks; only the icon geometry is shared.
 - **KaTeX** fonts and stylesheet, bundled with the frontend build.
 
-The workspace declares `license = "MIT"` in `Cargo.toml`. A `LICENSE` file is still owed at the root, so
-until it lands treat the manifest as the intent rather than the grant.
+SmoLLM Studio is MIT licensed; see [`LICENSE`](LICENSE). The engine and the model weights keep their own
+terms, listed above.

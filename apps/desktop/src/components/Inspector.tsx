@@ -81,6 +81,10 @@ const CAPABILITY_ICONS: Partial<Record<StepKind, IconName>> = {
   createFile: "createFile",
   searchContent: "searchContent",
   terminal: "terminal",
+  tests: "check",
+  build: "cube",
+  linter: "review",
+  git: "outline",
   webSearch: "search",
   webReading: "webReading",
 };

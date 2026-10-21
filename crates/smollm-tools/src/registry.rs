@@ -12,7 +12,7 @@
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use smollm_config::agent::PermissionClass;
+use smollm_config::agent::{shell_governed, PermissionClass};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -233,7 +233,11 @@ pub fn registry() -> Vec<ToolDescriptor> {
             permission: SideEffect,
             requires_network: false,
             input_schema: s(
-                json!({ "filter": { "type": "string" }, "target": { "type": "string" } }),
+                json!({
+                    "filter": { "type": "string" },
+                    "target": { "type": "string" },
+                    "paths": { "type": "array", "items": { "type": "string" } }
+                }),
                 &[],
             ),
         },
@@ -476,18 +480,19 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
         .collect()
 }
 
-/// The tools this build can actually run: the four workspace reads, the three writes, the command,
-/// and the two calls that reach the internet, whose executors live in [`crate::exec`] and
-/// [`crate::web`].
+/// The tools this build can actually run: the four workspace reads, the three writes, the shell and
+/// the three project runners, the three read-only git calls, and the two calls that reach the
+/// internet, whose executors live in [`crate::exec`] and [`crate::web`].
 ///
 /// The rest of the registry is a declaration with no verb behind it — a schema, a permission class,
 /// and nothing that touches the disk. Offering one of those would invite the model to ask for a
 /// delete that can only come back refused, so a run that carries tools hands over this list and
 /// nothing else. The writes are on it because the sandbox bounds them to the workspace root — one
 /// makes a file that is not there, one changes text it has to find first, and one applies a diff
-/// whose every old line it has to find first. The shell is on it because the user's Terminal access
-/// switch bounds it: the switch is off by default, and [`executable_specs`] does not hand it over
-/// until the switch says so.
+/// whose every old line it has to find first. The shell and the runners are on it because the user's
+/// Terminal access switch bounds them: the switch is off by default, and [`executable_specs`] does
+/// not hand any of them over until the switch says so. The git calls are reads of what the
+/// repository already holds, with a fixed argv and no switch of their own.
 pub const EXECUTABLE: &[&str] = &[
     "read_file",
     "list_dir",
@@ -497,6 +502,12 @@ pub const EXECUTABLE: &[&str] = &[
     "edit_file",
     "apply_patch",
     "terminal",
+    "run_tests",
+    "run_build",
+    "run_linter",
+    "git_status",
+    "git_diff",
+    "git_log",
     "web_search",
     "fetch_url",
 ];
@@ -525,9 +536,9 @@ pub fn is_runnable(tool_id: &str) -> bool {
 }
 
 /// The declaration side for [`EXECUTABLE`], minus the two web calls while `network` is off, the
-/// command while `shell` is off, and delegation while `subagents` is off.
+/// shell and its project runners while `shell` is off, and delegation while `subagents` is off.
 ///
-/// The gate itself is [`crate::authorize`], which refuses either one anyway — but a tool that is
+/// The gate itself is [`crate::authorize`], which refuses each one anyway — but a tool that is
 /// offered and then refused is a promise the interface made and broke, and it costs the model a round
 /// to learn so. When a switch is off, the offer itself has to say what this run cannot reach.
 pub fn executable_specs(network: bool, shell: bool, subagents: bool) -> Vec<Value> {
@@ -536,19 +547,21 @@ pub fn executable_specs(network: bool, shell: bool, subagents: bool) -> Vec<Valu
         .filter(|t| {
             is_runnable(t.id)
                 && (network || !t.requires_network)
-                && (shell || t.id != "terminal")
+                && (shell || !shell_governed(t.id))
                 && (subagents || t.id != "spawn_subagent")
         })
         .map(spec)
         .collect()
 }
 
-/// The read-only workspace calls a subagent is offered: the same four reads the main run has, and
-/// nothing that writes, runs or reaches the internet.
+/// The read-only workspace calls a subagent is offered: the four workspace reads, the three git
+/// reads, and nothing that writes, runs or reaches the internet.
 ///
 /// A subagent that could write would change files the parent's review never saw, which is the one
 /// thing this build's transcript cannot honestly report. Web reads stay out too: one switch already
 /// governs what leaves the machine, and a nested run is not the place to spend it a second time.
+/// The git calls are on the list because they read the repository with a fixed argv, which is the
+/// same bargain `read_file` makes with the sandbox.
 pub fn subagent_specs() -> Vec<Value> {
     registry()
         .into_iter()
@@ -582,6 +595,14 @@ pub fn summary(tool_id: &str, arguments: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or("<no command>")
         ),
+        // A runner derives its command from the manifest when it executes, so the headline names the
+        // job rather than a command this function cannot see.
+        "run_tests" => "Run this project's tests".to_string(),
+        "run_build" => "Build this project".to_string(),
+        "run_linter" => "Run this project's linter".to_string(),
+        "git_status" => "Read the working-tree status".to_string(),
+        "git_diff" => "Read the working-tree diff".to_string(),
+        "git_log" => "Read the recent commits".to_string(),
         "git_commit" => format!(
             "Commit: {}",
             arguments
@@ -790,9 +811,9 @@ mod tests {
     /// The other half of the rule is what the loop promises a run: everything offered either is a
     /// workspace read the sandbox bounds, or is one of the three writes it bounds, or is a call that
     /// leaves the machine and therefore only stands on the list while the Privacy switch is on, or is
-    /// the command — which stands on the list only while Terminal access is on, and is the one offer
-    /// the path sandbox does not bound. A delete or a rename appearing here would mean nothing at all
-    /// stands between a run and the machine.
+    /// the command and its runners — which stand on the list only while Terminal access is on, and are
+    /// the offers the path sandbox does not bound. A delete or a rename appearing here would mean
+    /// nothing at all stands between a run and the machine.
     #[test]
     fn only_bounded_reads_the_writes_the_switchable_web_calls_and_the_shell_are_offered() {
         for id in EXECUTABLE {
@@ -800,7 +821,7 @@ mod tests {
             let allowed = match tool.permission {
                 PermissionClass::ReadOnly | PermissionClass::WorkspaceWrite => true,
                 PermissionClass::Network => matches!(*id, "web_search" | "fetch_url"),
-                PermissionClass::SideEffect => *id == "terminal",
+                PermissionClass::SideEffect => shell_governed(id),
             };
             assert!(allowed, "{id} is offered with {:?}", tool.permission);
         }
@@ -851,24 +872,37 @@ mod tests {
         );
         assert!(!names.contains(&"web_search"), "{names:?}");
         assert!(!names.contains(&"fetch_url"), "{names:?}");
-        // And with Terminal access off, the command is not offered either, whatever the other switch
-        // says. This is the offer the default settings produce.
+        // And with Terminal access off, the command and its runners are not offered either, whatever
+        // the other switch says. This is the offer the default settings produce.
         for network in [true, false] {
             let specs = executable_specs(network, false, true);
             let names: Vec<&str> = specs
                 .iter()
                 .map(|s| s["function"]["name"].as_str().unwrap())
                 .collect();
-            assert!(!names.contains(&"terminal"), "{names:?}");
+            for id in ["terminal", "run_tests", "run_build", "run_linter"] {
+                assert!(!names.contains(&id), "{names:?}");
+            }
+            // Four runners out with the shell off, and the two web calls out when the network is.
             assert_eq!(
                 names.len(),
-                EXECUTABLE.len() + DELEGATED.len() - if network { 1 } else { 3 }
+                EXECUTABLE.len() + DELEGATED.len() - 4 - if network { 0 } else { 2 },
+                "{names:?}"
             );
             // Subagents stay out until their own switch is on, on top of every other gate.
             let no_delegation = executable_specs(network, false, false);
             assert!(!no_delegation
                 .iter()
                 .any(|s| s["function"]["name"] == json!("spawn_subagent")));
+        }
+        // The git reads are not behind the shell switch: they report what the repository holds.
+        let closed = executable_specs(false, false, false);
+        let names: Vec<&str> = closed
+            .iter()
+            .map(|s| s["function"]["name"].as_str().unwrap())
+            .collect();
+        for id in ["git_status", "git_diff", "git_log"] {
+            assert!(names.contains(&id), "{id} is not a shell call: {names:?}");
         }
     }
 
@@ -880,8 +914,16 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["read_file", "list_dir", "glob", "grep_search"],
-            "the four reads, in registry order, and nothing else"
+            [
+                "read_file",
+                "list_dir",
+                "glob",
+                "grep_search",
+                "git_status",
+                "git_diff",
+                "git_log"
+            ],
+            "the workspace reads and the git reads, in registry order, and nothing else"
         );
         // The schema asks for the one thing the loop reads, and no field it would ignore.
         let spawn = find("spawn_subagent").expect("declared");

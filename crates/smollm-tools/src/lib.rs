@@ -11,8 +11,10 @@
 //!
 //! A shell now has an executor, but it is the one capability the path sandbox cannot bound: it runs
 //! only while the user's Terminal access switch is on, and [`authorize`] refuses it otherwise. The
-//! engine's tool-call quirk is already accounted for here: an empty `arguments` object must be sent as
-//! `"{}"`, because the fork answers HTTP 500 otherwise (llama.cpp#112).
+//! project runners — tests, build, linter — execute the same code by another name, so they answer to
+//! that switch too; the three git reads report what the repository already holds and need no switch.
+//! The engine's tool-call quirk is already accounted for here: an empty `arguments` object must be sent
+//! as `"{}"`, because the fork answers HTTP 500 otherwise (llama.cpp#112).
 
 pub mod exec;
 pub mod registry;
@@ -20,6 +22,8 @@ pub mod sandbox;
 pub mod web;
 
 use std::path::Path;
+
+use smollm_config::agent::shell_governed;
 
 pub use exec::{execute, Edit, Executed, Summary, SummaryKey, MAX_RESULT_BYTES};
 pub use registry::{
@@ -43,7 +47,9 @@ pub enum ToolsError {
     NetworkNotConfigured(String),
     #[error("this build has no executor for {0}: it is declared but not implemented")]
     NoExecutor(String),
-    #[error("Terminal access is switched off in Settings, so no command was run")]
+    #[error("{0}")]
+    NotConfigured(String),
+    #[error("Terminal access is switched off in Settings, so nothing was run")]
     ShellDisabled,
     #[error("{tool} could not open {path} ({reason})")]
     Io {
@@ -75,7 +81,7 @@ pub fn authorize(
             .check_network()
             .map_err(|_| ToolsError::NetworkNotConfigured(tool_id.into()))?;
     }
-    if tool.id == "terminal" && !policy.shell_allowed {
+    if shell_governed(tool.id) && !policy.shell_allowed {
         return Err(ToolsError::ShellDisabled);
     }
     let access = if tool.is_read_only() {
@@ -86,6 +92,14 @@ pub fn authorize(
     for key in PATH_KEYS {
         if let Some(raw) = arguments.get(key).and_then(|v| v.as_str()) {
             policy.resolve_path(Path::new(raw), access)?;
+        }
+    }
+    // A runner's `paths` is an array, which the loop above cannot see; the linter executor resolves
+    // each entry before it builds an argument list, and this is the check that keeps the same rule in
+    // one place for every caller that reaches `authorize` alone.
+    if let Some(paths) = arguments.get("paths").and_then(|v| v.as_array()) {
+        for raw in paths.iter().filter_map(|v| v.as_str()) {
+            policy.resolve_path(Path::new(raw), Access::Read)?;
         }
     }
     Ok(tool)

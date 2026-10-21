@@ -20,6 +20,17 @@ pub enum PermissionClass {
     Network,
 }
 
+/// The calls that run the project's own code: the user's shell, and the three runners built on the
+/// same consent. Tests, builds and scripts all execute code the workspace already carries, under this
+/// user's permissions, so the Terminal switch is their approval — not the dial, which cannot price
+/// what a `package.json` script actually does. While the switch is off none of them is offered.
+pub fn shell_governed(tool_id: &str) -> bool {
+    matches!(
+        tool_id,
+        "terminal" | "run_tests" | "run_build" | "run_linter"
+    )
+}
+
 /// Composer dropdown: ▷ Auto approve ▾.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -45,7 +56,9 @@ pub struct Approvals {
     pub shell_allow: Vec<String>,
     pub shell_deny: Vec<String>,
     /// Off by default: a command runs with this user's permissions, so the switch is the consent the
-    /// approval prompt would otherwise ask for. Nothing in the loop offers `terminal` while it is off.
+    /// approval prompt would otherwise ask for. It covers the project runners — tests, build, linter —
+    /// because those execute the same code by another name. Nothing in the loop offers any of them
+    /// while it is off.
     pub shell_enabled: bool,
     pub shell_timeout_ms: u64,
     /// Off by default: a subagent is a second model run against the same weights, and the main run
@@ -85,11 +98,11 @@ impl Approvals {
         if let Some(explicit) = self.tool_overrides.get(tool_id) {
             return Some(*explicit);
         }
-        // The terminal is the one side effect a switch could stand in for: there is no prompt in this
-        // build to ask with, and the switch says in advance what the prompt would. It only reaches
-        // here while the sandbox's own `shell_allowed` is on — the engine refuses a switched-off shell
-        // before the mode is consulted.
-        if tool_id == "terminal" && self.shell_enabled && self.mode != ApprovalMode::AskAlways {
+        // The shell and the project runners are the side effects a switch could stand in for: there is
+        // no prompt in this build to ask with, and the switch says in advance what the prompt would.
+        // They only reach here while the sandbox's own `shell_allowed` is on — the engine refuses a
+        // switched-off shell before the mode is consulted.
+        if shell_governed(tool_id) && self.shell_enabled && self.mode != ApprovalMode::AskAlways {
             return Some(matches!(
                 self.mode,
                 ApprovalMode::AutoApprove | ApprovalMode::Custom
@@ -296,6 +309,23 @@ mod tests {
         };
         assert_eq!(
             on.decide("terminal", PermissionClass::SideEffect),
+            Some(true)
+        );
+        // The project runners execute the same code by another name, so one switch answers for all of
+        // them — and a call whose switch is off is never approved by the dial.
+        for id in ["run_tests", "run_build", "run_linter"] {
+            assert!(shell_governed(id), "{id} runs project code");
+            assert_eq!(off.decide(id, PermissionClass::SideEffect), None, "{id}");
+            assert_eq!(
+                on.decide(id, PermissionClass::SideEffect),
+                Some(true),
+                "{id}"
+            );
+        }
+        // A read of the repository is not project code and is not behind the switch.
+        assert!(!shell_governed("git_status"));
+        assert_eq!(
+            off.decide("git_status", PermissionClass::ReadOnly),
             Some(true)
         );
         assert_eq!(
