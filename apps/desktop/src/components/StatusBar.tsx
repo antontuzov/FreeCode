@@ -53,7 +53,7 @@ export function StatusBar({ locale }: { locale: Locale }) {
     : free
       ? !free.allowed
         ? translate(locale, "model.badge.needsConsent")
-        : !free.routable
+        : !free.routable && !status?.opencode.available
           ? translate(locale, "model.badge.notRoutable")
           : translate(locale, "model.badge.free")
       : status?.blocked

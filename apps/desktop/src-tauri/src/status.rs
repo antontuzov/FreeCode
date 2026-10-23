@@ -140,6 +140,9 @@ impl Assembly {
             local: local_badge(self.report.is_allowed(), remote_selected, free.is_some()),
             remote,
             free,
+            // Filled by the command after the probe: the status build is synchronous and this one
+            // fact is a live process rather than a document on disk.
+            opencode: OpenCodeView::default(),
             packing: self.pack.key.clone(),
             size_gb: self.pack.size_gb,
             warnings,
@@ -362,6 +365,14 @@ pub struct FreeView {
     pub allowed: bool,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenCodeView {
+    /// Whether the OpenCode app's local service answers on this machine.
+    pub available: bool,
+    pub version: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStatusView {
@@ -382,6 +393,10 @@ pub struct ModelStatusView {
     /// The free model this turn goes to instead of the local engine, when the picker's free tier is
     /// the selected source. Same no-secret rule as `remote`.
     pub free: Option<FreeView>,
+    /// The OpenCode app on this Mac, when it is running. A free pick answers through it without a
+    /// gateway key, so the card has to be able to name the route that is actually going to be used.
+    #[serde(default)]
+    pub opencode: OpenCodeView,
     pub packing: String,
     pub size_gb: f32,
     pub warnings: Vec<String>,
@@ -574,13 +589,17 @@ mod tests {
 
     #[test]
     fn the_local_badge_needs_a_permitted_run_and_the_local_source() {
-        assert!(local_badge(true, false));
+        assert!(local_badge(true, false, false));
         assert!(
-            !local_badge(true, true),
+            !local_badge(true, true, false),
             "selecting the remote provider takes the badge off"
         );
         assert!(
-            !local_badge(false, false),
+            !local_badge(true, false, true),
+            "selecting a free model takes the badge off too"
+        );
+        assert!(
+            !local_badge(false, false, false),
             "a refused load is not local, it is not running"
         );
     }

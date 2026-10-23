@@ -36,6 +36,7 @@ const STATUS: ModelStatus = {
   local: true,
   remote: null,
   free: null,
+  opencode: { available: false, version: null },
   packing: "PQ2_0",
   sizeGb: 0.46,
   warnings: [],

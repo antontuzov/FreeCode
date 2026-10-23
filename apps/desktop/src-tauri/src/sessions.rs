@@ -112,6 +112,12 @@ pub struct Session {
     /// ignores it and reopens the conversation as the exchange alone, which is what it did anyway.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rows: Vec<serde_json::Value>,
+    /// The OpenCode session this conversation continues in, when its turns are answered by the
+    /// OpenCode app on this Mac. Stored so reopening the conversation tomorrow continues the same
+    /// exchange instead of asking a fresh session what the window still shows. Additive for the same
+    /// reason `rows` is: an older build ignores what it does not know.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_session: Option<String>,
 }
 
 /// What the sidebar needs, without every answer's text crossing the IPC boundary to get it.
@@ -168,6 +174,7 @@ impl Session {
             updated_at_ms: now_ms(),
             turns: Vec::new(),
             rows: Vec::new(),
+            opencode_session: None,
         }
     }
 

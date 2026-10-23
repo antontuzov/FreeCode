@@ -56,11 +56,16 @@ export type ModelStatus = {
     id: string;
     label: string;
     provider: string;
-    /** False for the promotion rows, which a turn refuses rather than routing. */
+    /** False for the promotion rows, which the gateway route refuses rather than routing. */
     routable: boolean;
     /** The Privacy consent switch. Off means a free turn is refused, not rerouted. */
     allowed: boolean;
   } | null;
+  /**
+   * The OpenCode app's local service, which answers every free row without a gateway key. `available`
+   * is a probe of this machine, not a setting: the picker's rows go live when it is true.
+   */
+  opencode: { available: boolean; version: string | null };
   packing: string;
   sizeGb: number;
   warnings: string[];
@@ -80,9 +85,10 @@ export type ModelStatus = {
 
 /**
  * One free-model registry entry, as the picker draws it. Mirrors
- * `smollm_desktop_lib::free_models::FreeModelInfo`. `routable: false` is the promotion rows: listed
- * for parity with the page that inspired the list, and a turn with one selected is refused rather
- * than routed to a guessed address.
+ * `smollm_desktop_lib::free_models::FreeModelInfo`. `routable` is about the gateway key: a row whose
+ * model OpenRouter does not list cannot be sent there. `local` is the other route — the OpenCode app
+ * on this Mac, which answers the whole list — so a row can be unpickable for the key and pickable
+ * for the app in the same breath.
  */
 export type FreeModelInfo = {
   id: string;
@@ -90,6 +96,13 @@ export type FreeModelInfo = {
   provider: string;
   isFree: boolean;
   routable: boolean;
+  local: boolean;
+};
+
+/** The OpenCode app's local service, as the host probes it. Mirrors `opencode::Status`. */
+export type OpenCodeStatus = {
+  available: boolean;
+  version: string | null;
 };
 
 /**
@@ -392,6 +405,10 @@ export type AgentEvent =
       runId: string;
       modelLabel: string;
       local: boolean;
+      /** The supervised local engine answers this run. A remote provider and the OpenCode service run
+       * on this machine too, so `local` is true for them as well; this is the flag that says a server
+       * has to be started before the first token. */
+      engine: boolean;
       maxRounds: number;
       plan: boolean;
     }
@@ -815,8 +832,9 @@ export const ipc = {
   /** Remove the saved key; answers whether one is saved now, which is always `false` on success. */
   clearRemoteKey: () => invoke<boolean>("clear_remote_key"),
   /**
-   * The free-model registry as the picker draws it. No secret rides along: ids, labels, providers
-   * and whether the gateway can actually be reached with this entry.
+   * The free-model registry as the picker draws it. No secret rides along: ids, labels, providers,
+   * whether the gateway can be reached with this entry, and whether the OpenCode app on this Mac is
+   * answering.
    */
   freeModelsList: () => invoke<FreeModelInfo[]>("free_models_list"),
   /** Whether the Keychain holds the free gateway key. The key itself is never returned. */
@@ -825,6 +843,11 @@ export const ipc = {
   saveFreeKey: (key: string) => invoke<boolean>("save_free_key", { key }),
   /** Remove the saved gateway key; answers whether one is saved now, always `false` on success. */
   clearFreeKey: () => invoke<boolean>("clear_free_key"),
+  /**
+   * Whether the OpenCode app's local service answers, and its version. A probe of this machine, not
+   * a credential: the service's own password never crosses this boundary.
+   */
+  opencodeStatus: () => invoke<OpenCodeStatus>("opencode_status"),
   /**
    * Put a fence's text on the system pasteboard. The host does the writing because the webview is not
    * a place the web Clipboard API can be counted on, and its promise settles only once the pasteboard

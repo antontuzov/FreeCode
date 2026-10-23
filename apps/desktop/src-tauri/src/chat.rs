@@ -49,7 +49,7 @@ use smollm_tools::{SandboxPolicy, Summary, SummaryKey};
 
 use crate::agent::{self, Ran};
 use crate::free_models::FreeModel;
-use crate::{appearance, free_models, sessions, status, undo};
+use crate::{appearance, free_models, opencode, sessions, status, undo};
 use sessions::{Role, Session};
 
 /// Event name the transcript subscribes to for the duration of the window.
@@ -208,6 +208,25 @@ struct FreeTurn {
     max_tokens: u32,
 }
 
+/// A turn answered by the OpenCode app on this Mac.
+///
+/// This is the free tier's other route: the same registry rows, answered by the runtime their models
+/// are reserved for, with no gateway key. `session` is the service session the conversation continues
+/// in; it is opened on the first turn and remembered on the filed conversation, so a reopened
+/// conversation picks the exchange up rather than starting over. `fresh` says this turn opened that
+/// session, which is when the system prompt has to be carried to it; `replay` is true for the one
+/// turn that had to open a fresh service session under a conversation the app already holds: its
+/// prompt then carries the exchange the service has not seen.
+#[derive(Clone)]
+struct OpenCodeTurn {
+    service: opencode::Service,
+    model: &'static FreeModel,
+    max_tokens: u32,
+    session: Option<String>,
+    fresh: bool,
+    replay: bool,
+}
+
 /// Where one turn is answered.
 ///
 /// There is deliberately no fallback between the three: a remote or free selection whose consent
@@ -224,11 +243,16 @@ enum Answer {
     Local(Box<Turn>),
     Remote(RemoteTurn),
     Free(FreeTurn),
+    /// The same free registry, answered by the OpenCode app this Mac already runs. No key, and no
+    /// bytes leave for anywhere but the local service.
+    OpenCode(OpenCodeTurn),
 }
 
 impl Answer {
+    /// Whether the answer is produced on this machine: by the supervised server, or by the OpenCode
+    /// app's own loopback service. Either way no prompt leaves for the internet from here.
     fn is_local(&self) -> bool {
-        matches!(self, Self::Local(_))
+        matches!(self, Self::Local(_) | Self::OpenCode(_))
     }
 
     fn label(&self) -> String {
@@ -236,6 +260,7 @@ impl Answer {
             Self::Local(turn) => format!("{} ({})", turn.model.name, turn.view.packing),
             Self::Remote(turn) => format!("{} (remote)", turn.model),
             Self::Free(turn) => format!("{} (free)", turn.model.label),
+            Self::OpenCode(turn) => format!("{} (OpenCode)", turn.model.label),
         }
     }
 
@@ -243,7 +268,7 @@ impl Answer {
         match self {
             Self::Local(turn) => turn.view.context_tokens,
             Self::Remote(turn) => turn.context_tokens,
-            Self::Free(_) => FREE_CONTEXT_TOKENS,
+            Self::Free(_) | Self::OpenCode(_) => FREE_CONTEXT_TOKENS,
         }
     }
 
@@ -252,6 +277,7 @@ impl Answer {
             Self::Local(turn) => turn.max_tokens,
             Self::Remote(turn) => turn.max_tokens,
             Self::Free(turn) => turn.max_tokens,
+            Self::OpenCode(turn) => turn.max_tokens,
         }
     }
 
@@ -259,8 +285,9 @@ impl Answer {
         match self {
             Self::Local(turn) => Some(&turn.effort),
             // The local template's effort vocabulary was measured. A remote endpoint's is not, so
-            // the field stays off rather than sending a word the provider may reject.
-            Self::Remote(_) | Self::Free(_) => None,
+            // the field stays off rather than sending a word the provider may reject. The local
+            // OpenCode service takes no effort switch at all.
+            Self::Remote(_) | Self::Free(_) | Self::OpenCode(_) => None,
         }
     }
 }
@@ -913,7 +940,7 @@ async fn ensure_running(app: &AppHandle, needs: Needs) -> Result<Turn, String> {
 async fn ensure_answer(app: &AppHandle, needs: Needs) -> Result<Answer, String> {
     let settings = appearance::load_settings()?;
     if settings.free_model.is_some() {
-        return free_turn(&settings).await.map(Answer::Free);
+        return free_answer(&settings).await;
     }
     if settings.remote_provider.source == ModelSource::Remote {
         return remote_turn(&settings).await.map(Answer::Remote);
@@ -986,10 +1013,10 @@ async fn remote_turn(settings: &Settings) -> Result<RemoteTurn, String> {
 
 /// Everything a free turn needs except the credential: the picked registry entry and the budget.
 ///
-/// Split from [`free_turn`] like [`remote_plan`] is from [`remote_turn`], for the same reason: the
-/// refusals are testable without a Keychain. Every refusal names the place to change, and none of
-/// them falls back to the local engine.
-fn free_plan(settings: &Settings) -> Result<(&'static FreeModel, u32), String> {
+/// Split from the two transports below like [`remote_plan`] is from [`remote_turn`], for the same
+/// reason: the refusals are testable without a Keychain or a running service. Every refusal names the
+/// place to change, and none of them falls back to the local engine.
+fn free_choice(settings: &Settings) -> Result<(&'static FreeModel, u32), String> {
     if !settings.privacy.allow_remote_providers {
         return Err(
             "Remote providers are off in Settings → Privacy, so this prompt was not sent anywhere. \
@@ -998,17 +1025,15 @@ fn free_plan(settings: &Settings) -> Result<(&'static FreeModel, u32), String> {
         );
     }
     let Some(id) = settings.free_model.as_deref() else {
-        return Err("no free model is selected; pick one in Settings → Model → Model picker".into());
+        return Err(
+            "no free model is selected; pick one in Settings → Model → Model picker".into(),
+        );
     };
     let Some(model) = free_models::find(id) else {
-        return Err(format!("the selected free model is not in the registry: {id}"));
-    };
-    if model.upstream.is_none() {
         return Err(format!(
-            "{} is a promotion listed here and not routable from this app; pick another free model",
-            model.label
+            "the selected free model is not in the registry: {id}"
         ));
-    }
+    };
     // The run's configured budget, capped by half the gateway's window for the same reason the
     // remote clamp uses half: the prompt and the answer share one slot.
     let max_tokens = settings
@@ -1016,25 +1041,102 @@ fn free_plan(settings: &Settings) -> Result<(&'static FreeModel, u32), String> {
         .budget
         .clamped()
         .max_tokens
-        .min(FREE_CONTEXT_TOKENS / 2)
-        .max(1);
+        .clamp(1, FREE_CONTEXT_TOKENS / 2);
     Ok((model, max_tokens))
 }
 
-/// The free turn, admitted only after consent, a routable pick and the gateway key all check out.
+/// The gateway route's admission: the shared checks, plus an upstream id the relay can address.
+fn free_plan(settings: &Settings) -> Result<(&'static FreeModel, u32), String> {
+    let (model, max_tokens) = free_choice(settings)?;
+    if model.upstream.is_none() {
+        return Err(format!(
+            "{} is a promotion listed here and not routable from this app; pick another free model",
+            model.label
+        ));
+    }
+    Ok((model, max_tokens))
+}
+
+/// The free pick, answered by whichever route is live.
 ///
-/// The key is read from the Keychain on the blocking pool and lives in this struct and the requests
-/// it makes; nothing here logs or echoes it.
-async fn free_turn(settings: &Settings) -> Result<FreeTurn, String> {
+/// The OpenCode app on this Mac comes first: its service is the runtime the registry's models are
+/// reserved for, it needs no gateway key, and it is the only route that carries the promotion rows.
+/// The gateway is the fallback, and only for a pick it actually lists — a promotion with no upstream
+/// id is refused with the reason rather than sent to a model that is not there.
+async fn free_answer(settings: &Settings) -> Result<Answer, String> {
+    let (model, max_tokens) = free_choice(settings)?;
+    if let Some(service) = opencode::ready().await {
+        return Ok(Answer::OpenCode(OpenCodeTurn {
+            service,
+            model,
+            max_tokens,
+            session: None,
+            fresh: true,
+            replay: false,
+        }));
+    }
     let (model, max_tokens) = free_plan(settings)?;
+    // Read from the Keychain on the blocking pool and lives in this struct and the requests it
+    // makes; nothing here logs or echoes it.
     let key = tauri::async_runtime::spawn_blocking(free_models::load_key)
         .await
         .map_err(|e| format!("reading the saved key stopped: {e}"))??;
-    Ok(FreeTurn {
+    Ok(Answer::Free(FreeTurn {
         model,
         key,
         max_tokens,
-    })
+    }))
+}
+
+/// Point an OpenCode turn at the service session this conversation continues in, opening one when
+/// there is none to continue.
+///
+/// The id is remembered on the filed conversation, so reopening it tomorrow asks the same service
+/// session what the window still shows. A remembered session the service has dropped — it was
+/// restarted, or OpenCode forgot it — opens a new one, and the turn is marked `replay` so the prompt
+/// carries the exchange the service has not seen. That replay is also why a conversation that was
+/// filed before this route existed still continues instead of starting blank.
+async fn open_service_session(state: &ChatState, answer: Answer) -> Result<Answer, String> {
+    let mut turn = match answer {
+        Answer::OpenCode(turn) => turn,
+        other => return Ok(other),
+    };
+    let held = lock(&state.session)
+        .as_ref()
+        .and_then(|s| s.opencode_session.clone());
+    if let Some(id) = held {
+        // A service that cannot be asked is not evidence the session is gone; the prompt below
+        // would fail on the same connection, so only a clear "no" from a live service reopens it.
+        if opencode::session_lives(&turn.service, &id)
+            .await
+            .unwrap_or(false)
+        {
+            // The picker may have moved since this conversation last ran; the session answers with
+            // whatever model it was last told, so it is told again.
+            opencode::switch_model(&turn.service, &id, turn.model.id).await?;
+            turn.session = Some(id);
+            turn.fresh = false;
+            return Ok(Answer::OpenCode(turn));
+        }
+    }
+    // The prompt this turn carries is already in the history beside the turns the service has not
+    // seen; more than one message means there is an exchange to replay.
+    turn.replay = lock(&state.history).len() > 1;
+    let id = opencode::create_session(&turn.service, turn.model.id).await?;
+    turn.session = Some(id.clone());
+    let filed = {
+        let mut cell = lock(&state.session);
+        cell.as_mut().map(|session| {
+            session.opencode_session = Some(id);
+            session.clone()
+        })
+    };
+    // A conversation that will not take the id is one the next turn replays; that is the honest
+    // fallback and not a reason to fail a turn the service has already opened.
+    if let Some(session) = filed {
+        let _ = sessions::write(&session);
+    }
+    Ok(Answer::OpenCode(turn))
 }
 
 /// The request for one turn: the system prompt as it is configured now, then the stored history.
@@ -1101,6 +1203,7 @@ struct Stops<'a> {
 async fn stream_round(
     answer: &Answer,
     request: &ChatRequest,
+    stop: &AtomicBool,
     mut on_delta: impl FnMut(&[ReplyDelta]) -> StreamControl,
     mut on_fallback: impl FnMut(&'static str, &'static str),
 ) -> Result<Reply, String> {
@@ -1152,11 +1255,75 @@ async fn stream_round(
                     Err(error) => return Err(error.to_string()),
                 }
             }
-            Err(last_error.unwrap_or_else(|| {
-                "no routable free model is listed for this pick".to_string()
-            }))
+            Err(last_error
+                .unwrap_or_else(|| "no routable free model is listed for this pick".to_string()))
+        }
+        Answer::OpenCode(turn) => {
+            let Some(session) = turn.session.as_deref() else {
+                return Err("this free turn has no OpenCode session to continue".into());
+            };
+            let prompt = opencode_prompt(request, turn)?;
+            opencode::stream_turn(&turn.service, session, &prompt, stop, on_delta).await
         }
     }
+}
+
+/// The text one OpenCode prompt carries.
+///
+/// The service keeps a conversation of its own, so an ordinary turn sends only what was just asked:
+/// repeating the history would say everything twice. The exception is a session that had to be
+/// opened under a conversation this app already holds — the system prompt is sent to every fresh
+/// session, and the turns before this one go with it so the service answers as the same
+/// conversation.
+///
+/// Pictures are refused rather than dropped: the service's prompt is text, and an answer produced
+/// without the picture the user attached would be a guess presented as one.
+fn opencode_prompt(request: &ChatRequest, turn: &OpenCodeTurn) -> Result<String, String> {
+    let Some(last) = request.messages.last() else {
+        return Ok(String::new());
+    };
+    if !last.images.is_empty() {
+        return Err(
+            "the OpenCode app takes text prompts only, so the picture on this prompt was not \
+             sent. Remove the picture, or pick a model that answers through the gateway key."
+                .into(),
+        );
+    }
+    if !turn.fresh {
+        return Ok(last.content.clone());
+    }
+    let mut prompt = String::new();
+    if let Some(system) = request
+        .messages
+        .iter()
+        .find(|message| message.role == smollm_llama::Role::System)
+    {
+        if !system.content.trim().is_empty() {
+            prompt.push_str("Instructions for this conversation:\n");
+            prompt.push_str(&system.content);
+            prompt.push_str("\n\n");
+        }
+    }
+    if turn.replay {
+        prompt.push_str("The conversation so far, for context:\n\n");
+        for message in &request.messages[..request.messages.len() - 1] {
+            if message.role == smollm_llama::Role::System || message.content.trim().is_empty() {
+                continue;
+            }
+            let who = match message.role {
+                smollm_llama::Role::Assistant => "Assistant",
+                smollm_llama::Role::Tool => "Tool",
+                _ => "User",
+            };
+            prompt.push_str(who);
+            prompt.push_str(":\n");
+            prompt.push_str(&message.content);
+            prompt.push_str("\n\n");
+        }
+        prompt.push_str("Now answer the last message:\n\n");
+    }
+    prompt.push_str(&last.content);
+    Ok(prompt)
 }
 
 async fn stream_turn(
@@ -1198,7 +1365,7 @@ async fn stream_turn(
             AgentEvent::notice(NoticeCode::FreeModelFallback, &[("from", from), ("to", to)]),
         );
     };
-    stream_round(answer, request, on_delta, on_fallback).await
+    stream_round(answer, request, stops.requested, on_delta, on_fallback).await
 }
 
 /// Whether this run is the dial's Plan-only mode: it was offered tools and may read, but the answer
@@ -1366,6 +1533,7 @@ async fn delegate(
         let reply = stream_round(
             answer,
             &request,
+            stops.requested,
             |_| {
                 if stops.requested.load(Ordering::Relaxed) {
                     stops.stopped.store(true, Ordering::Relaxed);
@@ -1866,6 +2034,9 @@ pub async fn chat_send(
         held.iter().any(|m| !m.images.is_empty())
     };
     let answer = ensure_answer(&app, Needs::from_request(carries_picture)).await?;
+    // The OpenCode route answers in prose and keeps its own read-only permission set; the app's tool
+    // loop and its plan contract belong to the local engine, so neither is offered here.
+    let tools = tools && !matches!(answer, Answer::OpenCode(_));
     let state = app.state::<ChatState>();
     {
         let mut slot = lock(&state.slot);
@@ -1893,9 +2064,12 @@ pub async fn chat_send(
             run_id: run_id.clone(),
             model_label: model_label.clone(),
             // The source was resolved above, so this is a fact rather than a possibility: a local
-            // turn talks only to the supervised loopback server, and a remote one only to the
-            // address the user configured.
+            // turn talks only to this machine — the supervised loopback server or the OpenCode
+            // app's own service — and a remote one only to the address the user configured.
             local: answer.is_local(),
+            // Only the supervised server has to be paged into memory, so only a run it answers may
+            // tell the user the local engine is starting.
+            engine: matches!(answer, Answer::Local(_)),
             // Zero says this run has no rounds to spend, which is what the step pill reads as "do not
             // draw me" — a plain chat does not have a budget, and a pill saying `Step 0 / 0` over it
             // would be a counter of something that cannot happen.
@@ -1918,6 +2092,19 @@ pub async fn chat_send(
         &text,
         image.clone(),
     );
+    // After the user turn is filed, because the conversation this run continues is the one that file
+    // just opened or appended to: a fresh service session is remembered on it, and a conversation
+    // with no service session yet is the one whose history the prompt has to replay.
+    let answer = match open_service_session(&state, answer).await {
+        Ok(answer) => answer,
+        Err(message) => {
+            // The prompt never went anywhere, so the history must not hold it as asked: the retry
+            // the message invites would otherwise replay the same question twice.
+            lock(&state.history).pop();
+            lock(&state.slot).streaming = false;
+            return Err(message);
+        }
+    };
     // Read before the request goes out and acted on after it lands: the replay this turn is about to
     // do is already too big for the window, but what the run did with that is only known once the
     // server reports its own count.
@@ -1962,7 +2149,7 @@ pub async fn chat_send(
                 Err(_) => false,
             }
         }
-        Answer::Remote(_) | Answer::Free(_) => false,
+        Answer::Remote(_) | Answer::Free(_) | Answer::OpenCode(_) => false,
     };
 
     let started = Instant::now();
@@ -3094,8 +3281,10 @@ mod tests {
     /// the prompt somewhere the user did not select.
     #[test]
     fn a_free_turn_refuses_before_it_could_fall_back() {
-        let mut settings = Settings::default();
-        settings.free_model = Some("glm-5.3-flash-free".into());
+        let mut settings = Settings {
+            free_model: Some("glm-5.3-flash-free".into()),
+            ..Settings::default()
+        };
 
         let refused = free_plan(&settings).unwrap_err();
         assert!(refused.contains("Settings → Privacy"), "{refused}");
@@ -3118,7 +3307,10 @@ mod tests {
         settings.free_model = Some("glm-5.3-flash-free".into());
         let (model, max_tokens) = free_plan(&settings).expect("routable pick");
         assert_eq!(model.id, "glm-5.3-flash-free");
-        assert!((1..=FREE_CONTEXT_TOKENS / 2).contains(&max_tokens), "{max_tokens}");
+        assert!(
+            (1..=FREE_CONTEXT_TOKENS / 2).contains(&max_tokens),
+            "{max_tokens}"
+        );
     }
 
     /// The free tier's only fallback is inside the tier: a pre-token refusal moves down the

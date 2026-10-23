@@ -15,6 +15,7 @@ mod engine;
 mod extensions;
 mod free_models;
 mod knowledge;
+mod opencode;
 mod paths;
 mod provider;
 mod reveal;
@@ -51,9 +52,18 @@ pub(crate) fn root_and_settings(app: &AppHandle) -> Result<(PathBuf, Settings), 
 async fn model_status(app: AppHandle) -> Result<ModelStatusView, String> {
     let (root, settings) = root_and_settings(&app)?;
     // Multi-GB directories and `sysctl` probes belong off the event loop.
-    tauri::async_runtime::spawn_blocking(move || status::build(&root, &settings))
+    let mut view = tauri::async_runtime::spawn_blocking(move || status::build(&root, &settings))
         .await
-        .map_err(|e| format!("model status probe failed: {e}"))?
+        .map_err(|e| format!("model status probe failed: {e}"))??;
+    // The local OpenCode service is the one thing on this card that is neither in the settings nor in
+    // the catalog: it is a process, so it is asked, and the answer rides on the status the window
+    // already polls. A probe that fails is "not running", which is what the card says.
+    let service = opencode::status().await;
+    view.opencode = status::OpenCodeView {
+        available: service.available,
+        version: service.version,
+    };
+    Ok(view)
 }
 
 /// The catalog as a page: every model and packing the pins name, and which of those files this
@@ -223,10 +233,19 @@ async fn clear_remote_key() -> Result<bool, String> {
 }
 
 /// The free-model registry as the picker draws it. No secret rides along: the page asks the Keychain
-/// separately whether a gateway key is saved, and this list carries ids, labels and routability only.
+/// separately whether a gateway key is saved, and this list carries ids, labels, routability and
+/// whether the OpenCode app on this Mac is answering — which is the route that needs no key at all.
 #[tauri::command]
 async fn free_models_list() -> Result<Vec<free_models::FreeModelInfo>, String> {
-    Ok(free_models::infos())
+    let local = opencode::status().await.available;
+    Ok(free_models::infos(local))
+}
+
+/// Whether the OpenCode app's local service answers, and which version. The status card and the
+/// picker both name it, because a free model that answers without a key does so through this service.
+#[tauri::command]
+async fn opencode_status() -> Result<opencode::Status, String> {
+    Ok(opencode::status().await)
 }
 
 /// Whether the Keychain holds the free gateway key. The key itself never crosses this boundary.
@@ -378,6 +397,9 @@ pub fn run() {
             free_key_present,
             save_free_key,
             clear_free_key,
+            // The OpenCode app's local service: whether it is running, so the picker can say which
+            // free models answer without a key. The password in its state file never leaves the host.
+            opencode_status,
             // The one write the UI may make to the machine it runs on: the text of a code fence, onto
             // the pasteboard. See `clipboard`.
             clipboard::copy_text,

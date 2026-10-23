@@ -97,9 +97,11 @@ export function ModelPicker({
     const settings = useSettings.getState();
     if (!settings.loaded) await settings.load();
     const entry = freeList?.find((m) => m.id === id);
-    // A promotion row is listed but cannot answer; the host would refuse a turn with it, so the
-    // picker refuses the pick instead of filing a selection that can only fail.
-    if (!entry?.routable) return;
+    // A row answers through the gateway when its upstream id is known, and through the OpenCode app
+    // whenever that service is answering. A row with neither is listed and not pickable: the host
+    // would refuse the turn anyway, and a row that looks pickable but can only fail is the bug a
+    // silent no-op would hide.
+    if (!entry || !(entry.routable || entry.local)) return;
     setOpen(false);
     if (id === status?.free?.id) return;
     await useSettings.getState().update((doc) => {
@@ -128,7 +130,11 @@ export function ModelPicker({
             fact a user reads off it, and the label only matters once the panel is open. A remote
             provider may have no model id yet, and then the pill names the source instead. */}
         <span className="max-w-[16ch] truncate">
-          {remote ? remote.model || t("remote") : free ? free.label : (status?.displayName ?? t("title"))}
+          {remote
+            ? remote.model || t("remote")
+            : free
+              ? free.label
+              : (status?.displayName ?? t("title"))}
         </span>
         <Icon name="chevronDown" size={12} />
       </button>
@@ -200,10 +206,10 @@ export function ModelPicker({
                   </button>
                 );
               })}
-            {/* The free tier: the list OpenCode shows, routable only where the gateway's own catalog
-                carries the model. A promotion row is listed and marked, and picking it is refused in
-                the same breath — the host would refuse the turn anyway, and a row that looks pickable
-                but can only fail is the bug a silent no-op would hide. */}
+            {/* The free tier: the list OpenCode publishes, answered either by the gateway the key
+                reaches or by the OpenCode app on this Mac. A row is pickable when either route is
+                live; one with neither is listed and marked, and picking it is refused in the same
+                breath — the host would refuse the turn anyway. */}
             {freeList !== null && freeList.length > 0 && (
               <>
                 <p className="section-label px-[var(--space-3)] pt-[var(--space-2)]">
@@ -211,12 +217,13 @@ export function ModelPicker({
                 </p>
                 {freeList.map((model) => {
                   const current = model.id === free?.id;
+                  const live = model.routable || model.local;
                   return (
                     <button
                       key={model.id}
                       type="button"
                       data-current={current || undefined}
-                      aria-disabled={!model.routable || undefined}
+                      aria-disabled={!live || undefined}
                       className="picker-row"
                       onClick={() => void chooseFree(model.id)}
                     >
@@ -225,7 +232,9 @@ export function ModelPicker({
                         <span className="row-desc truncate">
                           {model.routable
                             ? model.provider
-                            : `${model.provider} · ${t("freeOnlyInside")}`}
+                            : model.local
+                              ? `${model.provider} · ${t("freeViaApp")}`
+                              : `${model.provider} · ${t("freeOnlyInside")}`}
                         </span>
                       </span>
                       <span className="pill shrink-0">{t("freeBadge")}</span>
@@ -238,7 +247,11 @@ export function ModelPicker({
               </>
             )}
             <div className="border-t border-line px-[var(--space-3)] py-[var(--space-2)]">
-              {!remote && <p className="text-fine text-faint">{t(free ? "freeNote" : "note")}</p>}
+              {!remote && (
+                <p className="text-fine text-faint">
+                  {t(free ? (status?.opencode.available ? "freeNoteApp" : "freeNote") : "note")}
+                </p>
+              )}
               <button
                 type="button"
                 className="nav-item mt-[var(--space-1)]"

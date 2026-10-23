@@ -225,26 +225,33 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   if (!status) return null;
 
   // A free pick answers without the local engine, like the remote source: the card shows the pick
-  // and its gateway instead of packing, engine and server rows that describe a run this one will
-  // never make. The refusal order mirrors the host's: consent, then routability, then the key.
+  // and its route instead of packing, engine and server rows that describe a run this one will never
+  // make. The OpenCode app on this Mac comes first — no key, and every registry row is answerable —
+  // and the gateway key is the fallback. The refusal order mirrors the host's: consent, then the
+  // route, then the key.
   if (free) {
-    const ready = free.allowed && free.routable && freeKeySaved === true;
+    const app = status.opencode;
+    const ready = free.allowed && (app.available || (free.routable && freeKeySaved === true));
     const badge = !free.allowed
       ? translate(locale, "model.badge.needsConsent")
-      : !free.routable
-        ? translate(locale, "model.badge.notRoutable")
-        : freeKeySaved === false
-          ? translate(locale, "model.badge.noKey")
-          : translate(locale, "model.badge.free");
+      : app.available
+        ? translate(locale, "model.badge.free")
+        : !free.routable
+          ? translate(locale, "model.badge.notRoutable")
+          : freeKeySaved === false
+            ? translate(locale, "model.badge.noKey")
+            : translate(locale, "model.badge.free");
     const note = !free.allowed
       ? translate(locale, "model.free.noConsent")
-      : !free.routable
-        ? translate(locale, "model.free.notRoutable")
-        : freeKeySaved === false
-          ? translate(locale, "model.free.noKey")
-          : freeKeySaved === null
-            ? translate(locale, "model.free.keyChecking")
-            : translate(locale, "model.free.ready");
+      : app.available
+        ? translate(locale, "model.free.appReady")
+        : !free.routable
+          ? translate(locale, "model.free.notRoutable")
+          : freeKeySaved === false
+            ? translate(locale, "model.free.noKey")
+            : freeKeySaved === null
+              ? translate(locale, "model.free.keyChecking")
+              : translate(locale, "model.free.ready");
     return (
       <section
         aria-label={translate(locale, "model.free.title")}
@@ -275,13 +282,19 @@ export function ModelStatus({ locale }: { locale: Locale }) {
             </dd>
           </div>
           <div className="flex items-baseline justify-between gap-3">
-            <dt className="shrink-0">{translate(locale, "model.remote.key")}</dt>
+            <dt className="shrink-0">
+              {translate(locale, app.available ? "model.free.route" : "model.remote.key")}
+            </dt>
             <dd className="truncate text-fg">
-              {freeKeySaved === null
-                ? translate(locale, "model.remote.keyCheckingShort")
-                : freeKeySaved
-                  ? translate(locale, "model.remote.keySaved")
-                  : translate(locale, "model.remote.keyAbsent")}
+              {app.available
+                ? `${translate(locale, "model.free.appRoute")}${
+                    app.version ? ` · ${app.version}` : ""
+                  }`
+                : freeKeySaved === null
+                  ? translate(locale, "model.remote.keyCheckingShort")
+                  : freeKeySaved
+                    ? translate(locale, "model.remote.keySaved")
+                    : translate(locale, "model.remote.keyAbsent")}
             </dd>
           </div>
         </dl>

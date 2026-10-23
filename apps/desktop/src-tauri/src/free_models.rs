@@ -1,10 +1,12 @@
 //! The free cloud models the picker offers, and the one gateway that serves them.
 //!
 //! The list is the free tier OpenCode publishes, read against their model page; a row is routable
-//! here only when the same model has a verified OpenRouter id, because the relay sends through that
-//! one gateway and a guessed id is a request to a model that is not there. The promo models OpenCode
-//! serves only inside their own product therefore stay in the list but carry no upstream id: the
-//! picker shows them as not routable in this build rather than pretending a route exists.
+//! through the gateway only when the same model has a verified OpenRouter id, because the relay sends
+//! through that one gateway and a guessed id is a request to a model that is not there. The promo
+//! models OpenCode serves only inside their own product therefore carry no upstream id: the picker
+//! shows them as not routable through the key rather than pretending a route exists. They are still
+//! answerable through the OpenCode app on this Mac, which is the runtime those models are reserved
+//! for — see [`crate::opencode`].
 //!
 //! The gateway key follows the same rule as the remote provider's: it lives in the platform
 //! keychain, the UI only ever learns whether one is saved, and it is loaded at request time for the
@@ -21,6 +23,7 @@ const ACCOUNT: &str = "openrouter-key";
 pub const GATEWAY_BASE: &str = "https://openrouter.ai/api/v1";
 
 /// One free model, as the picker and the relay see it.
+#[derive(Debug)]
 pub struct FreeModel {
     pub id: &'static str,
     pub label: &'static str,
@@ -33,6 +36,11 @@ pub struct FreeModel {
 
 /// What the frontend needs to draw a row. `is_free` is constant here — this is the free list — but
 /// the field keeps the row's shape explicit rather than implied by the group it renders in.
+///
+/// `routable` is about the gateway key: a row whose model OpenRouter does not list has no upstream
+/// id to send to. `local` is the other route, the OpenCode app on this Mac, which serves the whole
+/// list — so a row can be unpickable for the key and pickable for the app in the same breath, and the
+/// picker says which.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FreeModelInfo {
@@ -41,6 +49,8 @@ pub struct FreeModelInfo {
     pub provider: String,
     pub is_free: bool,
     pub routable: bool,
+    /// Whether the OpenCode app's local service is answering, which makes every row answerable.
+    pub local: bool,
 }
 
 /// The free tier OpenCode publishes, in their page's order.
@@ -144,7 +154,7 @@ pub fn find(id: &str) -> Option<&'static FreeModel> {
     models().iter().find(|model| model.id == id)
 }
 
-pub fn infos() -> Vec<FreeModelInfo> {
+pub fn infos(local: bool) -> Vec<FreeModelInfo> {
     models()
         .iter()
         .map(|model| FreeModelInfo {
@@ -153,19 +163,24 @@ pub fn infos() -> Vec<FreeModelInfo> {
             provider: model.provider.to_string(),
             is_free: true,
             routable: model.upstream.is_some(),
+            local,
         })
         .collect()
 }
 
 /// The routable models the relay may try for a turn, starting at the chosen one and moving to the
 /// next priority only after a failure. A model with no upstream id never appears: there is nothing
-/// to send its request to, and the refusal says so before any bytes leave the machine.
+/// to send its request to, and the refusal says so before any bytes leave the machine. An id the
+/// registry does not hold has no order at all rather than the whole routable list: only a pick the
+/// host resolved is ever sent.
 pub fn attempt_order(id: &str) -> Vec<&'static FreeModel> {
-    let start = models()
+    let Some(start) = models()
         .iter()
         .find(|model| model.id == id)
         .map(|model| model.priority)
-        .unwrap_or(0);
+    else {
+        return Vec::new();
+    };
     models()
         .iter()
         .filter(|model| model.priority >= start && model.upstream.is_some())
@@ -185,7 +200,9 @@ pub fn save_key(raw: &str) -> Result<(), String> {
         return Err("the key is empty".into());
     }
     if key.chars().any(char::is_control) {
-        return Err("the key contains a control character; paste it again without line breaks".into());
+        return Err(
+            "the key contains a control character; paste it again without line breaks".into(),
+        );
     }
     entry()?
         .set_password(key)
@@ -250,7 +267,11 @@ mod tests {
         let ids: Vec<_> = list.iter().map(|model| model.id).collect();
         let labels: Vec<_> = list.iter().map(|model| model.label).collect();
         for id in &ids {
-            assert_eq!(ids.iter().filter(|held| *held == id).count(), 1, "{id} twice");
+            assert_eq!(
+                ids.iter().filter(|held| *held == id).count(),
+                1,
+                "{id} twice"
+            );
         }
         for label in &labels {
             assert_eq!(
@@ -291,9 +312,12 @@ mod tests {
     fn the_promo_models_stay_listed_but_unroutable() {
         let big_pickle = find("big-pickle").unwrap();
         assert_eq!(big_pickle.upstream, None);
-        assert!(infos()
+        assert!(infos(false)
             .iter()
             .find(|info| info.id == "big-pickle")
             .is_some_and(|info| !info.routable && info.is_free));
+        // The OpenCode app on this Mac serves the promotion rows too, so the picker marks the whole
+        // list as answerable when the service is up.
+        assert!(infos(true).iter().all(|info| info.local));
     }
 }
