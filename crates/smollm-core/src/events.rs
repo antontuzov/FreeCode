@@ -162,13 +162,17 @@ pub enum NoticeCode {
     ProjectorLoading,
     /// The selected model publishes no projector at all, so it cannot be given a picture.
     ModelTakesNoImages,
+    /// The chosen free model refused the request before a token landed, and the gateway moved the
+    /// turn to the next routable one. Said out loud because the answer that follows is not the model
+    /// the picker named.
+    FreeModelFallback,
 }
 
 impl NoticeCode {
     /// Every code the host can emit. `verify-transcript-i18n` walks this to require one catalog entry
     /// per code, so a notice added here without its sentence in both locales fails the build instead
     /// of rendering its own key in the middle of a transcript.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::EffortNotSupported,
         Self::EngineRestarted,
         Self::ToolCallWithoutTools,
@@ -181,6 +185,7 @@ impl NoticeCode {
         Self::ProjectorAbsent,
         Self::ProjectorLoading,
         Self::ModelTakesNoImages,
+        Self::FreeModelFallback,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -197,6 +202,7 @@ impl NoticeCode {
             Self::ProjectorAbsent => "notice.projector-absent",
             Self::ProjectorLoading => "notice.projector-loading",
             Self::ModelTakesNoImages => "notice.model-takes-no-images",
+            Self::FreeModelFallback => "notice.free-model-fallback",
         }
     }
 
@@ -218,6 +224,7 @@ impl NoticeCode {
             Self::ProjectorAbsent => &["model", "file"],
             Self::ProjectorLoading => &["file"],
             Self::ModelTakesNoImages => &["model"],
+            Self::FreeModelFallback => &["from", "to"],
         }
     }
 }

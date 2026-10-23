@@ -13,6 +13,7 @@ mod clipboard;
 mod diagnostics;
 mod engine;
 mod extensions;
+mod free_models;
 mod knowledge;
 mod paths;
 mod provider;
@@ -162,6 +163,11 @@ async fn save_settings(app: AppHandle, mut settings: Settings) -> Result<Setting
     remote.base_url = remote.base_url.trim().to_string();
     remote.model = remote.model.trim().to_string();
     provider::reject_embedded_credentials(&remote.base_url)?;
+    // The picker clears its selection with an empty string; an empty pick is the same state as no
+    // pick, so the document never files a `""` id the chat path would have to refuse later.
+    if settings.free_model.as_deref() == Some("") {
+        settings.free_model = None;
+    }
     settings.schema_version = smollm_config::SETTINGS_SCHEMA_VERSION;
     appearance::save_settings(&settings)?;
     wear_icon(&app, settings.appearance.app_icon);
@@ -211,6 +217,41 @@ async fn save_remote_key(key: String) -> Result<bool, String> {
 #[tauri::command]
 async fn clear_remote_key() -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(provider::clear_key)
+        .await
+        .map_err(|e| format!("the keychain write stopped: {e}"))??;
+    Ok(false)
+}
+
+/// The free-model registry as the picker draws it. No secret rides along: the page asks the Keychain
+/// separately whether a gateway key is saved, and this list carries ids, labels and routability only.
+#[tauri::command]
+async fn free_models_list() -> Result<Vec<free_models::FreeModelInfo>, String> {
+    Ok(free_models::infos())
+}
+
+/// Whether the Keychain holds the free gateway key. The key itself never crosses this boundary.
+#[tauri::command]
+async fn free_key_present() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(free_models::key_saved)
+        .await
+        .map_err(|e| format!("the keychain check stopped: {e}"))
+}
+
+/// Store a pasted gateway key in the login Keychain. The answer is the new "a key is saved" state;
+/// the value that was handed over is not echoed back and is not written to the settings document.
+#[tauri::command]
+async fn save_free_key(key: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || free_models::save_key(&key))
+        .await
+        .map_err(|e| format!("the keychain write stopped: {e}"))??;
+    Ok(true)
+}
+
+/// Remove the saved gateway key. Answering `false` is the state the UI draws, not an error: there
+/// was nothing to remove, or the credential is gone now either way.
+#[tauri::command]
+async fn clear_free_key() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(free_models::clear_key)
         .await
         .map_err(|e| format!("the keychain write stopped: {e}"))??;
     Ok(false)
@@ -331,6 +372,12 @@ pub fn run() {
             remote_key_present,
             save_remote_key,
             clear_remote_key,
+            // The free tier's registry and its one gateway key, under the same no-readback rule as
+            // the provider's. The registry itself carries no secret, only ids and routability.
+            free_models_list,
+            free_key_present,
+            save_free_key,
+            clear_free_key,
             // The one write the UI may make to the machine it runs on: the text of a code fence, onto
             // the pasteboard. See `clipboard`.
             clipboard::copy_text,

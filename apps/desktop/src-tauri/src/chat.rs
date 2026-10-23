@@ -48,7 +48,8 @@ use smollm_models::{gguf, IntegrityStatus, ModelEntry};
 use smollm_tools::{SandboxPolicy, Summary, SummaryKey};
 
 use crate::agent::{self, Ran};
-use crate::{appearance, sessions, status, undo};
+use crate::free_models::FreeModel;
+use crate::{appearance, free_models, sessions, status, undo};
 use sessions::{Role, Session};
 
 /// Event name the transcript subscribes to for the duration of the window.
@@ -189,12 +190,32 @@ struct RemoteTurn {
     key: String,
 }
 
+/// The gateway's advertised window for a free-model turn. The run's configured budget still caps the
+/// answer well below it — this number only decides when a replayed conversation has outgrown the
+/// window the provider will accept.
+const FREE_CONTEXT_TOKENS: u32 = 32_768;
+
+/// A turn answered by one of the free models behind the single gateway key.
+///
+/// `model` is the picked entry, not necessarily the one that answers: the registry's attempt order
+/// moves a pre-token refusal to the next routable model and says so in the transcript. The key is
+/// the same OpenRouter credential the remote-provider row would use, kept under the free tier's own
+/// service name, and lives here and on the requests it makes — never filed or logged.
+#[derive(Clone)]
+struct FreeTurn {
+    model: &'static FreeModel,
+    key: String,
+    max_tokens: u32,
+}
+
 /// Where one turn is answered.
 ///
-/// There is deliberately no fallback between the two: a remote selection whose consent switch is
-/// off, whose address is incomplete or whose key is missing is a refusal, not a quiet return to the
-/// local engine. Falling back would send a prompt somewhere the user did not choose, or pay a model
-/// load they did not ask for, and the refusal names the setting to change instead.
+/// There is deliberately no fallback between the three: a remote or free selection whose consent
+/// switch is off, whose address or pick is incomplete, or whose key is missing is a refusal, not a
+/// quiet return to the local engine. Falling back would send a prompt somewhere the user did not
+/// choose, or pay a model load they did not ask for, and the refusal names the setting to change
+/// instead. The only fallback that exists is inside the free tier itself, where the registry's order
+/// is the whole point of the pick.
 #[derive(Clone)]
 enum Answer {
     // Boxed because the local turn carries the resolved model entry and the server view, and an enum
@@ -202,6 +223,7 @@ enum Answer {
     // every move, for a run that never reads it.
     Local(Box<Turn>),
     Remote(RemoteTurn),
+    Free(FreeTurn),
 }
 
 impl Answer {
@@ -213,6 +235,7 @@ impl Answer {
         match self {
             Self::Local(turn) => format!("{} ({})", turn.model.name, turn.view.packing),
             Self::Remote(turn) => format!("{} (remote)", turn.model),
+            Self::Free(turn) => format!("{} (free)", turn.model.label),
         }
     }
 
@@ -220,6 +243,7 @@ impl Answer {
         match self {
             Self::Local(turn) => turn.view.context_tokens,
             Self::Remote(turn) => turn.context_tokens,
+            Self::Free(_) => FREE_CONTEXT_TOKENS,
         }
     }
 
@@ -227,6 +251,7 @@ impl Answer {
         match self {
             Self::Local(turn) => turn.max_tokens,
             Self::Remote(turn) => turn.max_tokens,
+            Self::Free(turn) => turn.max_tokens,
         }
     }
 
@@ -235,7 +260,7 @@ impl Answer {
             Self::Local(turn) => Some(&turn.effort),
             // The local template's effort vocabulary was measured. A remote endpoint's is not, so
             // the field stays off rather than sending a word the provider may reject.
-            Self::Remote(_) => None,
+            Self::Remote(_) | Self::Free(_) => None,
         }
     }
 }
@@ -881,10 +906,15 @@ async fn ensure_running(app: &AppHandle, needs: Needs) -> Result<Turn, String> {
 
 /// Resolve where this run is answered before anything is launched.
 ///
-/// Checking the remote source first is what makes "remote selected" mean remote: a missing key or a
-/// consent switch that is off refuses here, and the local engine is never started as a substitute.
+/// The free pick is checked first because it is the most recent choice the picker recorded, then the
+/// remote source: that order is what makes either selection mean what it says. A missing key or a
+/// consent switch that is off refuses at the chosen step, and the local engine is never started as a
+/// substitute.
 async fn ensure_answer(app: &AppHandle, needs: Needs) -> Result<Answer, String> {
     let settings = appearance::load_settings()?;
+    if settings.free_model.is_some() {
+        return free_turn(&settings).await.map(Answer::Free);
+    }
     if settings.remote_provider.source == ModelSource::Remote {
         return remote_turn(&settings).await.map(Answer::Remote);
     }
@@ -954,6 +984,59 @@ async fn remote_turn(settings: &Settings) -> Result<RemoteTurn, String> {
     })
 }
 
+/// Everything a free turn needs except the credential: the picked registry entry and the budget.
+///
+/// Split from [`free_turn`] like [`remote_plan`] is from [`remote_turn`], for the same reason: the
+/// refusals are testable without a Keychain. Every refusal names the place to change, and none of
+/// them falls back to the local engine.
+fn free_plan(settings: &Settings) -> Result<(&'static FreeModel, u32), String> {
+    if !settings.privacy.allow_remote_providers {
+        return Err(
+            "Remote providers are off in Settings → Privacy, so this prompt was not sent anywhere. \
+             Turn that switch on to use a free model from Settings → Model → Model picker."
+                .into(),
+        );
+    }
+    let Some(id) = settings.free_model.as_deref() else {
+        return Err("no free model is selected; pick one in Settings → Model → Model picker".into());
+    };
+    let Some(model) = free_models::find(id) else {
+        return Err(format!("the selected free model is not in the registry: {id}"));
+    };
+    if model.upstream.is_none() {
+        return Err(format!(
+            "{} is a promotion listed here and not routable from this app; pick another free model",
+            model.label
+        ));
+    }
+    // The run's configured budget, capped by half the gateway's window for the same reason the
+    // remote clamp uses half: the prompt and the answer share one slot.
+    let max_tokens = settings
+        .sampling
+        .budget
+        .clamped()
+        .max_tokens
+        .min(FREE_CONTEXT_TOKENS / 2)
+        .max(1);
+    Ok((model, max_tokens))
+}
+
+/// The free turn, admitted only after consent, a routable pick and the gateway key all check out.
+///
+/// The key is read from the Keychain on the blocking pool and lives in this struct and the requests
+/// it makes; nothing here logs or echoes it.
+async fn free_turn(settings: &Settings) -> Result<FreeTurn, String> {
+    let (model, max_tokens) = free_plan(settings)?;
+    let key = tauri::async_runtime::spawn_blocking(free_models::load_key)
+        .await
+        .map_err(|e| format!("reading the saved key stopped: {e}"))??;
+    Ok(FreeTurn {
+        model,
+        key,
+        max_tokens,
+    })
+}
+
 /// The request for one turn: the system prompt as it is configured now, then the stored history.
 fn conversation(state: &ChatState, system_prompt: &str) -> Vec<Message> {
     let history = lock(&state.history);
@@ -993,13 +1076,6 @@ fn picture_tokens(request: &ChatRequest) -> u64 {
         .sum()
 }
 
-/// Stream one round of an answer.
-///
-/// `offered` is whether this run put tools on the request. A call arriving without any is the model
-/// emitting one anyway and has to be said out loud, because the answer text is truncated at that
-/// point and silence reads as a stalled server. With tools offered the same delta is simply the call
-/// the loop is about to run, and [`agent::run_batch`] gives it a row — two announcements for one event
-/// would put the same tool in the transcript twice.
 /// The two halves of an interruption, which always travel together: the flag a Stop press sets for
 /// whichever run is live, and the flag that run sets to record that it saw the press. One round that
 /// could halt a stream without recording the halt would leave the transcript holding an answer and no
@@ -1009,27 +1085,78 @@ struct Stops<'a> {
     stopped: &'a AtomicBool,
 }
 
+/// Stream one round of an answer.
+///
+/// `offered` is whether this run put tools on the request. A call arriving without any is the model
+/// emitting one anyway and has to be said out loud, because the answer text is truncated at that
+/// point and silence reads as a stalled server. With tools offered the same delta is simply the call
+/// the loop is about to run, and [`agent::run_batch`] gives it a row — two announcements for one event
+/// would put the same tool in the transcript twice.
+///
+/// The free arm is the one place fallback exists: a refusal that arrives before the first delta moves
+/// the request to the next routable model in the registry's order, announced through `on_fallback`
+/// so the transcript can say which model was asked and which one answered. Once a delta has landed
+/// the answer belongs to that model — a provider that dies mid-sentence is reported, not quietly
+/// restarted as a different model's words.
 async fn stream_round(
     answer: &Answer,
     request: &ChatRequest,
-    on_delta: impl FnMut(&[ReplyDelta]) -> StreamControl,
+    mut on_delta: impl FnMut(&[ReplyDelta]) -> StreamControl,
+    mut on_fallback: impl FnMut(&'static str, &'static str),
 ) -> Result<Reply, String> {
     match answer {
-        Answer::Local(turn) => {
-            smollm_llama::stream_chat(
-                &turn.view.base_url,
-                request,
-                &turn.model,
-                turn.view.context_tokens,
-                on_delta,
-            )
-            .await
-        }
+        Answer::Local(turn) => smollm_llama::stream_chat(
+            &turn.view.base_url,
+            request,
+            &turn.model,
+            turn.view.context_tokens,
+            on_delta,
+        )
+        .await
+        .map_err(|e| e.to_string()),
         Answer::Remote(turn) => {
-            smollm_llama::stream_remote_chat(&remote_access(turn), request, on_delta).await
+            smollm_llama::stream_remote_chat(&remote_access(turn), request, on_delta)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        Answer::Free(turn) => {
+            // The order the registry picked, which [`free_models::attempt_order`] already filters to
+            // routable entries — a promotion can never be reached from here.
+            let order = free_models::attempt_order(turn.model.id);
+            let mut last_error: Option<String> = None;
+            for (index, model) in order.iter().enumerate() {
+                let access = RemoteAccess {
+                    base_url: free_models::GATEWAY_BASE.to_string(),
+                    model: model.upstream.unwrap_or_default().to_string(),
+                    key: turn.key.clone(),
+                };
+                let mut landed = false;
+                let result = {
+                    let deltas = &mut on_delta;
+                    smollm_llama::stream_remote_chat(&access, request, |ds| {
+                        if !ds.is_empty() {
+                            landed = true;
+                        }
+                        deltas(ds)
+                    })
+                    .await
+                };
+                match result {
+                    Ok(reply) => return Ok(reply),
+                    Err(error) if !landed => {
+                        if let Some(next) = order.get(index + 1) {
+                            on_fallback(model.label, next.label);
+                        }
+                        last_error = Some(error.to_string());
+                    }
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+            Err(last_error.unwrap_or_else(|| {
+                "no routable free model is listed for this pick".to_string()
+            }))
         }
     }
-    .map_err(|e| e.to_string())
 }
 
 async fn stream_turn(
@@ -1040,6 +1167,7 @@ async fn stream_turn(
     stops: &Stops<'_>,
 ) -> Result<Reply, String> {
     let sink = app.clone();
+    let fallback_sink = sink.clone();
     let on_delta = move |deltas: &[ReplyDelta]| {
         for delta in deltas {
             let event = match delta {
@@ -1064,7 +1192,13 @@ async fn stream_turn(
         stops.stopped.store(true, Ordering::Relaxed);
         StreamControl::Stop
     };
-    stream_round(answer, request, on_delta).await
+    let on_fallback = move |from: &'static str, to: &'static str| {
+        emit(
+            &fallback_sink,
+            AgentEvent::notice(NoticeCode::FreeModelFallback, &[("from", from), ("to", to)]),
+        );
+    };
+    stream_round(answer, request, on_delta, on_fallback).await
 }
 
 /// Whether this run is the dial's Plan-only mode: it was offered tools and may read, but the answer
@@ -1229,14 +1363,21 @@ async fn delegate(
             });
         }
         rounds += 1;
-        let reply = stream_round(answer, &request, |_| {
-            if stops.requested.load(Ordering::Relaxed) {
-                stops.stopped.store(true, Ordering::Relaxed);
-                StreamControl::Stop
-            } else {
-                StreamControl::Continue
-            }
-        })
+        let reply = stream_round(
+            answer,
+            &request,
+            |_| {
+                if stops.requested.load(Ordering::Relaxed) {
+                    stops.stopped.store(true, Ordering::Relaxed);
+                    StreamControl::Stop
+                } else {
+                    StreamControl::Continue
+                }
+            },
+            // A subagent's fallback moves are the parent run's news; the parent's own stream is
+            // what announces them, and the subagent's window is not a transcript.
+            |_, _| {},
+        )
         .await
         .map_err(|e| format!("the delegated request failed: {e}"))?;
 
@@ -1821,7 +1962,7 @@ pub async fn chat_send(
                 Err(_) => false,
             }
         }
-        Answer::Remote(_) => false,
+        Answer::Remote(_) | Answer::Free(_) => false,
     };
 
     let started = Instant::now();
@@ -2946,6 +3087,52 @@ mod tests {
 
         settings.remote_provider.context_tokens = 3;
         assert_eq!(remote_plan(&settings).unwrap().3, 1);
+    }
+
+    /// The free pick is a choice like the remote one: consent off, a missing pick, an unknown id and
+    /// a promotion all refuse with the reason, because a quiet return to the local engine would send
+    /// the prompt somewhere the user did not select.
+    #[test]
+    fn a_free_turn_refuses_before_it_could_fall_back() {
+        let mut settings = Settings::default();
+        settings.free_model = Some("glm-5.3-flash-free".into());
+
+        let refused = free_plan(&settings).unwrap_err();
+        assert!(refused.contains("Settings → Privacy"), "{refused}");
+
+        settings.privacy.allow_remote_providers = true;
+        settings.free_model = None;
+        let refused = free_plan(&settings).unwrap_err();
+        assert!(refused.contains("no free model is selected"), "{refused}");
+
+        settings.free_model = Some("not-a-model".into());
+        let refused = free_plan(&settings).unwrap_err();
+        assert!(refused.contains("not-a-model"), "{refused}");
+
+        // A promotion is listed but not routable: the refusal says so instead of inventing an
+        // address for a model the gateway does not carry.
+        settings.free_model = Some("big-pickle".into());
+        let refused = free_plan(&settings).unwrap_err();
+        assert!(refused.contains("not routable"), "{refused}");
+
+        settings.free_model = Some("glm-5.3-flash-free".into());
+        let (model, max_tokens) = free_plan(&settings).expect("routable pick");
+        assert_eq!(model.id, "glm-5.3-flash-free");
+        assert!((1..=FREE_CONTEXT_TOKENS / 2).contains(&max_tokens), "{max_tokens}");
+    }
+
+    /// The free tier's only fallback is inside the tier: a pre-token refusal moves down the
+    /// registry's attempt order, which for a routable pick starts at the pick and never rewinds to
+    /// an earlier one. The loop itself is exercised by the registry's order, not the wire.
+    #[test]
+    fn a_free_turn_falls_forward_only() {
+        let order = free_models::attempt_order("glm-5.3-flash-free");
+        let ids: Vec<&str> = order.iter().map(|m| m.id).collect();
+        assert_eq!(ids.first(), Some(&"glm-5.3-flash-free"));
+        // Every entry the loop can reach is routable — a promotion is never on the wire.
+        assert!(order.iter().all(|m| m.upstream.is_some()));
+        // An unknown id has nowhere to go, which the stream reports rather than guessing.
+        assert!(free_models::attempt_order("not-a-model").is_empty());
     }
 
     /// The subagent is the same assistant with narrower hands, not a stranger: it gets the user's own

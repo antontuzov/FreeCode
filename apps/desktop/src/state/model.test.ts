@@ -35,6 +35,7 @@ const STATUS: ModelStatus = {
   weightsPresent: true,
   local: true,
   remote: null,
+  free: null,
   packing: "PQ2_0",
   sizeGb: 0.46,
   warnings: [],

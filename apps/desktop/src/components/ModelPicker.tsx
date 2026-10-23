@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 
 import { Icon } from "./icons";
 import { translate, type Locale } from "../i18n";
-import { ipc, type CatalogModel, type KnowledgeCenter } from "../lib/ipc";
+import { ipc, type CatalogModel, type FreeModelInfo, type KnowledgeCenter } from "../lib/ipc";
 import { useModel } from "../state/model";
 import { useSettings } from "../state/settings";
 
@@ -41,8 +41,12 @@ export function ModelPicker({
   // A remote provider has no pack, no download and no catalog row here: its model id is free text in
   // Settings, so this panel can only say which provider answers and offer the page that changes it.
   const remote = status?.remote ?? null;
+  // A free pick is the third source the pill names: it has a registry row here, and its one gateway
+  // key lives in Settings like the provider's.
+  const free = status?.free ?? null;
   const [open, setOpen] = useState(SEEDED);
   const [center, setCenter] = useState<KnowledgeCenter | null>(null);
+  const [freeList, setFreeList] = useState<FreeModelInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const t = (key: string, params?: Record<string, string | number>) =>
     translate(locale, `modelPicker.${key}`, params);
@@ -58,9 +62,22 @@ export function ModelPicker({
       .catch((e: unknown) => setError(String(e)));
   }, [open, remote, center, error]);
 
+  // The registry is a small fixed list the host holds in memory, so it is read with the panel and
+  // not cached: the "Free" group is the one part of this panel a provider selection still shows.
+  useEffect(() => {
+    if (!open || freeList) return;
+    void ipc
+      .freeModelsList()
+      .then(setFreeList)
+      .catch(() => setFreeList([]));
+  }, [open, freeList]);
+
   const choose = async (id: string) => {
     setOpen(false);
-    if (!status || id === status.catalogId) return;
+    if (!status) return;
+    // Picking the model that is already picked is a no-op — unless a free model is the one
+    // answering, in which case the same click means "back to local".
+    if (id === status.catalogId && !free) return;
     const settings = useSettings.getState();
     if (!settings.loaded) await settings.load();
     await useSettings.getState().update((doc) => {
@@ -68,9 +85,29 @@ export function ModelPicker({
       // A forced packing is a claim about the model it was chosen for, so it does not travel with the
       // choice: the new model gets the same detection the first one did.
       doc.localModel.packing = "auto";
+      // The catalog pick is the local pick: a free model chosen earlier does not ride along.
+      doc.freeModel = null;
     });
     // No engine control is pressed from here. The host compares the weights the live server loaded
     // against what the settings now name, and starts another one when the next prompt arrives.
+    await useModel.getState().refresh();
+  };
+
+  const chooseFree = async (id: string) => {
+    const settings = useSettings.getState();
+    if (!settings.loaded) await settings.load();
+    const entry = freeList?.find((m) => m.id === id);
+    // A promotion row is listed but cannot answer; the host would refuse a turn with it, so the
+    // picker refuses the pick instead of filing a selection that can only fail.
+    if (!entry?.routable) return;
+    setOpen(false);
+    if (id === status?.free?.id) return;
+    await useSettings.getState().update((doc) => {
+      doc.freeModel = id;
+      // The free pick answers before the provider row would, but the Settings page shows one source
+      // at a time: flipping it here keeps the page from claiming Remote while a free model answers.
+      doc.remoteProvider.source = "local";
+    });
     await useModel.getState().refresh();
   };
 
@@ -86,12 +123,12 @@ export function ModelPicker({
         aria-expanded={open}
         className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-fine text-muted hover:bg-hover hover:text-fg"
       >
-        <Icon name={remote ? "globe" : "cube"} size={13} />
+        <Icon name={remote ? "globe" : free ? "bolt" : "cube"} size={13} />
         {/* The pill carries the model's name rather than the word "Model": which weights answer is the
             fact a user reads off it, and the label only matters once the panel is open. A remote
             provider may have no model id yet, and then the pill names the source instead. */}
         <span className="max-w-[16ch] truncate">
-          {remote ? remote.model || t("remote") : (status?.displayName ?? t("title"))}
+          {remote ? remote.model || t("remote") : free ? free.label : (status?.displayName ?? t("title"))}
         </span>
         <Icon name="chevronDown" size={12} />
       </button>
@@ -163,8 +200,45 @@ export function ModelPicker({
                   </button>
                 );
               })}
+            {/* The free tier: the list OpenCode shows, routable only where the gateway's own catalog
+                carries the model. A promotion row is listed and marked, and picking it is refused in
+                the same breath — the host would refuse the turn anyway, and a row that looks pickable
+                but can only fail is the bug a silent no-op would hide. */}
+            {freeList !== null && freeList.length > 0 && (
+              <>
+                <p className="section-label px-[var(--space-3)] pt-[var(--space-2)]">
+                  {t("freeGroup")}
+                </p>
+                {freeList.map((model) => {
+                  const current = model.id === free?.id;
+                  return (
+                    <button
+                      key={model.id}
+                      type="button"
+                      data-current={current || undefined}
+                      aria-disabled={!model.routable || undefined}
+                      className="picker-row"
+                      onClick={() => void chooseFree(model.id)}
+                    >
+                      <span className="row-copy min-w-0">
+                        <span className="row-title truncate">{model.label}</span>
+                        <span className="row-desc truncate">
+                          {model.routable
+                            ? model.provider
+                            : `${model.provider} · ${t("freeOnlyInside")}`}
+                        </span>
+                      </span>
+                      <span className="pill shrink-0">{t("freeBadge")}</span>
+                      {/* The checkmark the reference list uses: a tick, not a word, so "Free" stays the
+                          only chip on the row. */}
+                      {current && <Icon name="tick" size={14} className="shrink-0 text-accent" />}
+                    </button>
+                  );
+                })}
+              </>
+            )}
             <div className="border-t border-line px-[var(--space-3)] py-[var(--space-2)]">
-              {!remote && <p className="text-fine text-faint">{t("note")}</p>}
+              {!remote && <p className="text-fine text-faint">{t(free ? "freeNote" : "note")}</p>}
               <button
                 type="button"
                 className="nav-item mt-[var(--space-1)]"

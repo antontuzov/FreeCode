@@ -144,9 +144,12 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   const starting = useChat((s) => s.starting);
   const running = useTranscript((s) => s.running);
   const remote = status?.remote ?? null;
+  const free = status?.free ?? null;
   // The card cannot say whether a remote turn is possible without this bit, and it is the only thing
   // the Keychain will tell anyone. Read once per status answer; `null` while the answer is in flight.
   const [keySaved, setKeySaved] = useState<boolean | null>(null);
+  // The free gateway's key, under the same rule: presence only, never the value.
+  const [freeKeySaved, setFreeKeySaved] = useState<boolean | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -170,6 +173,25 @@ export function ModelStatus({ locale }: { locale: Locale }) {
       live = false;
     };
   }, [remote]);
+
+  useEffect(() => {
+    if (!free) {
+      setFreeKeySaved(null);
+      return;
+    }
+    let live = true;
+    void ipc
+      .freeKeyPresent()
+      .then((present) => {
+        if (live) setFreeKeySaved(present);
+      })
+      .catch(() => {
+        if (live) setFreeKeySaved(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [free]);
 
   // `?install-engine=1` runs the Install action and `?download-weights=1` the Download one on mount.
   // `?start-server=1` presses the card's own Start. The native window takes no injected clicks, so
@@ -201,6 +223,72 @@ export function ModelStatus({ locale }: { locale: Locale }) {
     );
   }
   if (!status) return null;
+
+  // A free pick answers without the local engine, like the remote source: the card shows the pick
+  // and its gateway instead of packing, engine and server rows that describe a run this one will
+  // never make. The refusal order mirrors the host's: consent, then routability, then the key.
+  if (free) {
+    const ready = free.allowed && free.routable && freeKeySaved === true;
+    const badge = !free.allowed
+      ? translate(locale, "model.badge.needsConsent")
+      : !free.routable
+        ? translate(locale, "model.badge.notRoutable")
+        : freeKeySaved === false
+          ? translate(locale, "model.badge.noKey")
+          : translate(locale, "model.badge.free");
+    const note = !free.allowed
+      ? translate(locale, "model.free.noConsent")
+      : !free.routable
+        ? translate(locale, "model.free.notRoutable")
+        : freeKeySaved === false
+          ? translate(locale, "model.free.noKey")
+          : freeKeySaved === null
+            ? translate(locale, "model.free.keyChecking")
+            : translate(locale, "model.free.ready");
+    return (
+      <section
+        aria-label={translate(locale, "model.free.title")}
+        className="w-full shrink-0 border-b border-line bg-elevated p-[var(--space-4)] shadow-raised"
+      >
+        <div className="flex items-center gap-2">
+          <Icon name="bolt" size={15} className="text-accent-ink" />
+          <h2 className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">{free.label}</h2>
+          <span
+            className={`shrink-0 rounded-[var(--radius-pill)] px-2 py-0.5 text-fine ${
+              ready ? "bg-accent-soft text-fg-strong" : "bg-sunken text-muted"
+            }`}
+          >
+            {badge}
+          </span>
+        </div>
+        <dl className="mt-3 flex flex-col gap-1 text-fine text-muted">
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="shrink-0">{translate(locale, "model.remote.provider")}</dt>
+            <dd className="truncate text-fg">{free.provider}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="shrink-0">{translate(locale, "model.remote.consent")}</dt>
+            <dd className="truncate text-fg">
+              {free.allowed
+                ? translate(locale, "model.remote.consentOn")
+                : translate(locale, "model.remote.consentOff")}
+            </dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="shrink-0">{translate(locale, "model.remote.key")}</dt>
+            <dd className="truncate text-fg">
+              {freeKeySaved === null
+                ? translate(locale, "model.remote.keyCheckingShort")
+                : freeKeySaved
+                  ? translate(locale, "model.remote.keySaved")
+                  : translate(locale, "model.remote.keyAbsent")}
+            </dd>
+          </div>
+        </dl>
+        <p className="mt-3 text-fine text-muted">{note}</p>
+      </section>
+    );
+  }
 
   // A remote source answers without the local engine, so the card shows the provider instead of
   // packing, engine and server rows that describe a run this one will never make. The local controls

@@ -968,13 +968,27 @@ function Shortcuts({ t }: { t: T }) {
 }
 
 /**
- * The remote key row: paste, save, remove, and say whether the Keychain holds one.
+ * A Keychain key row: paste, save, remove, and say whether the Keychain holds one.
  *
  * The value in the box goes to the host once and is then cleared; nothing here puts the key into the
  * settings document or keeps it in the store, and the host never sends it back. "Saved in the macOS
- * Keychain" is the only thing this control can learn, which is also all it needs to draw.
+ * Keychain" is the only thing this control can learn, which is also all it needs to draw. `prefix`
+ * names the i18n keys, and the three calls are the row's whole IPC surface — the remote provider's
+ * row and the free gateway's row are the same control with different names.
  */
-function RemoteKey({ t }: { t: T }) {
+function KeyRow({
+  t,
+  prefix,
+  present,
+  save,
+  clear,
+}: {
+  t: T;
+  prefix: string;
+  present: () => Promise<boolean>;
+  save: (key: string) => Promise<boolean>;
+  clear: () => Promise<boolean>;
+}) {
   const [key, setKey] = useState("");
   const [saved, setSaved] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
@@ -982,10 +996,9 @@ function RemoteKey({ t }: { t: T }) {
 
   useEffect(() => {
     let live = true;
-    void ipc
-      .remoteKeyPresent()
-      .then((present) => {
-        if (live) setSaved(present);
+    void present()
+      .then((isSaved) => {
+        if (live) setSaved(isSaved);
       })
       .catch((e: unknown) => {
         if (!live) return;
@@ -995,6 +1008,8 @@ function RemoteKey({ t }: { t: T }) {
     return () => {
       live = false;
     };
+    // The calls are the store's stable wrappers; the row is asked once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const act = async (run: () => Promise<boolean>) => {
@@ -1013,8 +1028,8 @@ function RemoteKey({ t }: { t: T }) {
     <div className="flex flex-col items-end gap-1.5">
       <div className="flex items-center gap-1.5">
         <SecretField
-          label={t("row.remoteKey")}
-          placeholder={t("row.remoteKey.placeholder")}
+          label={t(prefix)}
+          placeholder={t(`${prefix}.placeholder`)}
           value={key}
           onChange={setKey}
         />
@@ -1023,7 +1038,7 @@ function RemoteKey({ t }: { t: T }) {
           disabled={busy || key.trim() === ""}
           onClick={() =>
             void act(async () => {
-              const now = await ipc.saveRemoteKey(key);
+              const now = await save(key);
               // Only on success: a refused paste stays in the box to be corrected.
               setKey("");
               return now;
@@ -1031,16 +1046,16 @@ function RemoteKey({ t }: { t: T }) {
           }
           className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-accent px-2.5 py-1 text-fine font-medium text-accent-contrast disabled:opacity-60"
         >
-          {t("row.remoteKey.save")}
+          {t(`${prefix}.save`)}
         </button>
       </div>
       <div className="flex items-center gap-2">
         <span className="text-fine text-faint">
           {saved === null
-            ? t("row.remoteKey.checking")
+            ? t(`${prefix}.checking`)
             : saved
-              ? t("row.remoteKey.saved")
-              : t("row.remoteKey.absent")}
+              ? t(`${prefix}.saved`)
+              : t(`${prefix}.absent`)}
         </span>
         {saved && (
           <button
@@ -1048,13 +1063,13 @@ function RemoteKey({ t }: { t: T }) {
             disabled={busy}
             onClick={() =>
               void act(async () => {
-                await ipc.clearRemoteKey();
+                await clear();
                 return false;
               })
             }
             className="text-fine text-muted underline hover:text-fg disabled:opacity-60"
           >
-            {t("row.remoteKey.remove")}
+            {t(`${prefix}.remove`)}
           </button>
         )}
       </div>
@@ -1090,7 +1105,14 @@ function Model({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
               { value: "local", label: t("opt.local") },
               { value: "remote", label: t("opt.remote") },
             ]}
-            onChange={(v) => set((d) => void (d.remoteProvider.source = v))}
+            onChange={(v) =>
+              set((d) => {
+                d.remoteProvider.source = v;
+                // Remote answers only when no free pick stands in front of it, so a flip to
+                // Remote has to clear the pick for the word "Remote" to mean what it says.
+                if (v === "remote") d.freeModel = null;
+              })
+            }
           />
         </Row>
         {remote.source === "remote" && (
@@ -1124,11 +1146,31 @@ function Model({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
               />
             </Row>
             <Row title={t("row.remoteKey")} description={t("row.remoteKey.desc")}>
-              <RemoteKey t={t} />
+              <KeyRow
+                t={t}
+                prefix="row.remoteKey"
+                present={ipc.remoteKeyPresent}
+                save={ipc.saveRemoteKey}
+                clear={ipc.clearRemoteKey}
+              />
             </Row>
           </>
         )}
       </Section>
+
+      {remote.source === "local" && (
+        <Section label={t("section.free")} description={t("section.free.desc")}>
+          <Row title={t("row.freeKey")} description={t("row.freeKey.desc")}>
+            <KeyRow
+              t={t}
+              prefix="row.freeKey"
+              present={ipc.freeKeyPresent}
+              save={ipc.saveFreeKey}
+              clear={ipc.clearFreeKey}
+            />
+          </Row>
+        </Section>
+      )}
 
       <Section label={t("section.packing")}>
         <Row title={t("row.packing")} description={t("row.packing.desc")}>

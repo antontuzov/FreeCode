@@ -87,6 +87,7 @@ function document_(): SettingsDoc {
       model: "",
       contextTokens: 32_768,
     },
+    freeModel: null,
     context: { compressAtRatio: 0.8, keepRecentTurns: 4 },
     project: { root: "" },
     localModel: {

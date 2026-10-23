@@ -51,6 +51,16 @@ export type ModelStatus = {
     /** Whether the address and model are present. A turn also needs consent and a saved key. */
     configured: boolean;
   } | null;
+  /** Set when a free model is the selected source; the local engine rows are then not what answers. */
+  free: {
+    id: string;
+    label: string;
+    provider: string;
+    /** False for the promotion rows, which a turn refuses rather than routing. */
+    routable: boolean;
+    /** The Privacy consent switch. Off means a free turn is refused, not rerouted. */
+    allowed: boolean;
+  } | null;
   packing: string;
   sizeGb: number;
   warnings: string[];
@@ -66,6 +76,20 @@ export type ModelStatus = {
         downloadable: boolean;
       })
     | null;
+};
+
+/**
+ * One free-model registry entry, as the picker draws it. Mirrors
+ * `smollm_desktop_lib::free_models::FreeModelInfo`. `routable: false` is the promotion rows: listed
+ * for parity with the page that inspired the list, and a turn with one selected is refused rather
+ * than routed to a guessed address.
+ */
+export type FreeModelInfo = {
+  id: string;
+  label: string;
+  provider: string;
+  isFree: boolean;
+  routable: boolean;
 };
 
 /**
@@ -495,6 +519,9 @@ export type SettingsDoc = {
   approvals: ApprovalsDoc;
   privacy: { telemetry: boolean; allowRemoteProviders: boolean };
   remoteProvider: RemoteProviderDoc;
+  /** The free-model picker's choice, by registry id. `null` means no free model is selected, and
+   * the answer order is free first, then the remote provider, then the local engine. */
+  freeModel: string | null;
   context: { compressAtRatio: number; keepRecentTurns: number };
   /** The folder a run works in. Empty means the root the host resolved; anything else must be an
    * absolute path the host can open, or the run is refused by name. */
@@ -787,6 +814,17 @@ export const ipc = {
   saveRemoteKey: (key: string) => invoke<boolean>("save_remote_key", { key }),
   /** Remove the saved key; answers whether one is saved now, which is always `false` on success. */
   clearRemoteKey: () => invoke<boolean>("clear_remote_key"),
+  /**
+   * The free-model registry as the picker draws it. No secret rides along: ids, labels, providers
+   * and whether the gateway can actually be reached with this entry.
+   */
+  freeModelsList: () => invoke<FreeModelInfo[]>("free_models_list"),
+  /** Whether the Keychain holds the free gateway key. The key itself is never returned. */
+  freeKeyPresent: () => invoke<boolean>("free_key_present"),
+  /** Write a pasted gateway key to the login Keychain; answers whether one is saved now. */
+  saveFreeKey: (key: string) => invoke<boolean>("save_free_key", { key }),
+  /** Remove the saved gateway key; answers whether one is saved now, always `false` on success. */
+  clearFreeKey: () => invoke<boolean>("clear_free_key"),
   /**
    * Put a fence's text on the system pasteboard. The host does the writing because the webview is not
    * a place the web Clipboard API can be counted on, and its promise settles only once the pasteboard

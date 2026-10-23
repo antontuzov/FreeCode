@@ -106,6 +106,10 @@ pub struct Settings {
     pub project: Project,
     pub local_model: LocalModel,
     pub remote_provider: RemoteProvider,
+    /// The free-model picker's choice, by registry id. `None` means no free model is selected.
+    /// The answer order is free first, then the remote provider, then the local engine — the picker
+    /// is the most recent intent, and picking a local model clears this field.
+    pub free_model: Option<String>,
 }
 
 impl Default for Settings {
@@ -121,6 +125,7 @@ impl Default for Settings {
             project: Project::default(),
             local_model: LocalModel::default(),
             remote_provider: RemoteProvider::default(),
+            free_model: None,
         }
     }
 }

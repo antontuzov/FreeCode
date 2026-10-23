@@ -117,6 +117,17 @@ impl Assembly {
             allowed: settings.privacy.allow_remote_providers,
             configured: settings.remote_provider.configured(),
         });
+        let free = settings
+            .free_model
+            .as_deref()
+            .and_then(crate::free_models::find)
+            .map(|model| FreeView {
+                id: model.id.to_string(),
+                label: model.label.to_string(),
+                provider: model.provider.to_string(),
+                routable: model.upstream.is_some(),
+                allowed: settings.privacy.allow_remote_providers,
+            });
 
         ModelStatusView {
             catalog_id: self.model.id.clone(),
@@ -126,8 +137,9 @@ impl Assembly {
             engine_tag: self.lock.pinned_tag.clone(),
             engine_installed: self.engine_installed(),
             weights_present: self.weights_present(),
-            local: local_badge(self.report.is_allowed(), remote_selected),
+            local: local_badge(self.report.is_allowed(), remote_selected, free.is_some()),
             remote,
+            free,
             packing: self.pack.key.clone(),
             size_gb: self.pack.size_gb,
             warnings,
@@ -285,10 +297,10 @@ pub(crate) fn file_state(
 /// The "Local" badge reflects reality: generation is local only if the guard permits this machine to
 /// run it, and only while the local source is the one selected. Consent alone does not take the badge
 /// away — a local turn never falls back to the provider, so with Local selected it is still local —
-/// but choosing the provider does. `chat` uses the same fact for a live run by asking where the run
-/// was actually resolved, so the transcript and the status card cannot disagree.
-pub(crate) fn local_badge(guard_allows: bool, remote_selected: bool) -> bool {
-    guard_allows && !remote_selected
+/// but choosing the provider or a free model does. `chat` uses the same fact for a live run by asking
+/// where the run was actually resolved, so the transcript and the status card cannot disagree.
+pub(crate) fn local_badge(guard_allows: bool, remote_selected: bool, free_selected: bool) -> bool {
+    guard_allows && !remote_selected && !free_selected
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -332,6 +344,24 @@ pub struct RemoteView {
     pub configured: bool,
 }
 
+/// The free model the card shows when the picker's free tier is the selected source.
+///
+/// No secret is here, and no list of providers is: the registry is the host's, the page asks the
+/// Keychain separately whether a gateway key is saved, and the one fact the page cannot know without
+/// asking — whether this entry is one the gateway can actually be reached with — is said here.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FreeView {
+    pub id: String,
+    pub label: String,
+    pub provider: String,
+    /// False for the promotion rows: listed for parity with the page that inspired the list, but
+    /// not routable from this app, and a turn with one selected is refused rather than guessed.
+    pub routable: bool,
+    /// Whether the user's consent switch is on. Off means a free turn is refused, not rerouted.
+    pub allowed: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStatusView {
@@ -349,6 +379,9 @@ pub struct ModelStatusView {
     /// source. No secret is here: the Settings page asks the Keychain separately whether a key is
     /// saved, and this status poll never reads one.
     pub remote: Option<RemoteView>,
+    /// The free model this turn goes to instead of the local engine, when the picker's free tier is
+    /// the selected source. Same no-secret rule as `remote`.
+    pub free: Option<FreeView>,
     pub packing: String,
     pub size_gb: f32,
     pub warnings: Vec<String>,
