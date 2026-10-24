@@ -2004,11 +2004,12 @@ fn is_picture(url: &str) -> bool {
 /// it: "what is this?" is the reason the control exists. The picture goes into the history the way it
 /// went out, so every later turn of this conversation still has it in front of the model.
 ///
-/// `tools` is the composer's Coding control. Off, this is the chat it has always been: one request,
-/// one streamed answer, and a tool call the model emits anyway becomes a notice. On, the calls this
-/// build can run are offered and [`run_rounds`] answers what the model asks for — unless the approval
-/// dial says Plan only, in which case the run explores with the read-only calls and answers with a
-/// plan instead of changing the workspace.
+/// `tools` asks for the agent loop. The composer always sends it true — every prompt here is an agent
+/// prompt, and what a run may do is set by the approval dial, Terminal access and Subagents. False,
+/// this is the chat it has always been: one request, one streamed answer, and a tool call the model
+/// emits anyway becomes a notice. On, the calls this build can run are offered and [`run_rounds`]
+/// answers what the model asks for — unless the approval dial says Plan only, in which case the run
+/// explores with the read-only calls and answers with a plan instead of changing the workspace.
 #[tauri::command]
 pub async fn chat_send(
     app: AppHandle,

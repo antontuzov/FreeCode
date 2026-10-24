@@ -16,9 +16,9 @@ engine or the host actually measured.
   replaying only the answers, so the fork's prompt cache keeps hitting. A remote OpenAI-compatible
   provider can answer instead, behind an explicit source choice, the Privacy switch and a key held in the
   macOS Keychain.
-- **Runs a coding loop.** The composer's Coding control turns the same model into an agent that reads,
-  searches, creates files, edits them and applies a multi-file patch; with the Privacy switch on it looks
-  things up on the web, with Terminal access on it runs one command, and with Subagents on it may hand
+- **Runs a coding loop.** Every prompt this app sends is an agent prompt: the model reads, searches,
+  creates files, edits them and applies a multi-file patch; with the Privacy switch on it looks things
+  up on the web, with Terminal access on it runs one command, and with Subagents on it may hand
   one self-contained question to a read-only second model run. That is what lets it lay out a small app
   from nothing rather than only patch one. The approval dial's **Plan only** mode turns the same run into
   a proposer: it explores with the read-only calls and answers with a numbered plan instead of touching
@@ -116,11 +116,11 @@ the local engine as a fallback, so "Remote" cannot silently mean "local anyway".
 - **Approvals.** The mode the next run is built with — the composer's pill and Settings → Agent both
   edit the same value, which the host re-reads when a prompt is sent. A call it refuses comes back as a
   blocked row naming the policy. Nothing asks: this build has no prompt a run could wait on, so the mode
-  named "Ask every time" runs nothing. **Plan only** is a mode rather than a refusal alone: a Coding run
-  under it is offered the read-only calls, given a contract that asks for a plan, and its answer carries
-  a Plan mark so it cannot be read as a change that already happened. The Extensions page computes each
-  tool's answer with the same engine the loop uses mid-run, so the page cannot tell a friendlier story
-  than the agent acts.
+  named "Ask every time" runs nothing. **Plan only** is a mode rather than a refusal alone: an agent
+  run under it is offered the read-only calls, given a contract that asks for a plan, and its answer
+  carries a Plan mark so it cannot be read as a change that already happened. The Extensions page
+  computes each tool's answer with the same engine the loop uses mid-run, so the page cannot tell a
+  friendlier story than the agent acts.
 
 ## Where things live
 
@@ -197,7 +197,7 @@ The dev URL therefore accepts seeds that no shipped control ever sets:
 | `?collapsed=<groups>` | the inspector's lower groups, which the status card otherwise pushes below the fold |
 | `?settings=<page>`, `?q=<query>` | a Settings page, and the search field |
 | `?review=1`, `?find=<text>`, `?scope=all`, `?outline=1` | the review panel, its find field, its scope and its fold |
-| `?coding=1&ask=<prompt>`, `?ask=<prompt>` | a real run against the local model, started from the URL |
+| `?ask=<prompt>` | a real agent run against the local model, started from the URL |
 | `?knowledge=<id>`, `?extensions=1` | a model's Knowledge Center page, and the Extensions inventory |
 
 `pnpm app:dev:fixture`, `app:dev:settings` and `app:dev:chat` are the three pre-wired ones.

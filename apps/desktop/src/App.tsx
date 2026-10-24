@@ -57,10 +57,6 @@ export default function App() {
   const askAgain = query("ask_again");
   const forgetBetween = query("new_task_between") === "1";
   const stopAfter = Math.max(0, Number(query("stop_after")) || 0);
-  // `?coding=1` is the same press the composer's own control answers to, read here so a `?ask=` prompt
-  // goes out with the workspace tools offered: the loop's rows are otherwise only reachable by a click
-  // the native window cannot be given.
-  const coding = query("coding") === "1";
   const reopen = query("reopen") === "1";
   const filed = useSessions((s) => s.items);
   const openFiled = useSessions((s) => s.open);
@@ -125,12 +121,12 @@ export default function App() {
   useEffect(() => {
     if (!ask) return;
     void (async () => {
-      for (let i = 0; i < askRepeat; i += 1) await send(ask, undefined, coding);
+      for (let i = 0; i < askRepeat; i += 1) await send(ask);
       if (!askAgain) return;
       if (forgetBetween) await newTask();
-      await send(askAgain, undefined, coding);
+      await send(askAgain);
     })();
-  }, [ask, askRepeat, askAgain, forgetBetween, coding, newTask, send]);
+  }, [ask, askRepeat, askAgain, forgetBetween, newTask, send]);
 
   // `?reopen=1` opens the newest filed conversation once the list arrives — the same call the
   // sidebar's row makes, and the only way that row's behavior gets verified rather than assumed,

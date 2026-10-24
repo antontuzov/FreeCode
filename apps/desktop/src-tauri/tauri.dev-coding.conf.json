@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "build": {
-    "devUrl": "http://localhost:5173/?coding=1&ask=Read%20the%20file%20crates%2Fsmollm-tools%2Fsrc%2Fregistry.rs%20with%20a%20tool.%20Then%20name%2C%20in%20one%20short%20line%2C%20the%20tool%20ids%20the%20EXECUTABLE%20list%20holds."
+    "devUrl": "http://localhost:5173/?ask=Read%20the%20file%20crates%2Fsmollm-tools%2Fsrc%2Fregistry.rs%20with%20a%20tool.%20Then%20name%2C%20in%20one%20short%20line%2C%20the%20tool%20ids%20the%20EXECUTABLE%20list%20holds."
   }
 }

@@ -162,7 +162,7 @@ export function NavSteps({ locale, onOpenPalette }: { locale: Locale; onOpenPale
   const canForward = useNav((s) => s.cursor < s.history.length - 1);
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-0.5">
       <button
         type="button"
         aria-label={translate(locale, "nav.back")}
@@ -191,7 +191,7 @@ export function NavSteps({ locale, onOpenPalette }: { locale: Locale; onOpenPale
         type="button"
         aria-label={translate(locale, "sidebar.search")}
         title={`${translate(locale, "sidebar.search")} · ${shortcutLabel("palette")}`}
-        className="icon-btn ml-[var(--space-2)]"
+        className="icon-btn ml-[var(--space-1)]"
         onClick={onOpenPalette}
       >
         <Icon name="search" size={14} />
@@ -313,14 +313,16 @@ export function Sidebar({
           sits on their centre line: this band is the titlebar's, and the reference draws the toggle
           and the two history arrows on that line rather than stacked under it. */}
       <div
-        className="flex h-[calc(var(--traffic-light-center)*2)] items-center gap-1.5 px-[var(--space-3)]"
+        className="flex h-[calc(var(--traffic-light-center)*2)] items-center gap-0.5 px-[var(--space-3)]"
         style={{ paddingLeft: "max(var(--space-3), var(--traffic-light-inset))" }}
       >
         {/* The reference's header row: a column that folds, the two steps along the surfaces this
             window has opened, and the search over everything. Each of the arrows says so when the
             stack has nothing on that side of it rather than firing into a no-op. The glyphs are
-            drawn at 14px in the 28px hit area: at 16 they left roughly half the air the reference
-            keeps between one control and the next, which is what made the row read as one blob. */}
+            drawn at 14px in the 28px hit area and the row is set on a 2px gap, because the
+            reference's own controls sit on a 30px pitch — a 28px square and a 2px step — and the
+            looser gap that used to hold them apart read as four separate controls rather than one
+            row. */}
         <button
           type="button"
           aria-label={toggleLabel}
@@ -339,7 +341,7 @@ export function Sidebar({
       <div className="flex flex-col gap-1 p-[var(--space-3)] pt-[var(--space-4)]">
         <span className="pill w-fit">
           <Icon name="coding" />
-          {translate(locale, "sidebar.coding")}
+          {translate(locale, "sidebar.agent")}
         </span>
         {PRIMARY.map((r) => row(r))}
       </div>

@@ -84,7 +84,8 @@ describe("sending", () => {
 
     mock.chatSend.mockResolvedValueOnce("ok");
     await useChat.getState().send("", "data:image/png;base64,AA");
-    expect(mock.chatSend).toHaveBeenCalledWith("", "data:image/png;base64,AA", undefined);
+    // Even a picture with no words is an agent prompt: the tools always go with it.
+    expect(mock.chatSend).toHaveBeenCalledWith("", "data:image/png;base64,AA", true);
   });
 
   it("shows the bubble on the click, before the host has answered", async () => {
@@ -114,7 +115,7 @@ describe("sending", () => {
 
   it("closes the send out, refreshes the server and the filed list, and hands the rows over", async () => {
     mock.chatSend.mockResolvedValueOnce("answer");
-    await useChat.getState().send("hello", "data:image/png;base64,AA", true);
+    await useChat.getState().send("hello", "data:image/png;base64,AA");
 
     expect(mock.chatSend).toHaveBeenCalledWith("hello", "data:image/png;base64,AA", true);
     expect(useChat.getState().sending).toBe(false);

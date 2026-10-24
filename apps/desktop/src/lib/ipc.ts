@@ -897,9 +897,10 @@ export const ipc = {
    * `image` is a `data:<mime>;base64,…` URL. Asking with a picture is what makes the host start the
    * engine with its vision projector, so the first one after a text-only run also pays a reload.
    *
-   * `tools` is the composer's Coding control. Off, the host sends one request and answers in prose,
-   * and a tool call the model emits anyway is a notice. On, the four read-only tools are offered and
-   * each call the model asks for becomes a transcript row.
+   * `tools` asks for the agent loop; the composer always sends true, since every prompt here is an
+   * agent prompt. False, the host sends one request and answers in prose, and a tool call the model
+   * emits anyway is a notice. On, the four read-only tools are offered and each call the model asks
+   * for becomes a transcript row.
    */
   chatSend: (text: string, image?: string, tools?: boolean) =>
     invoke<string>("chat_send", {

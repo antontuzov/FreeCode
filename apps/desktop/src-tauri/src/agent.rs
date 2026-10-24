@@ -4,10 +4,10 @@
 //! calls that have executors — four reads of the workspace, three reads of its repository, three writes
 //! inside it, two that reach the internet, one command, and the three project runners built on the same
 //! consent; anything else the model asks for is answered with a notice that says so rather than run,
-//! which is why the loop can keep the "Local" badge true and the composer's Coding control can stay an
-//! opt-in. The web calls, the shell and its runners are only *offered* while their own switches are on,
-//! so a run that can leave the machine, or run with this user's permissions, is one the user asked for;
-//! the executors themselves are what bound them, the way the sandbox bounds the six that touch disk.
+//! which is why the loop can keep the "Local" badge true. The web calls, the shell and its runners are
+//! only *offered* while their own switches are on, so a run that can leave the machine, or run with
+//! this user's permissions, is one the user asked for; the executors themselves are what bound them,
+//! the way the sandbox bounds the six that touch disk.
 //!
 //! Every call takes the same road: [`smollm_core::approvals`] decides, [`smollm_tools::authorize`]
 //! resolves its paths against the workspace sandbox inside [`smollm_tools::execute`], and only then

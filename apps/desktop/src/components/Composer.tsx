@@ -17,10 +17,6 @@ import { ModelPicker } from "./ModelPicker";
  */
 const DIAL: ApprovalMode[] = ["auto_approve", "ask_always", "plan_only"];
 
-/** `?coding=1` stands in for the press of the Coding control the native window cannot be given, so the
- * control's on state — and the tool rows it earns — can be looked at in the real app. */
-const CODING_SEEDED = new URLSearchParams(window.location.search).get("coding") === "1";
-
 /**
  * The composer's approval selector is the agent loop's permission dial, and it edits the one value the
  * loop reads: `approvals.mode` in the settings the host loads when a prompt is sent, which is the same
@@ -42,17 +38,22 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   const toggleReview = useNav((s) => s.toggleReview);
   const [draft, setDraft] = useState("");
   const mode = useSettings((s) => s.doc?.approvals.mode);
-  // The shell's switch changes what the Coding tooltip may promise: with it on, a run can also issue
+  // The shell's switch changes what the agent's title may promise: with it on, a run can also issue
   // one command, and that is the one call the tooltip's "nothing else reaches past this machine" would
   // otherwise be wrong about.
   const shell = useSettings((s) => s.doc?.approvals.shellEnabled ?? false);
   // A delegation is a second model run, so the tooltip has to name it whenever the switch that pays
   // for it is on — the base sentences price a run in tool results and would leave it out.
   const subagents = useSettings((s) => s.doc?.approvals.subagentsEnabled ?? false);
-  // The Coding control: whether the next prompt offers the workspace reads. It is per prompt rather
-  // than per conversation, because each round costs the context window a tool result, and that is a
-  // price the user agrees to one question at a time rather than once per chat.
-  const [coding, setCoding] = useState(CODING_SEEDED);
+  // The agent's badge: what every prompt of this app is allowed to do, and what it costs. It is not a
+  // control — the mode is the app, not a per-question opt-in — so the glyph stays lit and the title
+  // carries the price. What a run may *change* is still the approval dial's answer beside it, and the
+  // shell and the subagents stay Settings switches, named here only because they widen what this badge
+  // is promising.
+  const agentTitle = [
+    translate(locale, shell ? "composer.agent.onShell" : "composer.agent.on"),
+    ...(subagents ? [translate(locale, "composer.agent.subagents")] : []),
+  ].join(" ");
   const [picture, setPicture] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -101,7 +102,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   const submit = () => {
     if (!draft.trim() && !picture) return;
     // A picture with no words is a question — "what is in this?" needs no saying.
-    void send(draft, picture ?? undefined, coding);
+    void send(draft, picture ?? undefined);
     setDraft("");
     setPicture(null);
   };
@@ -260,31 +261,16 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           >
             <Icon name="attach" size={14} />
           </button>
-          {/* The Coding control, as the reference draws it: one line icon in the row, not a second
-              labelled pill. It reads as pressed because the state is the whole point of the click —
-              the title is what says what each side of it costs. */}
-          <button
-            type="button"
-            onClick={() => setCoding((on) => !on)}
-            className={`icon-btn ${coding ? "bg-accent-soft text-fg-strong" : ""}`}
-            aria-label={translate(locale, "composer.coding")}
-            aria-pressed={coding}
-            title={[
-              translate(
-                locale,
-                coding
-                  ? shell
-                    ? "composer.coding.onShell"
-                    : "composer.coding.on"
-                  : shell
-                    ? "composer.coding.offShell"
-                    : "composer.coding.off",
-              ),
-              ...(coding && subagents ? [translate(locale, "composer.coding.subagents")] : []),
-            ].join(" ")}
+          {/* The agent's own glyph, lit and permanent: the reference draws the mode as one line icon in
+              this row, and here it is the app's name for itself rather than a state to enter. */}
+          <span
+            className="icon-btn bg-accent-soft text-fg-strong"
+            role="img"
+            aria-label={translate(locale, "composer.agent")}
+            title={agentTitle}
           >
             <Icon name="coding" size={14} />
-          </button>
+          </span>
           {/* The reference marks this dial with the warning triangle and colours the whole pill when
               the policy is the wide one: auto approve is the mode that lets the run change files and
               run a command without being asked, which is the one state the row should not whisper.
