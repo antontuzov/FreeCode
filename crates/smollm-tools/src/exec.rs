@@ -38,6 +38,115 @@ use walkdir::WalkDir;
 
 use crate::{authorize, registry::is_executable, web, Access, SandboxPolicy, ToolsError};
 
+/// The longest plan the model may keep: enough for a real task, short enough that the list is
+/// something a person reads rather than a second transcript.
+pub const MAX_PLAN_ITEMS: usize = 20;
+/// One step's text, in characters. A step is a phrase, and a model that writes a paragraph has
+/// written the answer twice.
+pub const MAX_PLAN_TEXT: usize = 160;
+
+/// Where one step of a plan stands. The three states are the whole vocabulary: a step that is not
+/// started, the one being worked on, and one whose result has been checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlanStatus {
+    Pending,
+    Active,
+    Done,
+}
+
+impl PlanStatus {
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "pending" => Some(Self::Pending),
+            "active" => Some(Self::Active),
+            "done" => Some(Self::Done),
+            _ => None,
+        }
+    }
+
+    /// The mark the model is handed back, and the one a terminal fallback draws.
+    fn mark(self) -> &'static str {
+        match self {
+            Self::Pending => "[ ]",
+            Self::Active => "[~]",
+            Self::Done => "[x]",
+        }
+    }
+}
+
+/// One step of the plan a run keeps. It is carried on the transcript row so the window can draw the
+/// list the model last stated, rather than a summary of it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanItem {
+    pub text: String,
+    pub status: PlanStatus,
+}
+
+/// Read and validate a `todo_write` call's items. The executor and the transcript row share this, so
+/// the list the user reads is exactly the list the tool accepted.
+pub fn plan(arguments: &Value) -> Result<Vec<PlanItem>, ToolsError> {
+    let tool = "todo_write";
+    let items = arguments
+        .get("items")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ToolsError::InvalidArguments {
+            tool: tool.into(),
+            reason: "items must be a list of { text, status } objects".into(),
+        })?;
+    if items.is_empty() || items.len() > MAX_PLAN_ITEMS {
+        return Err(ToolsError::InvalidArguments {
+            tool: tool.into(),
+            reason: format!("a plan holds 1 to {MAX_PLAN_ITEMS} steps"),
+        });
+    }
+    let mut plan = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let at = index + 1;
+        let text = item
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .ok_or_else(|| ToolsError::InvalidArguments {
+                tool: tool.into(),
+                reason: format!("step {at} has no text"),
+            })?;
+        if text.chars().count() > MAX_PLAN_TEXT {
+            return Err(ToolsError::InvalidArguments {
+                tool: tool.into(),
+                reason: format!("step {at} is longer than {MAX_PLAN_TEXT} characters"),
+            });
+        }
+        let status = item
+            .get("status")
+            .and_then(Value::as_str)
+            .and_then(PlanStatus::parse)
+            .ok_or_else(|| ToolsError::InvalidArguments {
+                tool: tool.into(),
+                reason: format!("step {at} needs a status of pending, active or done"),
+            })?;
+        plan.push(PlanItem {
+            text: text.to_string(),
+            status,
+        });
+    }
+    // Two steps being worked on at once would make the list disagree with the run it describes.
+    if plan
+        .iter()
+        .filter(|i| i.status == PlanStatus::Active)
+        .count()
+        > 1
+    {
+        return Err(ToolsError::InvalidArguments {
+            tool: tool.into(),
+            reason: "only one step may be active".into(),
+        });
+    }
+    Ok(plan)
+}
+
 /// Most result text one call may hand back, in bytes — about 3k tokens, against the smallest context
 /// window this app starts a server with.
 pub const MAX_RESULT_BYTES: usize = 12 * 1024;
@@ -167,6 +276,8 @@ pub enum SummaryKey {
     PageCut,
     /// One file created.
     FileCreated,
+    /// `{{done}}` of `{{total}}` steps of the run's plan are checked off.
+    PlanSteps,
     /// One hunk of a patch applied.
     HunkApplied,
     /// `{{count}}` hunks applied, in one or more places in the same file.
@@ -202,7 +313,7 @@ pub enum SummaryKey {
 impl SummaryKey {
     /// Every key the executors can answer with, so a catalog entry no executor reaches is named as the
     /// dead copy it is.
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::Empty,
         Self::Lines,
         Self::NoRange,
@@ -224,6 +335,7 @@ impl SummaryKey {
         Self::Results,
         Self::PageCut,
         Self::FileCreated,
+        Self::PlanSteps,
         Self::HunkApplied,
         Self::HunksApplied,
         Self::FilesPatched,
@@ -264,6 +376,7 @@ impl SummaryKey {
             Self::Results => "transcript.summary.results",
             Self::PageCut => "transcript.summary.pageCut",
             Self::FileCreated => "transcript.summary.fileCreated",
+            Self::PlanSteps => "transcript.summary.planSteps",
             Self::HunkApplied => "transcript.summary.hunkApplied",
             Self::HunksApplied => "transcript.summary.hunksApplied",
             Self::FilesPatched => "transcript.summary.filesPatched",
@@ -309,6 +422,7 @@ impl SummaryKey {
             Self::TerminalExit => &["code"],
             Self::TerminalTimedOut => &["seconds"],
             Self::SubagentReport => &["rounds", "reads"],
+            Self::PlanSteps => &["done", "total"],
             Self::GitDiffFile => &["added", "removed"],
             Self::GitDiff => &["files", "added", "removed"],
             Self::Empty
@@ -405,6 +519,7 @@ pub fn execute(
         "list_dir" => list_dir(tool.id, arguments, policy),
         "glob" => find_files(tool.id, arguments, policy),
         "grep_search" => search_content(tool.id, arguments, policy),
+        "todo_write" => todo_write(arguments),
         "edit_file" => edit_file(tool.id, arguments, policy),
         "write_file" => write_file(tool.id, arguments, policy),
         "apply_patch" => apply_patch(tool.id, arguments, policy),
@@ -453,6 +568,40 @@ pub fn write_targets(tool_id: &str, arguments: &Value, policy: &SandboxPolicy) -
 ///
 /// The whole allowed file is held while the range is picked out of it, which is what makes the answer
 /// able to state the file's real line count and to continue from any line the cap stopped it on.
+/// Record the plan. It touches no file: the list goes back to the model so the next round reads the
+/// same states the user does, and onto the transcript row so the window can draw them. The result
+/// says where the plan stands rather than repeating it, because the model just wrote the steps.
+fn todo_write(arguments: &Value) -> Result<Executed, ToolsError> {
+    let items = plan(arguments)?;
+    let done = items
+        .iter()
+        .filter(|i| i.status == PlanStatus::Done)
+        .count();
+    let total = items.len();
+    let mut content = String::from("Plan for this task:\n");
+    for (index, item) in items.iter().enumerate() {
+        content.push_str(&format!(
+            "{}. {} {}\n",
+            index + 1,
+            item.status.mark(),
+            item.text
+        ));
+    }
+    content.push_str(
+        "\nKeep it current: mark the step you are working on active, and a step done only once its \
+         result is verified.",
+    );
+    Ok(Executed {
+        summary: Summary::said(
+            SummaryKey::PlanSteps,
+            json!({ "done": done, "total": total }),
+            format!("{done} of {total} steps done"),
+        ),
+        content,
+        edits: Vec::new(),
+    })
+}
+
 fn read_file(
     tool: &str,
     arguments: &Value,
@@ -5224,5 +5373,80 @@ mod tests {
             matches!(err, ToolsError::InvalidArguments { .. }),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn a_plan_is_recorded_and_its_count_is_the_summary() {
+        let (_d, p) = fixture();
+        let args = json!({
+            "items": [
+                { "text": "Read the manifest", "status": "done" },
+                { "text": "Add the flag", "status": "active" },
+                { "text": "Run the tests", "status": "pending" }
+            ]
+        });
+        let got = ran("todo_write", &args, &p).expect("a plan touches no file");
+        assert!(got.edits.is_empty(), "a plan writes nothing");
+        assert_eq!(got.summary.text, "1 of 3 steps done");
+        assert_eq!(
+            got.summary.params,
+            json!({ "done": 1, "total": 3 }),
+            "the sentence's two blanks"
+        );
+        // The marks are the model's own echo: a step it marked done reads done.
+        assert!(
+            got.content.contains("1. [x] Read the manifest"),
+            "{}",
+            got.content
+        );
+        assert!(
+            got.content.contains("2. [~] Add the flag"),
+            "{}",
+            got.content
+        );
+        assert!(
+            got.content.contains("3. [ ] Run the tests"),
+            "{}",
+            got.content
+        );
+    }
+
+    #[test]
+    fn a_plan_the_run_could_not_follow_is_refused_with_the_step_that_broke_it() {
+        let (_d, p) = fixture();
+        let two_actives = json!({ "items": [
+            { "text": "one", "status": "active" },
+            { "text": "two", "status": "active" }
+        ] });
+        let err = ran("todo_write", &two_actives, &p).expect_err("one step at a time");
+        assert!(
+            err.to_string().contains("only one step may be active"),
+            "{err}"
+        );
+
+        let empty = json!({ "items": [] });
+        assert!(matches!(
+            ran("todo_write", &empty, &p),
+            Err(ToolsError::InvalidArguments { .. })
+        ));
+
+        let blank = json!({ "items": [{ "text": "   ", "status": "pending" }] });
+        assert!(ran("todo_write", &blank, &p)
+            .expect_err("a step needs words")
+            .to_string()
+            .contains("step 1 has no text"));
+
+        let unknown = json!({ "items": [{ "text": "one", "status": "started" }] });
+        assert!(ran("todo_write", &unknown, &p)
+            .expect_err("three states only")
+            .to_string()
+            .contains("pending, active or done"));
+
+        let long = "x".repeat(MAX_PLAN_TEXT + 1);
+        let too_long = json!({ "items": [{ "text": long, "status": "pending" }] });
+        assert!(ran("todo_write", &too_long, &p)
+            .expect_err("a step is a phrase")
+            .to_string()
+            .contains("longer than"));
     }
 }

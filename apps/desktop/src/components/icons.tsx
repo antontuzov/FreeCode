@@ -33,6 +33,10 @@ const PATHS = {
   // The glass and its handle inside one box with the panel glyph: the handle used to run to the 24's
   // corner, which made this the widest shape in the header row by a unit and a half of stroke.
   search: "M11 18.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15zM20 20l-3.9-3.9",
+  /* The run's plan, as the reference draws its task-list control: two rows of a list, the first
+     still to do (an empty box) and the second already checked. The check sits where the box was,
+     so the two rows read as one list changing state rather than two different lists. */
+  checklist: "M4 7.5h2.5V10H4zM10 8.75h9M4 15.5l1.9 1.9 3.1-3.7M11.5 16h7.5",
   workspace: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   knowledge: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 3v17",
   sites: "M3 5h18v14H3zM3 10h18M8 5v5",

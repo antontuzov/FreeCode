@@ -10,7 +10,14 @@
 import { create } from "zustand";
 
 import { has, translate, type Locale } from "../i18n";
-import type { AgentEvent, HostStep, HostStepStatus, HostToolOutcome, RunReport } from "../lib/ipc";
+import type {
+  AgentEvent,
+  HostPlanItem,
+  HostStep,
+  HostStepStatus,
+  HostToolOutcome,
+  RunReport,
+} from "../lib/ipc";
 
 export type StepKind =
   | "processed"
@@ -26,6 +33,7 @@ export type StepKind =
   | "createFile"
   | "readFile"
   | "searchContent"
+  | "todo"
   | "tool"
   | "contextCompressed"
   | "subagent"
@@ -49,6 +57,7 @@ const I18N_KEYS: Record<StepKind, string> = {
   createFile: "transcript.step.createFile",
   readFile: "transcript.step.readFile",
   searchContent: "transcript.step.searchContent",
+  todo: "transcript.step.todo",
   tool: "transcript.step.ranTool",
   contextCompressed: "transcript.step.contextCompressed",
   subagent: "transcript.step.subagent",
@@ -137,6 +146,11 @@ export type Step = {
    * other, never both. The review folds these per path exactly as it folds rows.
    */
   files?: EditedFile[];
+  /**
+   * On a `todo` row: the list the run restated, in its order. The plan panel draws the newest one,
+   * so the list is state the transcript holds rather than a second store that could disagree.
+   */
+  plan?: HostPlanItem[];
   /** For `toolBatch` and `running`: the rows nested underneath the header. */
   children?: Step[];
   /**
@@ -365,6 +379,7 @@ function hostRow(step: HostStep, summary?: ToolSummary): Step {
     detail: summary?.text,
     detailKey: summary?.key,
     detailParams: summary?.params,
+    plan: step.plan?.length ? step.plan : undefined,
     diff: step.diff ? { added: step.diff.linesAdded, removed: step.diff.linesRemoved } : undefined,
     hunk: step.hunk ?? undefined,
     files: step.files?.length ? step.files : undefined,
@@ -405,9 +420,11 @@ function pushStep(rows: Row[], step: Step): Row[] {
 
 /** A row a tool opened, which is what a batch header may claim. Notices and refusals are `blocked`
  * rows that a run produced alongside those tools, and folding one under "Ran 2 tools" would say the
- * batch ran it. */
+ * batch ran it. A plan is the run's own narration of the round rather than one of its calls — folded
+ * into the count it would disappear behind a disclosure on every update, which is the one row the
+ * user is watching. */
 function isToolStep(row: Row): boolean {
-  return !isTurn(row) && row.kind !== "toolBatch" && row.kind !== "blocked";
+  return !isTurn(row) && row.kind !== "toolBatch" && row.kind !== "blocked" && row.kind !== "todo";
 }
 
 /**
@@ -1046,6 +1063,24 @@ export const FIXTURE_ROWS: Row[] = [
         subject: "https://en.wikipedia.org/wiki/Quantization_(signal_processing)",
         status: "ok",
       },
+    ],
+  },
+  // The plan the run wrote, on the fixture the whole window is reviewed on: the header's checklist
+  // control and the list under this row draw the same steps, and the count on the button is the one
+  // those marks add up to. Two done, one in hand, two waiting — the three states the list has.
+  {
+    id: "f4p",
+    kind: "todo",
+    status: "ok",
+    detail: "2 of 5 steps done",
+    detailKey: "transcript.summary.planSteps",
+    detailParams: { done: "2", total: "5" },
+    plan: [
+      { text: "Read the fork's transcript module", status: "done" },
+      { text: "Add the todo_write tool to the registry", status: "done" },
+      { text: "Draw the plan in the header and under its row", status: "active" },
+      { text: "Run the gate on the change", status: "pending" },
+      { text: "Capture the plan from the running app", status: "pending" },
     ],
   },
   // A refusal, as the load guard reports it, so the card can be looked at without uninstalling the

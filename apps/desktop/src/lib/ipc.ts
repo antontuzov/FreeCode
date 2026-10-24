@@ -300,6 +300,7 @@ export type HostStepKind =
   | "createFile"
   | "readFile"
   | "searchContent"
+  | "todo"
   | "tool"
   | "contextCompressed"
   | "subagent"
@@ -339,6 +340,12 @@ export type HostHunk = { at: number; lines: string };
 export type HostEditedFile = { path: string; added: number; removed: number; hunks: HostHunk[] };
 
 /**
+ * `smollm_tools::PlanItem`: one step of the list a run keeps, with the state the model last gave it.
+ * `active` is the step being worked on; the tool refuses a plan with more than one.
+ */
+export type HostPlanItem = { text: string; status: "pending" | "active" | "done" };
+
+/**
  * `smollm_core::transcript::TranscriptStep`: one row as the host declares it.
  *
  * The host owns which row exists and what it measured; the catalog owns the words around it. `params`
@@ -367,6 +374,12 @@ export type HostStep = {
    * can stand in the chip. Absent on a single-hunk row, which keeps the `hunk` shape.
    */
   files?: HostEditedFile[];
+  /**
+   * `smollm_tools::PlanItem`: the steps a `todo_write` row recorded, in the order the model wrote
+   * them. Present only on that row, so the plan panel reads the latest non-empty list rather than
+   * keeping a second copy of state that could drift from the transcript.
+   */
+  plan?: HostPlanItem[];
   /** The registry id, which is what tells a generic "Ran tool" row which tool it ran. */
   toolId: string | null;
   collapsedByDefault: boolean;

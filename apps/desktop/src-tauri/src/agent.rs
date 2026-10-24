@@ -65,9 +65,14 @@ pub fn close_batch(app: &AppHandle, calls: &[ToolCall]) {
 /// How many of these calls open a row: exactly the ones [`run_one`] or the loop's delegation path
 /// will answer, which is the same test applied before emitting anything. A call for a tool with no
 /// runner is answered with a notice and never becomes a row, so counting it here would put a number
-/// in the header that the batch below it cannot show rows for.
+/// in the header that the batch below it cannot show rows for. A plan is the exception for the same
+/// reason in the other direction: the window keeps `todo_write`'s row in the column rather than
+/// folding it under the header, so counting it would name a child the batch does not hold.
 fn rows_for(calls: &[ToolCall]) -> usize {
-    calls.iter().filter(|call| is_runnable(&call.name)).count()
+    calls
+        .iter()
+        .filter(|call| is_runnable(&call.name) && call.name != "todo_write")
+        .count()
 }
 
 /// The sandbox every tool call in this build goes through: the project folder chosen in Settings — or
@@ -378,6 +383,7 @@ pub(crate) fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
     let kind = match name {
         "read_file" => StepKind::ReadFile,
         "grep_search" => StepKind::SearchContent,
+        "todo_write" => StepKind::Todo,
         "edit_file" => StepKind::EditFile,
         "write_file" => StepKind::CreateFile,
         "apply_patch" => StepKind::EditFile,
@@ -394,6 +400,12 @@ pub(crate) fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
     let shown = subject(name, arguments);
     let mut row = TranscriptStep::running_tool(name, kind, json!({ "subject": shown }));
     row.detail = shown;
+    // The plan rides on the row so the window can draw it. An invalid call is left empty here and
+    // fails in `execute` with the sentence that says which step is wrong.
+    if name == "todo_write" {
+        row.plan = smollm_tools::plan(arguments).unwrap_or_default();
+        row.detail.clear();
+    }
     row
 }
 
@@ -528,7 +540,7 @@ mod tests {
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(smollm_tools::EXECUTABLE.len(), 16);
+        assert_eq!(smollm_tools::EXECUTABLE.len(), 17);
         // The writes are the rows the pill is built from, so none can silently degrade to a generic
         // tool — and a create says create, because a row that reads "Edit file" over a file the run
         // invented would be the transcript contradicting the review under it.
@@ -590,6 +602,19 @@ mod tests {
         let delegated = started_row("spawn_subagent", &json!({ "task": "Find the entry point" }));
         assert_eq!(delegated.kind, StepKind::Subagent);
         assert_eq!(delegated.detail, "Find the entry point");
+        // The plan row carries the list itself, so the header can draw the steps rather than a count.
+        let plan = started_row(
+            "todo_write",
+            &json!({ "items": [
+                { "text": "Read the manifest", "status": "done" },
+                { "text": "Run the tests", "status": "active" }
+            ] }),
+        );
+        assert_eq!(plan.kind, StepKind::Todo);
+        assert_eq!(plan.plan.len(), 2);
+        assert_eq!(plan.plan[1].text, "Run the tests");
+        assert_eq!(plan.plan[1].status, smollm_tools::PlanStatus::Active);
+        assert_eq!(plan.detail, "", "the list is the row, not a chip");
     }
 
     #[test]

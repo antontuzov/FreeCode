@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
+import type { HostPlanItem } from "../lib/ipc";
 import { useNav } from "../state/nav";
 import {
   ctaLabel,
@@ -26,6 +27,9 @@ function StatusMark({ step }: { step: Step }) {
   if (step.notice) return <Icon name="warning" size={13} className="text-muted" />;
   if (step.status === "error" || step.status === "stopped")
     return <Icon name="warning" size={13} className="text-danger" />;
+  // The row that restates the plan is marked with the plan's own glyph, so the list under it and the
+  // header control that keeps it reachable are visibly the same thing.
+  if (step.kind === "todo") return <Icon name="checklist" size={13} className="text-accent-ink" />;
   return <Icon name="check" size={13} className="text-accent-ink" />;
 }
 
@@ -76,7 +80,15 @@ function RefusalRow({ step, locale }: { step: Step; locale: Locale }) {
  * control that looked different from its own caption would be a second thing to learn. */
 const CHIP = "rounded-[var(--radius-sm)] bg-sunken px-1.5 py-0.5 font-mono text-micro text-muted";
 
-function StepRow({ step, locale }: { step: Step; locale: Locale }) {
+function StepRow({
+  step,
+  locale,
+  livePlanId,
+}: {
+  step: Step;
+  locale: Locale;
+  livePlanId?: string | null;
+}) {
   // The host says which rows start folded over their children, and a finished round is the one that
   // needs it: its calls stand on screen while they run and fold under "Ran 8 tools" the moment they are
   // all in, which is what keeps a long run one skimmable line per round rather than a wall of reads.
@@ -179,6 +191,12 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
           </span>
         )}
       </div>
+      {step.kind === "todo" && step.plan && step.plan.length > 0 && step.id === livePlanId && (
+        // Only the plan the run is on now draws in full: an earlier restatement is the line above it,
+        // and repeating the list under each one would make the column a history of the same five
+        // steps. The list lines up under the row's label, so it reads as that row's detail.
+        <PlanList items={step.plan} className="mb-1 ml-5 border-l border-line pl-2" />
+      )}
       {step.files && step.files.length > 1 && (
         // A patch that named several files would otherwise leave the row's one line saying only how
         // many: the list is the files themselves, each with its own count, and each is a way into the
@@ -205,7 +223,7 @@ function StepRow({ step, locale }: { step: Step; locale: Locale }) {
       {hasChildren && open && (
         <ul className="disclosure-panel ml-3 border-l border-line pl-3">
           {step.children!.map((child) => (
-            <StepRow key={child.id} step={child} locale={locale} />
+            <StepRow key={child.id} step={child} locale={locale} livePlanId={livePlanId} />
           ))}
         </ul>
       )}
@@ -300,11 +318,19 @@ function TurnRow({
   );
 }
 
-function RowView({ row, locale }: { row: Row; locale: Locale }) {
+function RowView({
+  row,
+  locale,
+  livePlanId,
+}: {
+  row: Row;
+  locale: Locale;
+  livePlanId?: string | null;
+}) {
   return isTurn(row) ? (
     <TurnRow turn={row} locale={locale} />
   ) : (
-    <StepRow step={row} locale={locale} />
+    <StepRow step={row} locale={locale} livePlanId={livePlanId} />
   );
 }
 
@@ -370,6 +396,118 @@ function waitKey(seconds: number): string {
   return "transcript.keepGoing.elapsed";
 }
 
+/**
+ * The newest plan any row in the run stated, children included, with the row that stated it. A tool
+ * row lands under its round's batch header, so the list is not always in the top-level order —
+ * walking the children is what keeps the last plan the one the run actually last wrote. The row's id
+ * is what lets the column draw that one list in full and leave the earlier restatements as a line.
+ */
+function latestPlan(rows: Row[]): { id: string; items: HostPlanItem[] } | null {
+  let found: { id: string; items: HostPlanItem[] } | null = null;
+  for (const row of rows) {
+    if (isTurn(row)) continue;
+    if (row.plan?.length) found = { id: row.id, items: row.plan };
+    if (row.children?.length) found = latestPlan(row.children) ?? found;
+  }
+  return found;
+}
+
+/** The steps as the run wrote them: a tick for done, a pulse for the one being worked, a box for the
+ * rest. The panel and the transcript row draw the same list, so the row can be read without opening
+ * anything and the panel is only the place it stays reachable once the row has scrolled away. */
+function PlanList({ items, className }: { items: HostPlanItem[]; className?: string }) {
+  return (
+    <ol className={`plan-list ${className ?? ""}`}>
+      {items.map((item, index) => (
+        <li key={`${index}-${item.text}`} className="plan-row" data-status={item.status}>
+          <span className="plan-mark" aria-hidden>
+            {item.status === "done" ? (
+              <Icon name="tick" size={12} className="text-accent-ink" />
+            ) : item.status === "active" ? (
+              <span className="plan-pulse" />
+            ) : (
+              <span className="plan-box" />
+            )}
+          </span>
+          <span className="plan-text">{item.text}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * The run's plan, behind the header's checklist control. It reports the count on the button, so a
+ * run that is three steps in says so without the panel being opened, and the panel is the list
+ * itself — the steps are the model's words, not the app's summary of them.
+ */
+function PlanButton({ locale, plan }: { locale: Locale; plan: HostPlanItem[] | null }) {
+  const [open, setOpen] = useState(false);
+  // `?plan=1` opens the panel for a capture once the run has a list — the fixture's rows arrive after
+  // the first render, so this waits for them. A panel that only opens on a press would be the one
+  // surface no screenshot could be taken of without driving the mouse.
+  const auto = useRef(new URLSearchParams(window.location.search).get("plan") === "1");
+  useEffect(() => {
+    if (auto.current && plan) {
+      auto.current = false;
+      setOpen(true);
+    }
+  }, [plan]);
+  const done = plan?.filter((item) => item.status === "done").length ?? 0;
+  const total = plan?.length ?? 0;
+  return (
+    <span className="relative">
+      <button
+        type="button"
+        className={`icon-btn gap-1 ${open && plan ? "plan-btn-open" : ""} ${plan ? "" : "opacity-55"}`}
+        aria-label={translate(locale, "transcript.plan.title")}
+        aria-pressed={plan ? open : undefined}
+        aria-disabled={plan ? undefined : true}
+        title={
+          plan
+            ? translate(locale, "transcript.plan.count", { done, total })
+            : translate(locale, "transcript.plan.empty")
+        }
+        onClick={() => {
+          if (plan) setOpen((was) => !was);
+        }}
+      >
+        <Icon name="checklist" />
+        {plan && (
+          <span className="plan-badge font-mono text-micro">
+            {done}/{total}
+          </span>
+        )}
+      </button>
+      {open && plan && (
+        <>
+          <span className="picker-scrim" onClick={() => setOpen(false)} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={translate(locale, "transcript.plan.title")}
+            className="plan-panel"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setOpen(false);
+              }
+            }}
+          >
+            <p className="section-label px-[var(--space-3)] pt-[var(--space-2)]">
+              {translate(locale, "transcript.plan.title")}
+            </p>
+            <PlanList items={plan} />
+            <p className="px-[var(--space-3)] pb-[var(--space-2)] text-fine text-faint">
+              {translate(locale, "transcript.plan.hint")}
+            </p>
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
 export function Transcript({
   locale,
   onPickModel,
@@ -396,6 +534,8 @@ export function Transcript({
   const [flash, setFlash] = useState("");
 
   const checkpoints = useMemo(() => checkpointsOf(rows), [rows]);
+  const latest = useMemo(() => latestPlan(rows), [rows]);
+  const plan = latest?.items ?? null;
 
   // The dash marks the pair at the top of the column, which is the pair the user is looking at.
   const spy = useCallback(() => {
@@ -449,6 +589,10 @@ export function Transcript({
         <h1 className="min-w-0 flex-1 truncate text-ui font-medium text-fg">
           {translate(locale, "transcript.title")}
         </h1>
+        {/* The plan the run keeps, opened from the header the way the reference opens its task list.
+            Until the run has stated one the control is present and quiet: a button that appeared
+            only after the fact would be a control the user never learns is there. */}
+        <PlanButton locale={locale} plan={plan} />
         {/* The skills and extensions this button would manage are not in this build. */}
         <button
           type="button"
@@ -503,7 +647,7 @@ export function Transcript({
                     }}
                   />
                 ) : (
-                  <RowView key={row.id} row={row} locale={locale} />
+                  <RowView key={row.id} row={row} locale={locale} livePlanId={latest?.id} />
                 ),
               )}
             </ul>

@@ -44,6 +44,8 @@ pub enum StepKind {
     ReadFile,
     /// "Search content".
     SearchContent,
+    /// "Updated the plan" — the run restated its todo list, and the row carries the list.
+    Todo,
     /// "Ran tool" for anything else in the registry.
     Tool,
     /// The "Context compressed" divider emitted when older turns are summarized.
@@ -79,6 +81,7 @@ impl StepKind {
             StepKind::CreateFile => "transcript.step.createFile",
             StepKind::ReadFile => "transcript.step.readFile",
             StepKind::SearchContent => "transcript.step.searchContent",
+            StepKind::Todo => "transcript.step.todo",
             StepKind::Tool => "transcript.step.ranTool",
             StepKind::ContextCompressed => "transcript.step.contextCompressed",
             StepKind::Subagent => "transcript.step.subagent",
@@ -118,6 +121,7 @@ pub fn all_i18n_keys() -> Vec<&'static str> {
         CreateFile,
         ReadFile,
         SearchContent,
+        Todo,
         Tool,
         ContextCompressed,
         Subagent,
@@ -230,6 +234,11 @@ pub struct TranscriptStep {
     /// the sum over these; `hunk` remains the single-block form. Empty on a row that wrote nothing.
     #[serde(default)]
     pub files: Vec<EditedFile>,
+    /// The steps the run last stated, when the row is a `todo_write`. It is the list the tool
+    /// accepted, not a summary of it, so the window can draw the plan the model is working from
+    /// instead of re-wording it.
+    #[serde(default)]
+    pub plan: Vec<smollm_tools::PlanItem>,
     /// Set for tool rows: the registry id whose `title` the UI shows when there is no localized
     /// label.
     #[serde(default)]
@@ -248,6 +257,7 @@ impl TranscriptStep {
             diff: None,
             hunk: None,
             files: Vec::new(),
+            plan: Vec::new(),
             tool_id: None,
             // Reasoning rows and finished batches start collapsed, as in the reference shot.
             collapsed_by_default: matches!(kind, StepKind::Processed | StepKind::ToolBatch),

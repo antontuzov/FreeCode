@@ -666,6 +666,88 @@ select.field-input {
   border-color: var(--accent-line);
 }
 
+/* ---- the run's plan ----
+ * The reference opens its task list from the header, so this panel hangs off the header control
+ * rather than from the composer. Same material as the picker: the plan is read while the answer it
+ * describes is still on screen, and a scrim would hide what the steps are about. */
+.plan-panel {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100vw - var(--space-6) * 2));
+  max-height: min(360px, 52vh);
+  overflow-y: auto;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-bg);
+  backdrop-filter: var(--surface-blur);
+  box-shadow: var(--shadow);
+  animation: surface-enter var(--dur-quick) var(--ease-standard);
+}
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-2) var(--space-1);
+}
+.plan-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-fine);
+  line-height: 1.45;
+}
+/* The step being worked on is the one the sentence marks as current: the accent's soft fill, and
+ * the full ink, because it is the line the user is waiting on. A finished step keeps its sentence
+ * at reading contrast but stops competing with it — no strike-through, because the tick is the
+ * statement and a second one would be a second idiom. */
+.plan-row[data-status="active"] {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.plan-row[data-status="done"] {
+  color: var(--text-faint);
+}
+.plan-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 1.45em;
+}
+.plan-box {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 2px;
+}
+.plan-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.plan-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* The count rides inside the control, as the reference's badge does, so the header says "2/5"
+ * without the panel being opened. */
+.plan-badge {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.plan-btn-open {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
 /* ---- the footer's identity menu ----
  * Two columns side by side: the groups on the left, the live group's options on the right. The
  * reference keeps the list visible while you choose inside one of it, so the submenu sits beside the

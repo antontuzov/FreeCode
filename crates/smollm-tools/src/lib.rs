@@ -25,7 +25,10 @@ use std::path::Path;
 
 use smollm_config::agent::shell_governed;
 
-pub use exec::{execute, write_targets, Edit, Executed, Summary, SummaryKey, MAX_RESULT_BYTES};
+pub use exec::{
+    execute, plan, write_targets, Edit, Executed, PlanItem, PlanStatus, Summary, SummaryKey,
+    MAX_PLAN_ITEMS, MAX_RESULT_BYTES,
+};
 pub use registry::{
     executable_specs, find, is_delegated, is_executable, is_runnable, patch_target,
     read_only_specs, registry, summary, tool_specs, ToolCall, ToolDescriptor, DELEGATED,

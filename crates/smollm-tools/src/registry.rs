@@ -130,6 +130,39 @@ pub fn registry() -> Vec<ToolDescriptor> {
             ),
         },
         ToolDescriptor {
+            id: "todo_write",
+            title: "Update plan",
+            description: "Record the plan for this task as a short list of steps and their state. \
+                Call it before starting work that needs more than one call, and again whenever a \
+                step changes: pending while it waits, active while it is the one being worked on, \
+                done once its result is verified. It changes nothing on disk — the list is what the \
+                user reads to see where the run is.",
+            permission: ReadOnly,
+            requires_network: false,
+            input_schema: s(
+                json!({
+                    "items": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 20,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": { "type": "string" },
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "active", "done"]
+                                }
+                            },
+                            "required": ["text", "status"],
+                            "additionalProperties": false
+                        }
+                    }
+                }),
+                &["items"],
+            ),
+        },
+        ToolDescriptor {
             id: "codebase_search",
             title: "Search codebase",
             description: "Semantic search over the current workspace.",
@@ -480,9 +513,9 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
         .collect()
 }
 
-/// The tools this build can actually run: the four workspace reads, the three writes, the shell and
-/// the three project runners, the three read-only git calls, and the two calls that reach the
-/// internet, whose executors live in [`crate::exec`] and [`crate::web`].
+/// The tools this build can actually run: the four workspace reads, the plan the run keeps, the
+/// three writes, the shell and the three project runners, the three read-only git calls, and the two
+/// calls that reach the internet, whose executors live in [`crate::exec`] and [`crate::web`].
 ///
 /// The rest of the registry is a declaration with no verb behind it — a schema, a permission class,
 /// and nothing that touches the disk. Offering one of those would invite the model to ask for a
@@ -498,6 +531,7 @@ pub const EXECUTABLE: &[&str] = &[
     "list_dir",
     "glob",
     "grep_search",
+    "todo_write",
     "write_file",
     "edit_file",
     "apply_patch",
@@ -642,6 +676,18 @@ pub fn summary(tool_id: &str, arguments: &Value) -> String {
         {
             Some(path) => format!("Write {path}"),
             None => "Apply a patch".to_string(),
+        },
+        // The list is the sentence: an approval question about a plan has to show the steps it would
+        // record, since the plan is the whole of what the call does.
+        "todo_write" => match arguments.get("items").and_then(Value::as_array) {
+            Some(items) => {
+                let steps: Vec<&str> = items
+                    .iter()
+                    .filter_map(|item| item.get("text").and_then(Value::as_str))
+                    .collect();
+                format!("Plan {} steps: {}", steps.len(), steps.join("; "))
+            }
+            None => "Update the plan".to_string(),
         },
         other => format!("{other} {arguments}"),
     }
@@ -920,11 +966,12 @@ mod tests {
                 "list_dir",
                 "glob",
                 "grep_search",
+                "todo_write",
                 "git_status",
                 "git_diff",
                 "git_log"
             ],
-            "the workspace reads and the git reads, in registry order, and nothing else"
+            "the workspace reads, the plan and the git reads, in registry order, and nothing else"
         );
         // The schema asks for the one thing the loop reads, and no field it would ignore.
         let spawn = find("spawn_subagent").expect("declared");

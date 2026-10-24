@@ -2557,11 +2557,12 @@ mod tests {
                 "list_dir",
                 "glob",
                 "grep_search",
+                "todo_write",
                 "git_status",
                 "git_diff",
                 "git_log"
             ],
-            "the plan-mode run gets the read-only seven and no write"
+            "the plan-mode run gets the reads and the plan list, and no write"
         );
     }
 

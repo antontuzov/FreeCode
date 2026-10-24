@@ -193,6 +193,7 @@ The dev URL therefore accepts seeds that no shipped control ever sets:
 | Seed | Opens |
 | --- | --- |
 | `?fixture=1` | a scripted run, so the transcript and inspector render with nothing to show yet |
+| `?plan=1` | the run's plan panel, opened over the fixture's list |
 | `?collapsed=<groups>` | the inspector's lower groups, which the status card otherwise pushes below the fold |
 | `?settings=<page>`, `?q=<query>` | a Settings page, and the search field |
 | `?review=1`, `?find=<text>`, `?scope=all`, `?outline=1` | the review panel, its find field, its scope and its fold |
