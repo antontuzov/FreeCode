@@ -59,7 +59,7 @@ pub fn models() -> &'static [FreeModel] {
         FreeModel {
             id: "big-pickle",
             label: "Big Pickle",
-            provider: "OpenCode",
+            provider: "OpenFree",
             upstream: None,
             priority: 1,
         },

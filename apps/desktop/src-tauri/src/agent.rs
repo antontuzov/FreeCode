@@ -227,17 +227,17 @@ pub(crate) fn run_one(
 
 /// What a call wrote, as the row and the ledger need it: the call's totals, the chip when every
 /// change landed in one file, and the per-file list every write is staged from.
-struct Written {
-    diff: DiffStat,
-    detail: String,
-    hunk: Option<Hunk>,
-    files: Vec<EditedFile>,
+pub(crate) struct Written {
+    pub(crate) diff: DiffStat,
+    pub(crate) detail: String,
+    pub(crate) hunk: Option<Hunk>,
+    pub(crate) files: Vec<EditedFile>,
 }
 
 /// `None` for a call that wrote nothing. A single file with a single hunk keeps the one-`hunk` form
 /// the row has always had; a file changed in two places, or a patch that named two files, is listed
 /// per file so the review can number each block against the file it belongs to.
-fn written(edits: &[Edit]) -> Option<Written> {
+pub(crate) fn written(edits: &[Edit]) -> Option<Written> {
     let first = edits.first()?;
     let diff = DiffStat {
         lines_added: edits.iter().map(|edit| edit.added).sum(),

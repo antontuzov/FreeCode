@@ -167,9 +167,13 @@ pub enum NoticeCode {
     /// the picker named.
     FreeModelFallback,
     /// The prompt asked for the agent loop and the route that answers it carries none of this app's
-    /// tools, so the run's work happens out of this window's sight. The OpenCode service is the route
-    /// this names: it does write — measured on disk, in its own working directory rather than the
-    /// project's — which is exactly the change Review cannot show and the undo journal cannot reach.
+    /// tools, so the run's work happens out of this window's sight.
+    ///
+    /// The OpenCode service named this once, and was wrong to: it writes into its own working
+    /// directory, which Review could not show and the undo journal could not reach. It now runs its
+    /// session inside the project folder and asks before every write, so the change lands in this
+    /// window's rows, diff and Review panel — and nothing emits this notice. The variant stays because
+    /// a conversation filed while it did fire has to read back the way it was seen.
     RouteHasNoTools,
 }
 

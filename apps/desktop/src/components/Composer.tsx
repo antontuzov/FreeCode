@@ -45,8 +45,9 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   // A delegation is a second model run, so the tooltip has to name it whenever the switch that pays
   // for it is on — the base sentences price a run in tool results and would leave it out.
   const subagents = useSettings((s) => s.doc?.approvals.subagentsEnabled ?? false);
-  // A free model is answered through the OpenCode service, and that route carries none of this app's
-  // tools, so the badge may not promise a run that changes files while one is what the picker names.
+  // A free model is answered by the OpenCode service, which now works in the project folder and has its
+  // writes gated and rowed like a local run's — so the badge may promise a run that changes files. What
+  // that route cannot give is a before-image, and the title says so under the picker's name.
   const free = useSettings((s) => s.doc?.freeModel ?? null);
   // The agent's badge: what every prompt of this app is allowed to do, and what it costs. It is not a
   // control — the mode is the app, not a per-question opt-in — so the glyph stays lit and the title

@@ -4,7 +4,7 @@
 //! refused by their gateway. The desktop app this module talks to is that runtime — it keeps a
 //! daemon on loopback, writes its address and password to a state file under the user's home, and
 //! relays the turn with the handshake the gateway expects. Using it is using the copy the user
-//! already installed, not a way around it: the page says the OpenCode app has to be running, and a
+//! already installed, not a way around it: the page says the free-model service has to be running, and a
 //! turn without it takes the gateway route instead.
 //!
 //! The password in that file is a local secret. It is read when a request needs it, lives in
@@ -12,12 +12,13 @@
 //! back. The state file is untrusted input: only a loopback address is accepted, because sending that
 //! password anywhere else would hand a local credential to whatever the file names.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{json, Value};
+use smollm_core::transcript::Hunk;
 use smollm_llama::{Reply, ReplyDelta, StreamControl};
 
 /// The provider id the local service's own model list uses.
@@ -102,38 +103,38 @@ fn state_file() -> Option<PathBuf> {
 /// Read the state file, refusing anything that is not a loopback service.
 fn parse_state(raw: &str) -> Result<Service, String> {
     let value: Value = serde_json::from_str(raw)
-        .map_err(|e| format!("the OpenCode service state is unreadable: {e}"))?;
+        .map_err(|e| format!("the free-model service state is unreadable: {e}"))?;
     let base_url = value
         .get("url")
         .and_then(Value::as_str)
-        .ok_or("the OpenCode service state names no address")?
+        .ok_or("the free-model service state names no address")?
         .trim_end_matches('/')
         .to_string();
     let password = value
         .get("password")
         .and_then(Value::as_str)
-        .ok_or("the OpenCode service state names no password")?
+        .ok_or("the free-model service state names no password")?
         .to_string();
     if password.is_empty() {
-        return Err("the OpenCode service state holds an empty password".into());
+        return Err("the free-model service state holds an empty password".into());
     }
     // A state file that named a public host would have this app send a local credential to it.
     let loopback = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"]
         .iter()
         .any(|prefix| base_url.starts_with(prefix));
     if !loopback {
-        return Err("the OpenCode service state does not point at a loopback address".into());
+        return Err("the free-model service state does not point at a loopback address".into());
     }
     Ok(Service { base_url, password })
 }
 
 /// The service the state file describes, without proving it answers.
 pub fn service() -> Result<Service, String> {
-    let path =
-        state_file().ok_or("this machine has no home directory to find the OpenCode service in")?;
+    let path = state_file()
+        .ok_or("this machine has no home directory to find the free-model service in")?;
     let raw = std::fs::read_to_string(&path).map_err(|_| {
-        "the OpenCode app on this Mac is not running, so its free models are not reachable. \
-         Open OpenCode once, or pick another free model."
+        "the free-model service on this Mac is not running, so the free models are not reachable. \
+         Start it once from the free-models app, or pick another free model."
             .to_string()
     })?;
     parse_state(&raw)
@@ -189,21 +190,253 @@ pub async fn status() -> Status {
 
 /// The tools a turn from here may not use.
 ///
-/// The app already owns a tool loop against the project the user picked; a chat answered by OpenCode
-/// answers in prose, and a model that silently wrote into the home directory would be doing work the
-/// window never showed. The list is the one measured to keep the free tier's handshake intact —
-/// denying *every* tool, or the wildcard action, makes OpenCode's gateway refuse the turn, so this
-/// names writes and the shell rather than inventing a rule the service does not honour.
+/// The shell, the network and the browser are refused however this session was opened: this app
+/// prices those through their own switches, and a free-model turn has no say in what they are set to.
+fn denials() -> Value {
+    json!(["shell", "bash", "webfetch", "browser"]
+        .iter()
+        .map(|action| json!({"action": action, "resource": "*", "effect": "deny"}))
+        .collect::<Vec<_>>())
+}
+
+/// The ruleset for a session bound to a folder the window can show.
+///
+/// Writes are put to `ask` rather than to `allow`, because `allow` is not confinement: measured
+/// against the live service, `{action: "write", resource: "*", effect: "allow"}` wrote a path outside
+/// the session's directory, and `{action: "write", resource: "<directory>", …}` — with or without a
+/// `/**` suffix — took the write tool away from the model entirely. `ask` keeps the tool and hands
+/// the decision to the caller of [`stream_turn`], which answers with the same sandbox rule the app's
+/// own tool loop applies. The service then refuses the call itself, and says why, in the words the
+/// app sent with the refusal.
+fn project_permissions() -> Value {
+    let mut ruleset = ["edit", "write", "patch"]
+        .iter()
+        .map(|action| json!({"action": action, "resource": "*", "effect": "ask"}))
+        .collect::<Vec<_>>();
+    ruleset.extend(denials().as_array().into_iter().flatten().cloned());
+    json!(ruleset)
+}
+
+/// The ruleset for a session with no folder to work in: nothing may touch disk, because a change
+/// nobody can show is a change nobody can take back.
+///
+/// The list is the one measured to keep the free tier's handshake intact — denying *every* tool, or
+/// the wildcard action, makes OpenCode's gateway refuse the turn, so this names writes and the shell
+/// rather than inventing a rule the service does not honour.
 fn read_only_permissions() -> Value {
-    json!([
-        {"action": "edit", "resource": "*", "effect": "deny"},
-        {"action": "write", "resource": "*", "effect": "deny"},
-        {"action": "patch", "resource": "*", "effect": "deny"},
-        {"action": "shell", "resource": "*", "effect": "deny"},
-        {"action": "bash", "resource": "*", "effect": "deny"},
-        {"action": "webfetch", "resource": "*", "effect": "deny"},
-        {"action": "browser", "resource": "*", "effect": "deny"}
-    ])
+    let mut ruleset = ["edit", "write", "patch"]
+        .iter()
+        .map(|action| json!({"action": action, "resource": "*", "effect": "deny"}))
+        .collect::<Vec<_>>();
+    ruleset.extend(denials().as_array().into_iter().flatten().cloned());
+    json!(ruleset)
+}
+
+/// One file a service call changed, as the patch the service wrote for it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Change {
+    /// As the service names it: relative to the session's directory for a path inside it.
+    pub path: String,
+    /// `added`, `modified` or `deleted`, from the service's own field.
+    pub status: String,
+    pub added: u32,
+    pub removed: u32,
+    pub hunks: Vec<Hunk>,
+}
+
+impl Change {
+    /// Whether the file is one this run made rather than one it changed.
+    ///
+    /// Read off the status and not off the request's action, because measured against the live service
+    /// the action is `edit` for both: the same tool writes a new file and rewrites an old one, and its
+    /// answer says which happened. A row that promised "created" from the action alone would promise it
+    /// of every edit.
+    pub fn is_created(&self) -> bool {
+        self.status == "added"
+    }
+}
+
+/// What the service asks the app before one of its calls touches disk.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Request {
+    pub id: String,
+    /// The id of the tool call the request belongs to, which is what closes the row it opens: the
+    /// service reports the call's own outcome under this id.
+    pub call: Option<String>,
+    pub action: String,
+    /// The paths the call named. The app decides on these, so they are kept even though a ruleset
+    /// that asks over every file in the request answers with the first one.
+    pub resources: Vec<String>,
+    pub changes: Vec<Change>,
+}
+
+/// The app's answer to one [`Request`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum Verdict {
+    Allow,
+    /// Refused, with the sentence the service hands back to the model. The service tells the model
+    /// the call was refused either way; the words here are what it is told about why.
+    Refuse(String),
+}
+
+impl Verdict {
+    fn decision(&self) -> &'static str {
+        match self {
+            Self::Allow => "once",
+            Self::Refuse(_) => "reject",
+        }
+    }
+
+    fn message(&self) -> Option<&str> {
+        match self {
+            Self::Allow => None,
+            Self::Refuse(why) => Some(why),
+        }
+    }
+}
+
+/// The call a `session.tool.success` or `session.tool.failed` event closed. Its id is the one the
+/// permission request named, which is what ties a write the app answered to the outcome it waited for.
+fn event_call(event: &Value) -> Option<String> {
+    event
+        .get("data")
+        .and_then(|d| d.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// The files a request or a diff entry names, with their patches.
+fn parse_changes(value: &Value) -> Vec<Change> {
+    let Some(entries) = value.as_array() else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .map(|entry| Change {
+            path: entry
+                .get("file")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            status: entry
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            added: entry.get("additions").and_then(Value::as_u64).unwrap_or(0) as u32,
+            removed: entry.get("deletions").and_then(Value::as_u64).unwrap_or(0) as u32,
+            hunks: hunks_from(
+                entry
+                    .get("patch")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            ),
+        })
+        .collect()
+}
+
+/// One hunk of a patch: the numbers its header gave, and the body lines under it.
+struct Block {
+    /// The hunk's first old-file line, 1-based, as `@@ -a,b +c,d @@` wrote `a`.
+    old_start: u32,
+    /// How many old lines it spans; the body's ` ` and `-` lines are exactly these.
+    old_count: u32,
+    body: Vec<String>,
+}
+
+impl Block {
+    /// The line the change opens on, 1-based in the file as it stood before the write — the number
+    /// [`Hunk::at`] carries, and the same rule the app's own patch tool works to. An empty old range
+    /// is a pure insertion, so its block opens on the line the insert follows.
+    fn opening_line(&self) -> u32 {
+        if self.old_count == 0 {
+            return self.old_start + 1;
+        }
+        self.old_start
+            + self
+                .body
+                .iter()
+                .take_while(|line| line.starts_with(' '))
+                .count() as u32
+    }
+}
+
+/// Read a patch into the blocks the review draws.
+///
+/// Both dialects the service writes parse here: `git`'s `diff --git …` headers, and the `Index:`
+/// form the permission request carries. Neither header is kept — the file the change belongs to comes
+/// from the entry that carried the patch, and quoting header text into a hunk would print a line that
+/// is not in the file.
+fn hunks_from(patch: &str) -> Vec<Hunk> {
+    let mut blocks: Vec<Block> = Vec::new();
+    for line in patch.lines() {
+        if let Some(header) = line.strip_prefix("@@ ") {
+            // `@@ -0,0 +1,234 @@` and the `@@ -1 +1 @@` form a one-line range writes without the counts.
+            let range = header
+                .split_whitespace()
+                .next()
+                .and_then(|side| side.strip_prefix('-'))
+                .unwrap_or_default();
+            let (start, count) = range.split_once(',').unwrap_or((range, "1"));
+            blocks.push(Block {
+                old_start: start.parse().unwrap_or(0),
+                old_count: count.parse().unwrap_or(0),
+                body: Vec::new(),
+            });
+            continue;
+        }
+        let Some(block) = blocks.last_mut() else {
+            continue;
+        };
+        if line.starts_with(['+', '-', ' ']) {
+            block.body.push(line.to_string());
+        } else if line.is_empty() {
+            // A blank context line, stored as the single space a diff should have written it with, so
+            // the review's first character is always a prefix it can read a gutter from.
+            block.body.push(" ".to_string());
+        }
+    }
+    blocks
+        .into_iter()
+        .map(|block| Hunk {
+            at: block.opening_line(),
+            lines: block.body.join("\n"),
+        })
+        .collect()
+}
+
+/// The request a `permission.asked` event carries.
+fn permission_request(event: &Value) -> Option<Request> {
+    let data = event.get("data")?;
+    Some(Request {
+        id: data.get("id").and_then(Value::as_str)?.to_string(),
+        call: data
+            .get("source")
+            .and_then(|s| s.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        action: data
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        resources: data
+            .get("resources")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        changes: parse_changes(
+            data.get("metadata")
+                .and_then(|m| m.get("files"))
+                .unwrap_or(&Value::Null),
+        ),
+    })
 }
 
 async fn body_message(response: reqwest::Response) -> String {
@@ -230,39 +463,81 @@ async fn body_message(response: reqwest::Response) -> String {
         .map(str::to_string)
         .unwrap_or_else(|| text.trim().to_string());
     if message.is_empty() {
-        format!("the OpenCode service answered {status}")
+        format!("the free-model service answered {status}")
     } else {
         message
     }
 }
 
-/// Open a session bound to `model`. The id is what later prompts on this conversation continue.
-pub async fn create_session(service: &Service, model: &str) -> Result<String, String> {
-    let body = json!({
+/// Open a session bound to `model`, working in `directory` when one is named.
+///
+/// The directory is the whole difference between a run this window can follow and one it cannot: the
+/// service writes where the session says it works, so binding it to the project folder is what puts
+/// the change somewhere the review, the artifact list and the desktop's own opener can reach.
+/// The id is what later prompts on this conversation continue.
+pub async fn create_session(
+    service: &Service,
+    model: &str,
+    directory: Option<&Path>,
+) -> Result<String, String> {
+    let mut body = json!({
         "title": TITLE,
         "model": {"id": model, "providerID": PROVIDER},
-        "permissions": read_only_permissions(),
+        "permissions": if directory.is_some() { project_permissions() } else { read_only_permissions() },
     });
+    if let Some(dir) = directory {
+        body["location"] = json!({ "directory": dir });
+    }
     let response = service
         .post(&service.client(), "/api/session")
         .json(&body)
         .timeout(ACCEPT_TIMEOUT)
         .send()
         .await
-        .map_err(|e| format!("the OpenCode app would not open a session: {e}"))?;
+        .map_err(|e| format!("the free-model service would not open a session: {e}"))?;
     if !response.status().is_success() {
         return Err(body_message(response).await);
     }
     let value: Value = response
         .json()
         .await
-        .map_err(|e| format!("the OpenCode app's session answer was unreadable: {e}"))?;
+        .map_err(|e| format!("the free-model service's session answer was unreadable: {e}"))?;
     value
         .get("data")
         .and_then(|d| d.get("id"))
         .and_then(Value::as_str)
         .map(str::to_string)
-        .ok_or_else(|| "the OpenCode app opened a session without naming it".to_string())
+        .ok_or_else(|| "the free-model service opened a session without naming it".to_string())
+}
+
+/// Answer one permission request.
+///
+/// A request nobody answers holds the run: the service waits for the decision before the call goes
+/// through, and the answer here is the only one it will get from this app. A refusal to deliver it is
+/// therefore an error rather than a detail — the turn would otherwise sit until the idle timeout
+/// called it a dead service.
+pub async fn reply(
+    service: &Service,
+    session: &str,
+    request: &str,
+    verdict: &Verdict,
+) -> Result<(), String> {
+    let body = json!({ "decision": verdict.decision(), "message": verdict.message() });
+    let response = service
+        .post(
+            &service.client(),
+            &format!("/api/session/{session}/permission/{request}/reply"),
+        )
+        .json(&body)
+        .timeout(ACCEPT_TIMEOUT)
+        .send()
+        .await
+        .map_err(|e| format!("the free-model service's request could not be answered: {e}"))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(body_message(response).await)
+    }
 }
 
 /// Whether a session the conversation remembers is still one the service holds.
@@ -272,7 +547,7 @@ pub async fn session_lives(service: &Service, session: &str) -> Result<bool, Str
         .timeout(PROBE_TIMEOUT)
         .send()
         .await
-        .map_err(|e| format!("the OpenCode app could not be asked about the session: {e}"))?;
+        .map_err(|e| format!("the free-model service could not be asked about the session: {e}"))?;
     Ok(response.status().is_success())
 }
 
@@ -285,7 +560,7 @@ pub async fn switch_model(service: &Service, session: &str, model: &str) -> Resu
         .timeout(ACCEPT_TIMEOUT)
         .send()
         .await
-        .map_err(|e| format!("the OpenCode app would not switch the session's model: {e}"))?;
+        .map_err(|e| format!("the free-model service would not switch the session's model: {e}"))?;
     if response.status().is_success() {
         Ok(())
     } else {
@@ -361,8 +636,25 @@ fn event_failure(event: &Value) -> Option<String> {
         .get("message")
         .and_then(Value::as_str)
         .or_else(|| error.as_str())
-        .unwrap_or("the OpenCode service could not answer this turn");
+        .unwrap_or("the free-model service could not answer this turn");
     Some(message.to_string())
+}
+
+/// What became of one write the service asked about.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Fate {
+    /// This app refused it, with the sentence the service then told the model.
+    Refused(String),
+    /// The call ran, and the service said so under the same id it asked about.
+    Applied,
+    /// The call this app approved did not land. The change the request promised is not on disk.
+    Failed,
+}
+
+/// One write, reported to the window when its fate is known: what was asked, and what became of it.
+pub struct Write<'a> {
+    pub request: &'a Request,
+    pub fate: Fate,
 }
 
 /// Stream one turn through the local service.
@@ -370,12 +662,19 @@ fn event_failure(event: &Value) -> Option<String> {
 /// The event stream is opened before the prompt is posted — the service writes `server.connected`
 /// only once it has subscribed — so no delta can be missed between the prompt and the subscription.
 /// Only events naming this session are considered; the stream carries every session the app has open.
+///
+/// `gate` answers every write the service asks about, and `on_write` reports each one's fate once it
+/// is known: at the refusal, or at the call's own success or failure. The pair is what lets a run on
+/// this route have rows, a pill that moves, and a review that says what changed — see
+/// [`project_permissions`] for why the asking, rather than an allow rule, is the confinement.
 pub async fn stream_turn(
     service: &Service,
     session: &str,
     text: &str,
     stop: &AtomicBool,
     mut on_delta: impl FnMut(&[ReplyDelta]) -> StreamControl,
+    mut gate: impl FnMut(&Request) -> Verdict,
+    mut on_write: impl FnMut(&Write),
 ) -> Result<Reply, String> {
     let client = service.client();
     let mut events = service
@@ -383,7 +682,7 @@ pub async fn stream_turn(
         .send()
         .await
         .and_then(|response| response.error_for_status())
-        .map_err(|e| format!("the OpenCode app would not open its event stream: {e}"))?;
+        .map_err(|e| format!("the free-model service would not open its event stream: {e}"))?;
 
     // Wait until the subscription is acknowledged, not merely dialled.
     let mut buffer: Vec<u8> = Vec::new();
@@ -392,9 +691,11 @@ pub async fn stream_turn(
         let chunk = events
             .chunk()
             .await
-            .map_err(|e| format!("the OpenCode event stream stopped: {e}"))?;
+            .map_err(|e| format!("the free-model service's event stream stopped: {e}"))?;
         let Some(chunk) = chunk else {
-            return Err("the OpenCode event stream closed before the turn began".into());
+            return Err(
+                "the free-model service's event stream closed before the turn began".into(),
+            );
         };
         buffer.extend_from_slice(&chunk);
         while let Some(event) = take_event(&mut buffer) {
@@ -410,7 +711,7 @@ pub async fn stream_turn(
         .timeout(ACCEPT_TIMEOUT)
         .send()
         .await
-        .map_err(|e| format!("the OpenCode app would not take the prompt: {e}"))?;
+        .map_err(|e| format!("the free-model service would not take the prompt: {e}"))?;
     if !response.status().is_success() {
         return Err(body_message(response).await);
     }
@@ -422,6 +723,9 @@ pub async fn stream_turn(
     let mut finish = None;
     let mut last_event = Instant::now();
     let mut stopped = false;
+    // Writes this app answered, waiting on the call's own outcome. Keyed by nothing but that order
+    // would pair a write with some other call's report, so the calls are matched by their ids.
+    let mut asked: Vec<Request> = Vec::new();
 
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -430,12 +734,12 @@ pub async fn stream_turn(
             break;
         }
         let chunk = tokio::select! {
-            chunk = events.chunk() => chunk.map_err(|e| format!("the OpenCode event stream stopped: {e}"))?,
+            chunk = events.chunk() => chunk.map_err(|e| format!("the free-model service's event stream stopped: {e}"))?,
             _ = tokio::time::sleep(STOP_POLL) => {
                 if last_event.elapsed() > IDLE_TIMEOUT {
                     return Err(
-                        "the OpenCode app stopped sending events while this turn was running. \
-                         Its window or the service may have quit; start OpenCode and try again."
+                        "the free-model service stopped sending events while this turn was running. \
+                         It may have quit; start it again and try again."
                             .into(),
                     );
                 }
@@ -443,7 +747,9 @@ pub async fn stream_turn(
             }
         };
         let Some(chunk) = chunk else {
-            return Err("the OpenCode event stream closed before the turn finished".into());
+            return Err(
+                "the free-model service's event stream closed before the turn finished".into(),
+            );
         };
         last_event = Instant::now();
         buffer.extend_from_slice(&chunk);
@@ -523,9 +829,60 @@ pub async fn stream_turn(
                 }
                 "session.step.failed" | "session.execution.failed" => {
                     let why = event_failure(&event).unwrap_or_else(|| {
-                        "the OpenCode service could not answer this turn".into()
+                        "the free-model service could not answer this turn".into()
                     });
                     return Err(why);
+                }
+                // The service's own question before a write lands. `ask` is the ruleset that keeps the
+                // tool and still confines it, so this arm is where the app applies its sandbox to a
+                // route that does not run through its tool loop.
+                "permission.asked" => {
+                    let Some(request) = permission_request(&event) else {
+                        continue;
+                    };
+                    let verdict = gate(&request);
+                    reply(service, session, &request.id, &verdict).await?;
+                    match verdict {
+                        Verdict::Allow => {
+                            if request.call.is_none() {
+                                // A request that named no call has no outcome event to wait for, so
+                                // the approval is the last word this app gets on it. It is reported
+                                // rather than dropped: the alternative is a write the window never
+                                // mentions.
+                                on_write(&Write {
+                                    request: &request,
+                                    fate: Fate::Applied,
+                                });
+                            } else {
+                                asked.push(request);
+                            }
+                        }
+                        Verdict::Refuse(why) => on_write(&Write {
+                            request: &request,
+                            fate: Fate::Refused(why),
+                        }),
+                    }
+                }
+                "session.tool.success" | "session.tool.failed" => {
+                    let Some(call) = event_call(&event) else {
+                        continue;
+                    };
+                    // Only the calls this app answered have rows to close; every other tool the
+                    // service runs — its reads, its searches — arrives here unasked and is skipped.
+                    let Some(index) = asked.iter().position(|r| r.call.as_deref() == Some(&call))
+                    else {
+                        continue;
+                    };
+                    let request = asked.remove(index);
+                    let fate = if kind == "session.tool.success" {
+                        Fate::Applied
+                    } else {
+                        Fate::Failed
+                    };
+                    on_write(&Write {
+                        request: &request,
+                        fate,
+                    });
                 }
                 "session.execution.succeeded" => done = true,
                 _ => {}
@@ -616,5 +973,112 @@ mod tests {
             "data": {"finish": "stop", "tokens": {"input": 10, "output": 4, "reasoning": 6}}
         });
         assert_eq!(step_tokens(&event), (Some(10), Some(20)));
+    }
+
+    /// A `permission.asked` as the live service wrote it (OpenCode 2.1.3, measured 2026-10-24): a new
+    /// file, whose action is still `edit`, with its patch in the `Index:` dialect.
+    const CREATED: &str = r#"{
+        "id": "per_16e1f9676001Sf6DFM9Esen6nh",
+        "sessionID": "ses_e91e07c0cffezlrISpD50iiT10",
+        "action": "edit",
+        "resources": ["page.html"],
+        "save": ["*"],
+        "metadata": {"files": [{
+            "file": "page.html",
+            "status": "added",
+            "additions": 10,
+            "deletions": 0,
+            "patch": "Index: page.html\n===================================================================\n--- page.html\n+++ page.html\n@@ -0,0 +1,10 @@\n+<!DOCTYPE html>\n+<html lang=\"en\">\n"
+        }]},
+        "source": {"type": "tool", "messageID": "msg_1", "id": "chatcmpl-tool-8959ad70926794a9"}
+    }"#;
+
+    /// The same event for a line changed inside an existing file.
+    const EDITED: &str = r#"{
+        "id": "per_16e1f9677001g51hroYSehcZvS",
+        "sessionID": "ses_e91e07c0cffezlrISpD50iiT10",
+        "action": "edit",
+        "resources": ["notes.md"],
+        "metadata": {"files": [{
+            "file": "notes.md",
+            "status": "modified",
+            "additions": 1,
+            "deletions": 1,
+            "patch": "Index: notes.md\n===================================================================\n--- notes.md\n+++ notes.md\n@@ -1,3 +1,3 @@\n line one\n-line two\n+LINE TWO EDITED\n line three\n"
+        }]},
+        "source": {"type": "tool", "id": "chatcmpl-tool-8d0d1099ca06efd1"}
+    }"#;
+
+    fn request(raw: &str) -> Request {
+        permission_request(&json!({"type": "permission.asked", "data": serde_json::from_str::<Value>(raw).unwrap()}))
+            .expect("the event names a request")
+    }
+
+    #[test]
+    fn a_request_names_its_call_and_its_files() {
+        let created = request(CREATED);
+        assert_eq!(created.id, "per_16e1f9676001Sf6DFM9Esen6nh");
+        assert_eq!(created.action, "edit");
+        assert_eq!(created.resources, ["page.html"]);
+        // The id the call's own success or failure is reported under, which is what closes the row.
+        assert_eq!(
+            created.call.as_deref(),
+            Some("chatcmpl-tool-8959ad70926794a9")
+        );
+        assert_eq!(created.changes.len(), 1);
+        assert_eq!(created.changes[0].path, "page.html");
+        assert_eq!(created.changes[0].added, 10);
+        assert_eq!(created.changes[0].removed, 0);
+        assert!(created.changes[0].is_created());
+        assert!(!request(EDITED).changes[0].is_created());
+    }
+
+    #[test]
+    fn a_patches_header_becomes_the_line_the_review_numbers_from() {
+        // A pure insertion has no old lines, so its block opens on the first line it writes; an edit
+        // one line into a file opens past the one line of context the patch carries above it.
+        assert_eq!(request(CREATED).changes[0].hunks[0].at, 1);
+        assert_eq!(request(EDITED).changes[0].hunks[0].at, 2);
+        assert_eq!(
+            request(EDITED).changes[0].hunks[0].lines,
+            " line one\n-line two\n+LINE TWO EDITED\n line three"
+        );
+    }
+
+    #[test]
+    fn a_git_patch_reads_the_same_way() {
+        // The session's diff endpoint writes git's dialect rather than the `Index:` one; both reach
+        // the same parser, so a change is reported the same however it was asked about.
+        let hunks = hunks_from(
+            "diff --git a/extra.txt b/extra.txt\nnew file mode 100644\nindex 0000000..814f4a4\n\
+             --- /dev/null\n+++ b/extra.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n",
+        );
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(hunks[0].at, 1);
+        assert_eq!(hunks[0].lines, "+one\n+two");
+    }
+
+    #[test]
+    fn asking_keeps_the_write_tool_and_denies_the_rest() {
+        fn effects<'a>(ruleset: &'a Value, action: &str) -> Vec<&'a str> {
+            ruleset
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|rule| rule["action"] == action)
+                .map(|rule| rule["effect"].as_str().unwrap())
+                .collect()
+        }
+        let project = project_permissions();
+        // `ask` is the confinement: `allow` was measured writing outside the session's directory, and
+        // a scoped `allow` took the tool away from the model altogether.
+        assert_eq!(effects(&project, "edit"), ["ask"]);
+        assert_eq!(effects(&project, "write"), ["ask"]);
+        assert_eq!(effects(&project, "patch"), ["ask"]);
+        for action in ["shell", "bash", "webfetch", "browser"] {
+            assert_eq!(effects(&project, action), ["deny"]);
+        }
+        // A session with no folder to show has no change to report, so it takes nothing.
+        assert_eq!(effects(&read_only_permissions(), "edit"), ["deny"]);
     }
 }

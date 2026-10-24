@@ -45,7 +45,8 @@ use smollm_llama::{
     RemoteAccess, Reply, ReplyDelta, ServerHandle, StreamControl, IMAGE_TOKEN_CAP,
 };
 use smollm_models::{gguf, IntegrityStatus, ModelEntry};
-use smollm_tools::{SandboxPolicy, Summary, SummaryKey};
+use smollm_tools::exec::EditHunk;
+use smollm_tools::{Access, Edit, SandboxPolicy, Summary, SummaryKey};
 
 use crate::agent::{self, Ran};
 use crate::free_models::FreeModel;
@@ -217,6 +218,13 @@ struct FreeTurn {
 /// session, which is when the system prompt has to be carried to it; `replay` is true for the one
 /// turn that had to open a fresh service session under a conversation the app already holds: its
 /// prompt then carries the exchange the service has not seen.
+///
+/// `directory` is the folder the session works in — the project root the rest of this app sandboxes to.
+/// It is what makes the route's change visible: the service writes where its session says it works, so
+/// binding the folder is what puts a file somewhere Review can show, the inspector can list, and the
+/// desktop can open. Writes there are then put to this app, which decides them by the same rule its own
+/// loop applies — see [`opencode::project_permissions`]. `None` is a machine whose project folder could
+/// not be read: the session opens with nothing it can write, rather than writing where nobody can see.
 #[derive(Clone)]
 struct OpenCodeTurn {
     service: opencode::Service,
@@ -225,6 +233,7 @@ struct OpenCodeTurn {
     session: Option<String>,
     fresh: bool,
     replay: bool,
+    directory: Option<PathBuf>,
 }
 
 /// Where one turn is answered.
@@ -260,7 +269,7 @@ impl Answer {
             Self::Local(turn) => format!("{} ({})", turn.model.name, turn.view.packing),
             Self::Remote(turn) => format!("{} (remote)", turn.model),
             Self::Free(turn) => format!("{} (free)", turn.model.label),
-            Self::OpenCode(turn) => format!("{} (OpenCode)", turn.model.label),
+            Self::OpenCode(turn) => format!("{} (OpenFree)", turn.model.label),
         }
     }
 
@@ -940,7 +949,7 @@ async fn ensure_running(app: &AppHandle, needs: Needs) -> Result<Turn, String> {
 async fn ensure_answer(app: &AppHandle, needs: Needs) -> Result<Answer, String> {
     let settings = appearance::load_settings()?;
     if settings.free_model.is_some() {
-        return free_answer(&settings).await;
+        return free_answer(app, &settings).await;
     }
     if settings.remote_provider.source == ModelSource::Remote {
         return remote_turn(&settings).await.map(Answer::Remote);
@@ -1063,9 +1072,15 @@ fn free_plan(settings: &Settings) -> Result<(&'static FreeModel, u32), String> {
 /// reserved for, it needs no gateway key, and it is the only route that carries the promotion rows.
 /// The gateway is the fallback, and only for a pick it actually lists — a promotion with no upstream
 /// id is refused with the reason rather than sent to a model that is not there.
-async fn free_answer(settings: &Settings) -> Result<Answer, String> {
+async fn free_answer(app: &AppHandle, settings: &Settings) -> Result<Answer, String> {
     let (model, max_tokens) = free_choice(settings)?;
     if let Some(service) = opencode::ready().await {
+        // Resolved here rather than per turn, because a session keeps the folder it opened with: what
+        // the run is asked to change is decided once, and the review's paths are read against it.
+        // A folder that cannot be read — deleted, or never picked and the default gone — leaves the
+        // session with nothing to write, which the route says on the row rather than as a refusal: a
+        // question still deserves its answer, and a plain chat needs no folder at all.
+        let directory = crate::paths::project_root(Some(app), settings).ok();
         return Ok(Answer::OpenCode(OpenCodeTurn {
             service,
             model,
@@ -1073,6 +1088,7 @@ async fn free_answer(settings: &Settings) -> Result<Answer, String> {
             session: None,
             fresh: true,
             replay: false,
+            directory,
         }));
     }
     let (model, max_tokens) = free_plan(settings)?;
@@ -1122,7 +1138,8 @@ async fn open_service_session(state: &ChatState, answer: Answer) -> Result<Answe
     // The prompt this turn carries is already in the history beside the turns the service has not
     // seen; more than one message means there is an exchange to replay.
     turn.replay = lock(&state.history).len() > 1;
-    let id = opencode::create_session(&turn.service, turn.model.id).await?;
+    let id =
+        opencode::create_session(&turn.service, turn.model.id, turn.directory.as_deref()).await?;
     turn.session = Some(id.clone());
     let filed = {
         let mut cell = lock(&state.session);
@@ -1200,12 +1217,19 @@ struct Stops<'a> {
 /// so the transcript can say which model was asked and which one answered. Once a delta has landed
 /// the answer belongs to that model — a provider that dies mid-sentence is reported, not quietly
 /// restarted as a different model's words.
+///
+/// `gate` and `on_write` are read by the OpenCode arm alone, which runs its tool loop inside the
+/// service rather than through [`agent`]: the service asks before it writes, this app answers, and what
+/// became of the write comes back as a row. No other route asks — every call it makes already goes
+/// through [`agent`]'s sandbox and gets its row there.
 async fn stream_round(
     answer: &Answer,
     request: &ChatRequest,
     stop: &AtomicBool,
     mut on_delta: impl FnMut(&[ReplyDelta]) -> StreamControl,
     mut on_fallback: impl FnMut(&'static str, &'static str),
+    gate: impl FnMut(&opencode::Request) -> opencode::Verdict,
+    on_write: impl FnMut(&opencode::Write),
 ) -> Result<Reply, String> {
     match answer {
         Answer::Local(turn) => smollm_llama::stream_chat(
@@ -1260,10 +1284,19 @@ async fn stream_round(
         }
         Answer::OpenCode(turn) => {
             let Some(session) = turn.session.as_deref() else {
-                return Err("this free turn has no OpenCode session to continue".into());
+                return Err("this free turn has no free-model session to continue".into());
             };
             let prompt = opencode_prompt(request, turn)?;
-            opencode::stream_turn(&turn.service, session, &prompt, stop, on_delta).await
+            opencode::stream_turn(
+                &turn.service,
+                session,
+                &prompt,
+                stop,
+                on_delta,
+                gate,
+                on_write,
+            )
+            .await
         }
     }
 }
@@ -1284,7 +1317,7 @@ fn opencode_prompt(request: &ChatRequest, turn: &OpenCodeTurn) -> Result<String,
     };
     if !last.images.is_empty() {
         return Err(
-            "the OpenCode app takes text prompts only, so the picture on this prompt was not \
+            "the free-model service takes text prompts only, so the picture on this prompt was not \
              sent. Remove the picture, or pick a model that answers through the gateway key."
                 .into(),
         );
@@ -1326,6 +1359,233 @@ fn opencode_prompt(request: &ChatRequest, turn: &OpenCodeTurn) -> Result<String,
     Ok(prompt)
 }
 
+/// What this app does with a write the OpenCode service asks about: the answer it sends back, and the
+/// row it opens for it.
+///
+/// The service runs its own calls, so these rows cannot come from a call list the way [`agent`]'s do —
+/// they come from the asking. One request opens one row and that call's own report closes it; measured
+/// against the live service, the id a request names as its source is the id `session.tool.success` and
+/// `session.tool.failed` carry, which is what pairs the two halves without guessing. The map in between
+/// is what stops a run that wrote four files from closing the first row four times.
+struct ServiceWrites {
+    /// The folder the run's writes are checked against, or the sentence saying why there is none to
+    /// check them against: a project folder this app cannot read is one no write can be confined to.
+    policy: Result<SandboxPolicy, String>,
+    /// Whether a run of this shape may write at all — a chat is offered no tools and plan mode reads
+    /// and proposes — and the words that tell the model which of the two it hit.
+    may_write: bool,
+    refusal: &'static str,
+    open: BTreeMap<String, TranscriptStep>,
+}
+
+impl ServiceWrites {
+    fn new(policy: Result<SandboxPolicy, String>, may_write: bool, refusal: &'static str) -> Self {
+        Self {
+            policy,
+            may_write,
+            refusal,
+            open: BTreeMap::new(),
+        }
+    }
+
+    fn policy(&self) -> Option<&SandboxPolicy> {
+        self.policy.as_ref().ok()
+    }
+
+    /// A path the run changed, spelled the way the row and the review name it: inside the project as a
+    /// relative path, which is what lets two writes naming one file land on one ledger line.
+    fn shown(&self, raw: &str) -> String {
+        match self.policy() {
+            Some(policy) => policy.display_path(&self.target(raw)),
+            None => raw.to_string(),
+        }
+    }
+
+    /// Where the service's own spelling of a path lands on this machine.
+    ///
+    /// Measured: a file inside the session's folder is named relative to it (`page.html`), and one
+    /// outside it arrives absolute. The absolute form is what the sandbox exists for — no form of the
+    /// service's ruleset both keeps the write tool and confines it to a folder, so `ask` hands the
+    /// decision here and this is the check that holds a free-model run inside the project.
+    fn target(&self, raw: &str) -> PathBuf {
+        let path = Path::new(raw);
+        match (path.is_absolute(), self.policy()) {
+            (true, _) => path.to_path_buf(),
+            (false, Some(policy)) => policy.workspace_root.join(path),
+            (false, None) => path.to_path_buf(),
+        }
+    }
+
+    /// The paths one request would touch: the ones it was asked about, or, when it names none, the ones
+    /// the patch it carries describes.
+    fn targets(&self, request: &opencode::Request) -> Vec<PathBuf> {
+        let names: Vec<&str> = if request.resources.is_empty() {
+            request.changes.iter().map(|c| c.path.as_str()).collect()
+        } else {
+            request.resources.iter().map(String::as_str).collect()
+        };
+        names.iter().map(|raw| self.target(raw)).collect()
+    }
+
+    /// Answer one ask, in the words the service hands back to the model, and open its row.
+    ///
+    /// Two things can refuse: the run's own shape, read from the settings it started under rather than
+    /// from the session, which outlives the dial moving; and the sandbox, which bounds every path the
+    /// call names rather than the first one, because a write that touches two files lands outside on
+    /// either of them.
+    fn ask(&mut self, app: &AppHandle, request: &opencode::Request) -> opencode::Verdict {
+        let verdict = if !self.may_write {
+            opencode::Verdict::Refuse(self.refusal.to_string())
+        } else {
+            match &self.policy {
+                Err(why) => opencode::Verdict::Refuse(why.clone()),
+                Ok(policy) => self
+                    .targets(request)
+                    .iter()
+                    .find_map(|path| policy.resolve_path(path, Access::Write).err())
+                    .map(|violation| opencode::Verdict::Refuse(violation.to_string()))
+                    .unwrap_or(opencode::Verdict::Allow),
+            }
+        };
+        // Nothing can land without a folder to land it in, so there is no row to open and no write to
+        // report: the answer goes back to the model, and the model says what it could not do.
+        if self.policy.is_err() {
+            return verdict;
+        }
+        let row = self.row_for(request);
+        agent::emit(app, AgentEvent::ToolStarted { step: row.clone() });
+        self.open.insert(request.id.clone(), row);
+        verdict
+    }
+
+    /// The row one write gets: the same shape a local run's write row has, built by the same function,
+    /// so Review, the inspector's changed files and the page's open control cannot tell the routes apart.
+    fn row_for(&self, request: &opencode::Request) -> TranscriptStep {
+        // Measured: the service's write tool answers for a new file and a changed one alike, and its
+        // action says `edit` for both — so the row's kind, which is what makes a page an artifact the
+        // window can open, comes from the status of the files it listed.
+        let created =
+            !request.changes.is_empty() && request.changes.iter().all(|change| change.is_created());
+        let subject = request
+            .changes
+            .first()
+            .map(|change| self.shown(&change.path))
+            .unwrap_or_default();
+        agent::started_row(
+            if created { "write_file" } else { "edit_file" },
+            &json!({ "path": subject }),
+        )
+    }
+
+    /// Close the row a write ended, and move the pill when the bytes landed.
+    ///
+    /// Only an applied write carries a diff, which is what keeps Review honest on this route: a row for
+    /// a change that did not happen would be counted by the panel's file list and offered by the open
+    /// control, exactly like one that did.
+    fn tell(&mut self, app: &AppHandle, write: &opencode::Write) {
+        let Some(mut row) = self.open.remove(&write.request.id) else {
+            return;
+        };
+        let mut staged = None;
+        let outcome = match &write.fate {
+            opencode::Fate::Refused(why) => {
+                row.finish(StepStatus::Blocked);
+                ToolOutcome::blocked(why)
+            }
+            opencode::Fate::Failed => {
+                row.finish(StepStatus::Failed);
+                ToolOutcome::blocked("the free-model service reported that this write did not land")
+            }
+            opencode::Fate::Applied => {
+                row.finish(StepStatus::Done);
+                let edits = self.edits(&write.request.changes);
+                match agent::written(&edits) {
+                    // The call said it ran and named no file, so there is no change to draw: the row
+                    // says what the service called it, and the pill stays where it was.
+                    None => ToolOutcome::ok(Summary::verbatim(format!(
+                        "{} applied",
+                        write.request.action
+                    ))),
+                    Some(done) => {
+                        row.diff = Some(done.diff);
+                        row.detail = done.detail;
+                        row.hunk = done.hunk.clone();
+                        for file in &done.files {
+                            staged = Some(app.state::<ChatState>().stage(
+                                &file.path,
+                                file.added,
+                                file.removed,
+                            ));
+                        }
+                        // The row lists its files only when one hunk cannot describe the call, which is
+                        // the rule the local loop works to.
+                        if row.hunk.is_none() {
+                            row.files = done.files;
+                        }
+                        ToolOutcome::ok(summed(&write.request.changes, &edits))
+                    }
+                }
+            }
+        };
+        agent::emit(app, AgentEvent::ToolFinished { step: row, outcome });
+        // The pill moves once the row is closed, as it does in the local loop: a count of a change the
+        // transcript has not finished reporting is a number ahead of the rows under it.
+        if let Some(diff) = staged {
+            agent::emit(app, AgentEvent::DiffStaged { diff });
+        }
+    }
+
+    /// The service's patch, as the app's write rows are built from one.
+    ///
+    /// The counts and the diff lines are the service's rather than recomputed here, so the review shows
+    /// what the service wrote it changed — and so a row from this route goes through the same rule as a
+    /// local one: one block in one file keeps the chip's `hunk`, anything wider is listed per file.
+    fn edits(&self, changes: &[opencode::Change]) -> Vec<Edit> {
+        changes
+            .iter()
+            .map(|change| Edit {
+                path: self.shown(&change.path),
+                added: change.added,
+                removed: change.removed,
+                occurrences: change.hunks.len() as u32,
+                hunks: change
+                    .hunks
+                    .iter()
+                    .map(|hunk| EditHunk {
+                        at: hunk.at,
+                        lines: hunk.lines.clone(),
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+}
+
+/// The line under the row's label, in the same sentence the app's own three writes answer with: the
+/// catalog already words a created file, an applied hunk, several hunks and a patch over several files,
+/// and a free-model write is one of those four things.
+fn summed(changes: &[opencode::Change], edits: &[Edit]) -> Summary {
+    let hunks: usize = edits.iter().map(|edit| edit.hunks.len()).sum();
+    if edits.len() == 1 && changes.iter().all(|change| change.is_created()) {
+        return Summary::said(SummaryKey::FileCreated, json!({}), "1 file created");
+    }
+    if edits.len() > 1 {
+        return Summary::said(
+            SummaryKey::FilesPatched,
+            json!({ "count": edits.len() }),
+            format!("{} files patched", edits.len()),
+        );
+    }
+    if hunks == 1 {
+        return Summary::said(SummaryKey::HunkApplied, json!({}), "1 hunk applied");
+    }
+    Summary::said(
+        SummaryKey::HunksApplied,
+        json!({ "count": hunks }),
+        format!("{hunks} hunks applied"),
+    )
+}
+
 async fn stream_turn(
     app: &AppHandle,
     answer: &Answer,
@@ -1365,8 +1625,59 @@ async fn stream_turn(
             AgentEvent::notice(NoticeCode::FreeModelFallback, &[("from", from), ("to", to)]),
         );
     };
-    stream_round(answer, request, stops.requested, on_delta, on_fallback).await
+    // The service's route is the one route whose tool loop is not this app's, so its sandbox, its rows
+    // and its ledger are built here. The other three never ask, and their answer is a sandbox this app
+    // resolved anyway — so the folder is read only for a run the service may answer.
+    let settings = appearance::load_settings()?;
+    let plan = planning(&settings, offered);
+    let writer: Arc<Mutex<Option<ServiceWrites>>> = Arc::new(Mutex::new(match answer {
+        Answer::OpenCode(_) => Some(ServiceWrites::new(
+            agent::policy_for(app, &settings),
+            offered && !plan,
+            if plan { PLAN_REFUSAL } else { CHAT_REFUSAL },
+        )),
+        _ => None,
+    }));
+    // A run whose writer is absent is one whose route never asks; the answer is only reached by a
+    // service that asked while this app was not watching for it, and nothing that cannot be confined
+    // to a folder gets let through.
+    let gate_cell = Arc::clone(&writer);
+    let gate = move |request: &opencode::Request| match &mut *lock(&gate_cell) {
+        Some(writes) => writes.ask(app, request),
+        None => opencode::Verdict::Refuse(UNCONFINED.to_string()),
+    };
+    let tell_cell = Arc::clone(&writer);
+    let on_write = move |write: &opencode::Write| {
+        if let Some(writes) = &mut *lock(&tell_cell) {
+            writes.tell(app, write);
+        }
+    };
+    stream_round(
+        answer,
+        request,
+        stops.requested,
+        on_delta,
+        on_fallback,
+        gate,
+        on_write,
+    )
+    .await
 }
+
+/// What a service write is refused for when this app has no folder to confine it to: no row, no change,
+/// and the model told in the same sentence every time.
+const UNCONFINED: &str =
+    "the project folder this run works in cannot be read, so no file may be changed";
+
+/// The two refusals a run's own shape earns, before its paths are ever looked at. Both are said to the
+/// model, which answers with what it would have done instead — which is the whole of plan mode, and the
+/// whole of a chat sent with the control off.
+const PLAN_REFUSAL: &str = "Plan mode is on: this run reads and proposes, and changes no file.";
+const CHAT_REFUSAL: &str =
+    "This run was sent as a chat, with no tools offered, so it changes no file.";
+
+/// The third shape: a run that is not the user's, so its rows belong to nobody's transcript.
+const SUBAGENT_REFUSAL: &str = "A subagent reads and reports; it is not allowed to change a file.";
 
 /// Whether this run is the dial's Plan-only mode: it was offered tools and may read, but the answer
 /// is the change to make rather than the change itself. Coding off is a plain chat either way — there
@@ -1545,6 +1856,11 @@ async fn delegate(
             // A subagent's fallback moves are the parent run's news; the parent's own stream is
             // what announces them, and the subagent's window is not a transcript.
             |_, _| {},
+            // A subagent is offered the read-only seven, so a write on this route is the service's own
+            // tool reaching past the offer — and this loop emits no rows, so a change it made would be
+            // one nothing reported. Refusing it is the answer that keeps the bargain the parent made.
+            |_| opencode::Verdict::Refuse(SUBAGENT_REFUSAL.to_string()),
+            |_| {},
         )
         .await
         .map_err(|e| format!("the delegated request failed: {e}"))?;
@@ -1755,7 +2071,11 @@ async fn run_rounds(
     stops: &Stops<'_>,
 ) -> Result<Reply, String> {
     let mut reply = stream_turn(app, answer, &request, tools, stops).await?;
-    if !tools {
+    // The service's route needs nothing from this loop: it runs its calls itself, and the rows for
+    // them are already emitted while the answer streams — and its `Reply` carries no call list, so a
+    // second round here would only re-ask the same question. The sandbox below belongs to this app's
+    // own calls, which is why it is resolved after this exit rather than before it.
+    if !tools || matches!(answer, Answer::OpenCode(_)) {
         return Ok(reply);
     }
     // Built here rather than by the caller: a chat with the control off does not need a workspace at
@@ -2035,12 +2355,10 @@ pub async fn chat_send(
         held.iter().any(|m| !m.images.is_empty())
     };
     let answer = ensure_answer(&app, Needs::from_request(carries_picture)).await?;
-    // The OpenCode route answers with the service's own tools, not this app's loop; the app's tool
-    // rows and its plan contract belong to the local engine, so neither is offered here. The service
-    // does write — measured as a page it left in its own working directory — and that is the change
-    // this window neither shows in Review nor can undo, which is why the run is told on the row.
-    let prose_route = tools && matches!(answer, Answer::OpenCode(_));
-    let tools = tools && !prose_route;
+    // The OpenCode route runs its own tool loop inside the service, which asks this app before any
+    // write of it lands — so the run has rows, a diff and a Review panel exactly like a local one, and
+    // the tools stay offered. What it does not get is this app's plan contract on the model's own
+    // tools: the service carries its own, and the sandbox is applied at the ask rather than at a call.
     let state = app.state::<ChatState>();
     {
         let mut slot = lock(&state.slot);
@@ -2076,22 +2394,19 @@ pub async fn chat_send(
             engine: matches!(answer, Answer::Local(_)),
             // Zero says this run has no rounds to spend, which is what the step pill reads as "do not
             // draw me" — a plain chat does not have a budget, and a pill saying `Step 0 / 0` over it
-            // would be a counter of something that cannot happen.
-            max_rounds: if tools { MAX_TOOL_ROUNDS } else { 0 },
+            // would be a counter of something that cannot happen. The service's route is the other one
+            // with nothing to count: its rounds are spent inside the service, which closes no batch
+            // this app sees, so a budget here would be a number that never moves.
+            max_rounds: if tools && !matches!(answer, Answer::OpenCode(_)) {
+                MAX_TOOL_ROUNDS
+            } else {
+                0
+            },
             // What the transcript needs to say the answer is a plan rather than a change the run
             // decided not to make — the mode is a setting, and the dial may move before this run ends.
             plan,
         },
     );
-    if prose_route {
-        emit(
-            &app,
-            AgentEvent::notice(
-                NoticeCode::RouteHasNoTools,
-                &[("model", model_label.as_str())],
-            ),
-        );
-    }
     lock(&state.history).push(prompt(&text, image.clone()));
     // Filed before the request goes out rather than after the answer lands. A run that dies mid-stream
     // leaves the question on screen and nowhere else, and the one copy of what was asked that survives

@@ -1,7 +1,7 @@
 # OpenFree
 
 A local-first desktop chat and coding agent for [PrismML's ternary Bonsai models](https://huggingface.co/prism-ml),
-with a free-model tier answered by the OpenCode app already on this Mac. Tauri v2 shell, Rust host, one
+with a free-model tier answered by OpenFree's free-model service already on this Mac. Tauri v2 shell, Rust host, one
 supervised `llama-server` on loopback, and weights that stay on your disk.
 
 The interface is modelled on a three-column AI workbench — transcript in the middle, workspace on the left,
