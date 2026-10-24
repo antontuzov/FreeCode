@@ -166,13 +166,18 @@ pub enum NoticeCode {
     /// turn to the next routable one. Said out loud because the answer that follows is not the model
     /// the picker named.
     FreeModelFallback,
+    /// The prompt asked for the agent loop and the route that answers it carries none of this app's
+    /// tools, so the run's work happens out of this window's sight. The OpenCode service is the route
+    /// this names: it does write — measured on disk, in its own working directory rather than the
+    /// project's — which is exactly the change Review cannot show and the undo journal cannot reach.
+    RouteHasNoTools,
 }
 
 impl NoticeCode {
     /// Every code the host can emit. `verify-transcript-i18n` walks this to require one catalog entry
     /// per code, so a notice added here without its sentence in both locales fails the build instead
     /// of rendering its own key in the middle of a transcript.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::EffortNotSupported,
         Self::EngineRestarted,
         Self::ToolCallWithoutTools,
@@ -186,6 +191,7 @@ impl NoticeCode {
         Self::ProjectorLoading,
         Self::ModelTakesNoImages,
         Self::FreeModelFallback,
+        Self::RouteHasNoTools,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -203,6 +209,7 @@ impl NoticeCode {
             Self::ProjectorLoading => "notice.projector-loading",
             Self::ModelTakesNoImages => "notice.model-takes-no-images",
             Self::FreeModelFallback => "notice.free-model-fallback",
+            Self::RouteHasNoTools => "notice.route-has-no-tools",
         }
     }
 
@@ -225,6 +232,7 @@ impl NoticeCode {
             Self::ProjectorLoading => &["file"],
             Self::ModelTakesNoImages => &["model"],
             Self::FreeModelFallback => &["from", "to"],
+            Self::RouteHasNoTools => &["model"],
         }
     }
 }

@@ -2035,9 +2035,12 @@ pub async fn chat_send(
         held.iter().any(|m| !m.images.is_empty())
     };
     let answer = ensure_answer(&app, Needs::from_request(carries_picture)).await?;
-    // The OpenCode route answers in prose and keeps its own read-only permission set; the app's tool
-    // loop and its plan contract belong to the local engine, so neither is offered here.
-    let tools = tools && !matches!(answer, Answer::OpenCode(_));
+    // The OpenCode route answers with the service's own tools, not this app's loop; the app's tool
+    // rows and its plan contract belong to the local engine, so neither is offered here. The service
+    // does write — measured as a page it left in its own working directory — and that is the change
+    // this window neither shows in Review nor can undo, which is why the run is told on the row.
+    let prose_route = tools && matches!(answer, Answer::OpenCode(_));
+    let tools = tools && !prose_route;
     let state = app.state::<ChatState>();
     {
         let mut slot = lock(&state.slot);
@@ -2080,6 +2083,15 @@ pub async fn chat_send(
             plan,
         },
     );
+    if prose_route {
+        emit(
+            &app,
+            AgentEvent::notice(
+                NoticeCode::RouteHasNoTools,
+                &[("model", model_label.as_str())],
+            ),
+        );
+    }
     lock(&state.history).push(prompt(&text, image.clone()));
     // Filed before the request goes out rather than after the answer lands. A run that dies mid-stream
     // leaves the question on screen and nowhere else, and the one copy of what was asked that survives
