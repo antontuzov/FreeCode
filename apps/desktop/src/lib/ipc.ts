@@ -878,6 +878,13 @@ export const ipc = {
    */
   openFile: (path: string) => invoke<void>("open_file", { path }),
   /**
+   * The in-app address of one of the run's pages (`preview://localhost/…`), which the host serves
+   * from the project folder through its `preview` scheme. The review's open control frames it for an
+   * HTML file, so the page runs inside the app instead of leaving it. Same confinement as `open_file`,
+   * and the same rule for a refusal: the panel shows the host's reason rather than going quiet.
+   */
+  previewUrl: (path: string) => invoke<string>("preview_url", { path }),
+  /**
    * Put files a run wrote back to the text they held before it touched them.
    *
    * The before-images live in the host's journal for the conversation on screen, so a reopened

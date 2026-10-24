@@ -5,12 +5,14 @@ import { Inspector } from "./components/Inspector";
 import { Knowledge } from "./components/Knowledge";
 import { ModelStatus } from "./components/ModelStatus";
 import { Palette } from "./components/Palette";
+import { Preview } from "./components/Preview";
 import { Review } from "./components/Review";
 import { Settings } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { Transcript } from "./components/Transcript";
 import type { Locale } from "./i18n";
+import { ipc } from "./lib/ipc";
 import { useShortcuts } from "./lib/shortcuts";
 import { useAppearance } from "./state/appearance";
 import { connectAgentEvents, useChat } from "./state/chat";
@@ -41,6 +43,12 @@ export default function App() {
   // arrow that un-opened it would leave the conversation exactly as it was anyway.
   const panel = useNav((s) => s.panel);
   const showInspector = useNav((s) => s.showInspector);
+  // The in-app browser, opened by the review column for a page the run built. Not on the navigation
+  // stack — one press in, one press out, like the palette — so it closes into whatever surface asked
+  // for it.
+  const preview = useNav((s) => s.preview);
+  const openPreview = useNav((s) => s.openPreview);
+  const closePreview = useNav((s) => s.closePreview);
   // The two strips the header's panel toggles fold. They live in the nav store rather than in local
   // state so the deep links can seed them — the native window takes no injected clicks, and a folded
   // column that only a press can reach is one no capture can show.
@@ -138,6 +146,18 @@ export default function App() {
     if (newest) void openFiled(newest.id);
   }, [reopen, filed, openFiled]);
 
+  // `?preview=<path>` opens the in-app browser on that page — the dev-only press of the review's
+  // open control, since the native window takes no injected clicks. The host answers with the
+  // `preview://` address its scheme serves; a refusal is dev noise, so it is dropped.
+  const previewPath = query("preview");
+  useEffect(() => {
+    if (previewPath === null) return;
+    void ipc.previewUrl(previewPath).then(
+      (url) => openPreview(url, previewPath),
+      () => {},
+    );
+  }, [previewPath, openPreview]);
+
   // `?stop_after=<ms>` presses the composer's Stop that far into a run. Measured from the run
   // starting rather than from the window opening, because the engine spends seconds loading weights
   // and a timer from mount would press Stop before there was a reply to stop.
@@ -168,8 +188,14 @@ export default function App() {
     palette: () => setPaletteOpen((open) => !open),
     // Esc leaves a step of the history when there is one to leave and stops the run when the window is
     // already back at the conversation. The one control that means two things takes three in hand: a
-    // review panel the user opened is the nearest thing to close, and it is not on the stack.
+    // review panel the user opened is the nearest thing to close, and it is not on the stack. The
+    // in-app browser is nearer still — it opened from that panel — so it closes first. While the
+    // framed page has focus its own keys do not reach the window, which is what a game in it needs.
     escape: () => {
+      if (preview) {
+        closePreview();
+        return;
+      }
       if (panel === "review") {
         showInspector();
         return;
@@ -231,14 +257,21 @@ export default function App() {
         {rightOpen && (
           <div
             className={`flex min-h-0 shrink-0 flex-col ${
-              panel === "review" ? "w-[var(--review-width)]" : "w-[var(--inspector-width)]"
+              preview || panel === "review"
+                ? "w-[var(--review-width)]"
+                : "w-[var(--inspector-width)]"
             }`}
           >
-            <ModelStatus locale={locale} />
-            {/* One column, two reports: the run's numbers, or the change those numbers name. Shot 06 has
-                the diff here rather than under the answer, because a code line needs the width the
-                transcript would have to give up to show it. */}
-            {panel === "review" ? (
+            {!preview && <ModelStatus locale={locale} />}
+            {/* One column, three reports: the run's numbers, the change those numbers name, or the
+                page that change built. Shot 06 has the diff here rather than under the answer,
+                because a code line needs the width the transcript would have to give up to show it —
+                and the game the diff produced gets the same column rather than the whole window,
+                because it is the run's answer, not the app's. The model card steps aside for it: the
+                page being played is the point, and the route it came from is the chat's business. */}
+            {preview ? (
+              <Preview locale={locale} />
+            ) : panel === "review" ? (
               <Review locale={locale} />
             ) : (
               <Inspector locale={locale} fixture={fixture} />

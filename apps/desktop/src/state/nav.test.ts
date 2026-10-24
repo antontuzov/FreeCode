@@ -174,3 +174,24 @@ describe("the panel toggles", () => {
     expect(useNav.getState().statusOpen).toBe(true);
   });
 });
+
+describe("the in-app browser", () => {
+  it("opens over the window and closes with one press", () => {
+    expect(useNav.getState().preview).toBeNull();
+    useNav.getState().openPreview("preview://localhost/tetris.html", "tetris.html");
+    expect(useNav.getState().preview).toEqual({
+      url: "preview://localhost/tetris.html",
+      path: "tetris.html",
+    });
+    // It is not on the navigation stack: the conversation underneath is untouched.
+    expect(currentView(useNav.getState())).toEqual({ kind: "chat" });
+    useNav.getState().closePreview();
+    expect(useNav.getState().preview).toBeNull();
+  });
+
+  it("a second page replaces the first rather than stacking under it", () => {
+    useNav.getState().openPreview("preview://localhost/a.html", "a.html");
+    useNav.getState().openPreview("preview://localhost/b.html", "b.html");
+    expect(useNav.getState().preview?.path).toBe("b.html");
+  });
+});

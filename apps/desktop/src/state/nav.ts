@@ -94,6 +94,11 @@ type NavStore = {
   /** The file the review column was asked to show, and which it scrolls to when it does. Cleared by
    * either way out of the column, so a jump is not replayed on a panel the reader already looked at. */
   reviewFile: string | null;
+  /** The in-app browser, covering the window: the `preview://` address of the page being shown, and
+   * the project path it came from, which the header's "open in the default browser" hands to the
+   * desktop. Not on the navigation stack — it is opened from the review column and closed with one
+   * press, the way the palette is. */
+  preview: { url: string; path: string } | null;
   /** Open a surface over the ones already on the stack. */
   push: (view: View) => void;
   /** Step back along the stack. Reports whether there was anything behind the current view, so the
@@ -110,10 +115,13 @@ type NavStore = {
   /** An edit row's file chip: the column switches to the change and opens on that file, because one
    * press that lands on the section is the answer to what was clicked. */
   openReviewAt: (path: string) => void;
+  openPreview: (url: string, path: string) => void;
+  closePreview: () => void;
 };
 
 export const useNav = create<NavStore>((set, get) => ({
   ...seed(),
+  preview: null,
   push: (view) => {
     const { history, cursor } = get();
     const current = history[cursor];
@@ -143,6 +151,8 @@ export const useNav = create<NavStore>((set, get) => ({
   toggleReview: () => set((s) => ({ panel: s.panel === "review" ? "inspector" : "review" })),
   showInspector: () => set({ panel: "inspector", reviewFile: null }),
   openReviewAt: (path) => set({ panel: "review", reviewFile: path }),
+  openPreview: (url, path) => set({ preview: { url, path } }),
+  closePreview: () => set({ preview: null }),
 }));
 
 export function currentView(s: NavStore): View {

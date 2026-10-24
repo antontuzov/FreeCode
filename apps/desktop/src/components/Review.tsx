@@ -12,6 +12,11 @@ import {
 } from "../state/transcript";
 import { Icon } from "./icons";
 
+/** A page the run built is shown inside the app; anything else goes to the desktop's handler. */
+function isPage(path: string): boolean {
+  return /\.html?$/i.test(path);
+}
+
 /**
  * One line of a hunk, with the file line it stands on.
  *
@@ -133,6 +138,7 @@ function marked(text: string, needle: string): ReactNode {
 export function Review({ locale }: { locale: Locale }) {
   const rows = useTranscript((s) => s.rows);
   const showInspector = useNav((s) => s.showInspector);
+  const openPreview = useNav((s) => s.openPreview);
   // `?scope=all` seeds the second scope the way `?q=` seeds the settings search: the switch is a press
   // the native window cannot be given, and a control nobody has seen rendered is a guess.
   const [scope, setScope] = useState<ReviewScope>(
@@ -175,6 +181,10 @@ export function Review({ locale }: { locale: Locale }) {
   // under the file it is about and a later press that works clears it. The panel has just told the
   // user this file changed; asking for a press and answering it with silence is the failure here.
   const [refused, setRefused] = useState<Record<string, string>>({});
+  // A page the run built answers inside the app rather than in the desktop's browser: the host hands
+  // back the `preview://` address its scheme serves, and the window frames it. Everything else keeps
+  // the desktop's default handler — a diff reader cannot show a font, and the app should not pretend
+  // it can render every file a run may touch.
   const open = async (path: string) => {
     setRefused((held) => {
       const rest = { ...held };
@@ -182,7 +192,11 @@ export function Review({ locale }: { locale: Locale }) {
       return rest;
     });
     try {
-      await ipc.openFile(path);
+      if (isPage(path)) {
+        openPreview(await ipc.previewUrl(path), path);
+      } else {
+        await ipc.openFile(path);
+      }
     } catch (why) {
       setRefused((held) => ({ ...held, [path]: String(why) }));
     }
@@ -496,8 +510,11 @@ export function Review({ locale }: { locale: Locale }) {
                     type="button"
                     onClick={() => void open(file.path)}
                     className="icon-btn mr-[var(--space-2)] shrink-0"
-                    aria-label={translate(locale, "review.open")}
-                    title={translate(locale, "review.open")}
+                    aria-label={translate(
+                      locale,
+                      isPage(file.path) ? "review.openPage" : "review.open",
+                    )}
+                    title={translate(locale, isPage(file.path) ? "review.openPage" : "review.open")}
                   >
                     <Icon name="external" size={13} />
                   </button>

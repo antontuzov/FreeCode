@@ -17,6 +17,7 @@ mod free_models;
 mod knowledge;
 mod opencode;
 mod paths;
+mod preview;
 mod provider;
 mod reveal;
 mod sessions;
@@ -355,6 +356,16 @@ pub fn run() {
         // The supervised server and the conversation it is answering from. One window, one engine:
         // the state is here so a second `start_engine` cannot begin a second 6 GB load.
         .manage(chat::ChatState::default())
+        // One process owns the engine, the conversation and the saved key, so a second launch hands
+        // over and exits; the window already open comes forward instead. This plugin has to be
+        // registered before the others — it runs their setup only after claiming the instance.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         // The one way this app leaves the machine for the user's browser: refusal links and the links
         // in an answer. The UI cannot reach it directly — the capability scopes it to `http` and
         // `https`, so a `file://` or a `javascript:` address in a model's own text never launches.
@@ -362,6 +373,9 @@ pub fn run() {
         // The project folder is picked with the platform's own chooser. Registered as a Rust plugin,
         // so no dialog permission is handed to the webview: the only caller is the host command.
         .plugin(tauri_plugin_dialog::init())
+        // The in-app browser: `preview://localhost/…` serves the project folder the run worked in,
+        // confined by the same sandbox as every other read of it. See `preview`.
+        .register_uri_scheme_protocol(preview::SCHEME, preview::handle)
         // The duck this launch wears, handed to the page before any of its own scripts run, so the
         // window and the Dock tile are the same picture from the first frame rather than a moment
         // apart. See `brand`.
@@ -406,6 +420,9 @@ pub fn run() {
             // Handing a file this run changed back to the desktop's default handler. Confined to the
             // workspace by the same sandbox a `read_file` goes through — see `reveal`.
             reveal::open_file,
+            // The in-app address of one of the run's pages, which the review's open control frames
+            // instead of leaving the app — see `preview`.
+            preview::preview_url,
             chat::start_engine,
             chat::stop_engine,
             chat::engine_status,

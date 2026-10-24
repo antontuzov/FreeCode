@@ -19,8 +19,9 @@ use tauri::AppHandle;
 /// The root is the project folder the run was confined to, so a file the panel names is one this
 /// command can actually reach. Launching a file is not a read though: the desktop hands it to
 /// whatever program claims that kind, so this command keeps the narrower rule and confines the path
-/// to that folder whatever the rest of the app is configured to allow.
-fn policy(app: &AppHandle) -> Result<SandboxPolicy, String> {
+/// to that folder whatever the rest of the app is configured to allow. Shared with `preview`, whose
+/// scheme serves the same folder — one sandbox for both doors into the workspace.
+pub(crate) fn policy(app: &AppHandle) -> Result<SandboxPolicy, String> {
     let settings = crate::appearance::load_settings()?;
     Ok(SandboxPolicy {
         workspace_root: crate::paths::project_root(Some(app), &settings)?,
@@ -29,7 +30,7 @@ fn policy(app: &AppHandle) -> Result<SandboxPolicy, String> {
 }
 
 /// The file behind a path the run named, or the reason there is no such file to open.
-fn confined(policy: &SandboxPolicy, raw: &str) -> Result<PathBuf, String> {
+pub(crate) fn confined(policy: &SandboxPolicy, raw: &str) -> Result<PathBuf, String> {
     let path = policy
         .resolve_path(Path::new(raw), Access::Read)
         .map_err(|why| why.to_string())?;
