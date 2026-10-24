@@ -41,6 +41,11 @@ export default function App() {
   // arrow that un-opened it would leave the conversation exactly as it was anyway.
   const panel = useNav((s) => s.panel);
   const showInspector = useNav((s) => s.showInspector);
+  // The two strips the header's panel toggles fold. They live in the nav store rather than in local
+  // state so the deep links can seed them — the native window takes no injected clicks, and a folded
+  // column that only a press can reach is one no capture can show.
+  const rightOpen = useNav((s) => s.rightOpen);
+  const statusOpen = useNav((s) => s.statusOpen);
   // `?search=<query>` opens the palette with that query already typed — the deep link the panel is
   // captured through, since the window takes no injected keystrokes and a search nobody can type
   // into is a search nobody can see.
@@ -223,25 +228,27 @@ export default function App() {
             onPickModel={() => push({ kind: "settings", page: "model" })}
             onOpenPalette={() => setPaletteOpen(true)}
           />
-          <StatusBar locale={locale} />
+          {statusOpen && <StatusBar locale={locale} />}
         </div>
         {/* The column owns its width, not either report inside it: both are the same column's turn, and
             a height the pair has to share is one constraint the reports should not each re-declare. */}
-        <div
-          className={`flex min-h-0 shrink-0 flex-col ${
-            panel === "review" ? "w-[var(--review-width)]" : "w-[var(--inspector-width)]"
-          }`}
-        >
-          <ModelStatus locale={locale} />
-          {/* One column, two reports: the run's numbers, or the change those numbers name. Shot 06 has
-              the diff here rather than under the answer, because a code line needs the width the
-              transcript would have to give up to show it. */}
-          {panel === "review" ? (
-            <Review locale={locale} />
-          ) : (
-            <Inspector locale={locale} fixture={fixture} />
-          )}
-        </div>
+        {rightOpen && (
+          <div
+            className={`flex min-h-0 shrink-0 flex-col ${
+              panel === "review" ? "w-[var(--review-width)]" : "w-[var(--inspector-width)]"
+            }`}
+          >
+            <ModelStatus locale={locale} />
+            {/* One column, two reports: the run's numbers, or the change those numbers name. Shot 06 has
+                the diff here rather than under the answer, because a code line needs the width the
+                transcript would have to give up to show it. */}
+            {panel === "review" ? (
+              <Review locale={locale} />
+            ) : (
+              <Inspector locale={locale} fixture={fixture} />
+            )}
+          </div>
+        )}
       </div>
       {paletteOpen && (
         <Palette

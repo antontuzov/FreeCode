@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { translate, type Locale } from "../i18n";
 import type { HostPlanItem } from "../lib/ipc";
 import { useNav } from "../state/nav";
+import { nextEffort, useSettings } from "../state/settings";
 import {
   ctaLabel,
   isTurn,
@@ -437,23 +438,90 @@ function PlanList({ items, className }: { items: HostPlanItem[]; className?: str
 }
 
 /**
+ * The four controls the reference keeps at the right of its top bar, in its order: the effort dial,
+ * the run's plan, the strip under the composer, and the column beside it.
+ *
+ * Each one answers to something this window has. The bolt walks the same effort order Settings lists
+ * and writes the same value its select does, so the lit tile means "not the model's own choice". The
+ * two panel toggles carry their strip's state to a screen reader as `aria-expanded` and stay quiet on
+ * screen: the reference's four glyphs sit unlit on a window that has both strips open, and a fold
+ * that hides a column has already said itself in the layout.
+ */
+function HeaderControls({ locale, plan }: { locale: Locale; plan: HostPlanItem[] | null }) {
+  const effort = useSettings((s) => s.doc?.sampling.effort);
+  const rightOpen = useNav((s) => s.rightOpen);
+  const statusOpen = useNav((s) => s.statusOpen);
+  const toggleRight = useNav((s) => s.toggleRight);
+  const toggleStatus = useNav((s) => s.toggleStatus);
+
+  // The dial is one of the window's first controls, and nothing else on this surface has asked for
+  // the document yet — without this the bolt would sit at "Auto" and do nothing until the user opened
+  // Settings or pressed the composer's approval pill.
+  useEffect(() => {
+    if (!useSettings.getState().loaded) void useSettings.getState().load();
+  }, []);
+
+  const level = translate(locale, `settings.opt.${effort ?? "auto"}`);
+  const effortLabel = translate(locale, "topbar.effort", { level });
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label={effortLabel}
+        aria-pressed={effort ? effort !== "auto" : undefined}
+        title={effortLabel}
+        onClick={() => {
+          const store = useSettings.getState();
+          const doc = store.doc;
+          if (!doc) return;
+          const next = nextEffort(doc.sampling.effort);
+          void store.update((d) => void (d.sampling.effort = next));
+        }}
+      >
+        <Icon name="bolt" size={14} />
+      </button>
+      <PlanButton locale={locale} plan={plan} />
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label={translate(locale, "topbar.status")}
+        aria-expanded={statusOpen}
+        title={translate(locale, "topbar.status")}
+        onClick={toggleStatus}
+      >
+        <Icon name="panelBottom" size={14} />
+      </button>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label={translate(locale, "topbar.rightPanel")}
+        aria-expanded={rightOpen}
+        title={translate(locale, "topbar.rightPanel")}
+        onClick={toggleRight}
+      >
+        <Icon name="panelRight" size={14} />
+      </button>
+    </div>
+  );
+}
+
+/**
  * The run's plan, behind the header's checklist control. The control is the reference's square
  * glyph and nothing else: the count used to ride beside the icon, which does not fit a 28px square —
  * it wrapped onto a second line and pushed the button into its neighbour. The count heads the panel
  * instead, where it has a row to itself, and the transcript's plan row already states it in words.
  */
 function PlanButton({ locale, plan }: { locale: Locale; plan: HostPlanItem[] | null }) {
-  const [open, setOpen] = useState(false);
-  // `?plan=1` opens the panel for a capture once the run has a list — the fixture's rows arrive after
-  // the first render, so this waits for them. A panel that only opens on a press would be the one
-  // surface no screenshot could be taken of without driving the mouse.
-  const auto = useRef(new URLSearchParams(window.location.search).get("plan") === "1");
-  useEffect(() => {
-    if (auto.current && plan) {
-      auto.current = false;
-      setOpen(true);
-    }
-  }, [plan]);
+  const [open, setOpen] = useState(
+    // `?plan=1` seeds the panel open the way the deep links seed the sidebar's fold: the native window
+    // takes no injected clicks, so a panel only a press can reach is one no capture can show. Seeded
+    // here rather than by an effect on the run's rows, because the rows land after this render and the
+    // panel's own body already waits on `plan` — an effect that opened it once arrived was the part
+    // that did not hold on the real window.
+    () => new URLSearchParams(window.location.search).get("plan") === "1",
+  );
   const done = plan?.filter((item) => item.status === "done").length ?? 0;
   const total = plan?.length ?? 0;
   return (
@@ -588,20 +656,9 @@ export function Transcript({
         <h1 className="min-w-0 flex-1 truncate text-ui font-medium text-fg">
           {translate(locale, "transcript.title")}
         </h1>
-        {/* The plan the run keeps, opened from the header the way the reference opens its task list.
-            Until the run has stated one the control is present and quiet: a button that appeared
-            only after the fact would be a control the user never learns is there. */}
-        <PlanButton locale={locale} plan={plan} />
-        {/* The skills and extensions this button would manage are not in this build. */}
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label={translate(locale, "transcript.more")}
-          aria-disabled
-          title={translate(locale, "common.notInBuild")}
-        >
-          <Icon name="extensions" size={14} />
-        </button>
+        {/* The reference's top-bar cluster, at the conversation's own header: the effort dial, the
+            plan, and the two strips this column shares the window with. */}
+        <HeaderControls locale={locale} plan={plan} />
       </header>
 
       <div className="flex min-h-0 flex-1">

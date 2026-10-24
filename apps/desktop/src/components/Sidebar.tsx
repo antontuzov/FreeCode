@@ -37,18 +37,11 @@ const PRIMARY: NavRow[] = [
 ];
 
 const PLACES: NavRow[] = [
-  // The same reason the search row's placeholder went: this row has a page behind it now, so it
-  // opens it instead of saying this build has nothing to open.
-  {
-    key: "knowledge",
-    icon: "knowledge",
-    tipKey: "sidebar.knowledgeAbout",
-    onActivate: (a) => a.openKnowledge(),
-  },
-  { key: "sites", icon: "sites", placeholder: true },
-  { key: "automations", icon: "automations", placeholder: true },
-  // The row's local meaning: this app installs no add-ons, but it does have a set of capabilities the
-  // agent is handed, and the page the row opens is that list — with what this build runs of it.
+  // One row, and the one that has a page behind it: this app installs no add-ons, but it does have a
+  // set of capabilities the agent is handed, and the page the row opens is that list — with what this
+  // build runs of it. The catalog and the automations surfaces still exist behind their own deep links,
+  // but they are not rows here: a footer of five destinations was the reference's shape, not this
+  // build's.
   {
     key: "extensions",
     icon: "extensions",
@@ -344,23 +337,10 @@ export function Sidebar({
           step: a hover pill that starts where the titlebar band leaves off reads as jammed under the
           window's chrome rather than as its first item. */}
       <div className="flex flex-col gap-1 p-[var(--space-3)] pt-[var(--space-4)]">
-        <div className="flex items-center gap-1">
-          <span className="pill w-fit">
-            <Icon name="coding" />
-            {translate(locale, "sidebar.coding")}
-          </span>
-          {/* The reference hangs a puzzle badge off the mode pill rather than only in the Places
-              list: the capabilities a run may use belong beside the mode that grants them. */}
-          <button
-            type="button"
-            aria-label={translate(locale, "sidebar.extensions")}
-            title={translate(locale, "sidebar.extensionsAbout")}
-            className="icon-btn"
-            onClick={() => actions.openExtensions()}
-          >
-            <Icon name="extensions" size={14} />
-          </button>
-        </div>
+        <span className="pill w-fit">
+          <Icon name="coding" />
+          {translate(locale, "sidebar.coding")}
+        </span>
         {PRIMARY.map((r) => row(r))}
       </div>
 

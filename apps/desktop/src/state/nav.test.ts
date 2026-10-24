@@ -143,11 +143,34 @@ describe("deep links", () => {
     expect(state.reviewFile).toBe("apps/desktop/src/App.tsx");
   });
 
+  it("folds the two strips the header's own toggles fold", async () => {
+    const state = await seeded("?right=hidden&status=hidden");
+    expect(state.rightOpen).toBe(false);
+    expect(state.statusOpen).toBe(false);
+  });
+
   it("starts on the conversation with the inspector when the URL says nothing", async () => {
     const state = await seeded("");
     expect(currentView(state)).toEqual({ kind: "chat" });
     expect(state.collapsed).toBe(false);
     expect(state.panel).toBe("inspector");
     expect(state.reviewFile).toBeNull();
+    expect(state.rightOpen).toBe(true);
+    expect(state.statusOpen).toBe(true);
+  });
+});
+
+describe("the panel toggles", () => {
+  it("fold and reopen each strip without touching the other", () => {
+    const nav = useNav.getState();
+    nav.toggleRight();
+    expect(useNav.getState().rightOpen).toBe(false);
+    expect(useNav.getState().statusOpen).toBe(true);
+    nav.toggleStatus();
+    expect(useNav.getState().statusOpen).toBe(false);
+    nav.toggleRight();
+    nav.toggleStatus();
+    expect(useNav.getState().rightOpen).toBe(true);
+    expect(useNav.getState().statusOpen).toBe(true);
   });
 });

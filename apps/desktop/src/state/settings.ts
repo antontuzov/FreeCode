@@ -3,8 +3,20 @@
 // with no control yet cannot be reset by saving the page.
 import { create } from "zustand";
 
-import { ipc, type SettingsDoc } from "../lib/ipc";
+import { ipc, type ReasoningEffort, type SettingsDoc } from "../lib/ipc";
 import { useAppearance } from "./appearance";
+
+/**
+ * The effort dial's own order, the one Settings lists. The header's bolt walks it, so a press on the
+ * glyph and a pick on the page are the same five values in the same sequence — and the last one wraps
+ * back to the model's own choice rather than pinning the widest effort with no way home.
+ */
+export const EFFORT_ORDER: ReasoningEffort[] = ["auto", "low", "medium", "xhigh", "none"];
+
+export function nextEffort(current: ReasoningEffort): ReasoningEffort {
+  const at = EFFORT_ORDER.indexOf(current);
+  return EFFORT_ORDER[(at + 1) % EFFORT_ORDER.length] ?? "auto";
+}
 
 type SettingsStore = {
   doc: SettingsDoc | null;

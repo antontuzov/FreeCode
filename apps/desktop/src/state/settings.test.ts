@@ -3,9 +3,9 @@
 // and the whole object goes back — with the window's appearance re-read either way.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ipc, type SettingsDoc } from "../lib/ipc";
+import { ipc, type ReasoningEffort, type SettingsDoc } from "../lib/ipc";
 import { useAppearance } from "./appearance";
-import { useSettings } from "./settings";
+import { EFFORT_ORDER, nextEffort, useSettings } from "./settings";
 
 vi.mock("../lib/ipc", () => ({
   ACCENTS: [],
@@ -186,5 +186,18 @@ describe("saving a page", () => {
     expect(useSettings.getState().error).toContain("read-only");
     // The window chrome still re-reads the file: the save failing does not mean the paint should lie.
     expect(appearanceLoad).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the effort dial", () => {
+  it("walks every level Settings offers, then wraps to the model's own choice", () => {
+    let effort: ReasoningEffort = "auto";
+    const walked: ReasoningEffort[] = [effort];
+    for (let i = 1; i < EFFORT_ORDER.length; i += 1) {
+      effort = nextEffort(effort);
+      walked.push(effort);
+    }
+    expect(walked).toEqual(EFFORT_ORDER);
+    expect(nextEffort(effort)).toBe("auto");
   });
 });

@@ -16,6 +16,14 @@ const PATHS = {
     "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 3v18M16.5 9l-3 3 3 3",
   sidebarExpand:
     "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 3v18M13.5 9l3 3-3 3",
+  /* The two strips under the conversation, as the reference draws their toggles: one window outline,
+     and the strip the press folds away named by a soft bar inside it — along the bottom edge for the
+     status strip, down the right edge for the inspector column. The outline is the same on both so
+     the pair reads as one window in two states, not two different glyphs. */
+  panelBottom:
+    "M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5z",
+  panelRight:
+    "M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5z",
   // The reference's history arrows are arrows, not chevrons: a shaft from the tip to the far edge, and
   // the head's two arms off it. The chevron this glyph used to be is 7 units wide beside a panel glyph
   // 18 units wide, which is why the top row read as two small ticks between two big shapes.
@@ -167,6 +175,17 @@ const PATHS = {
 export type IconName = keyof typeof PATHS;
 
 /**
+ * The one detail a glyph carries inside its outline. The panel toggles draw the strip they fold as a
+ * filled bar rather than a second outline: at 14px a second frame closes up into a box-in-a-box, while
+ * a bar at a third of the ink reads as the panel's own content and still lifts off the background on
+ * every interface style.
+ */
+const DETAILS: Partial<Record<IconName, string>> = {
+  panelBottom: "M7.5 13.8h9a1 1 0 0 1 1 1v1.4a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-1.4a1 1 0 0 1 1-1z",
+  panelRight: "M15.4 7.3h1.2a1 1 0 0 1 1 1v7.4a1 1 0 0 1-1 1h-1.2a1 1 0 0 1-1-1V8.3a1 1 0 0 1 1-1z",
+};
+
+/**
  * A brand mark is a silhouette, not line art, so it is painted rather than drawn: stroking a filled
  * path doubles its weight and turns a site's sign into a smudge at chip size. They still take
  * `currentColor`, which is what keeps a mark legible on every interface style.
@@ -189,6 +208,7 @@ export function Icon({
 }: { name: IconName; size?: number } & Omit<SVGProps<SVGSVGElement>, "name">) {
   const solid = SOLID.has(name);
   const sharp = SHARP.has(name);
+  const detail = DETAILS[name];
   return (
     <svg
       aria-hidden
@@ -203,6 +223,7 @@ export function Icon({
       strokeMiterlimit={sharp ? 8 : undefined}
       {...rest}
     >
+      {detail && <path d={detail} fill="currentColor" fillOpacity={0.35} stroke="none" />}
       <path d={PATHS[name]} />
     </svg>
   );

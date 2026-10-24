@@ -48,6 +48,8 @@ function seed(): {
   history: View[];
   cursor: number;
   collapsed: boolean;
+  rightOpen: boolean;
+  statusOpen: boolean;
   panel: Panel;
   reviewFile: string | null;
 } {
@@ -62,6 +64,11 @@ function seed(): {
     history,
     cursor: history.length - 1,
     collapsed: query("sidebar") === "collapsed",
+    // `?right=hidden` and `?status=hidden` fold the two strips the header's own toggles fold. The
+    // native window takes no injected clicks, so a state only a press can reach is a state a capture
+    // can never show — the same reason `?sidebar=collapsed` exists.
+    rightOpen: query("right") !== "hidden",
+    statusOpen: query("status") !== "hidden",
     // `?review=1` puts the change in the right column: the press that opens it is a click on the
     // pill, which the native window cannot be given, so the panel would otherwise never be seen.
     panel: query("review") === "1" ? "review" : "inspector",
@@ -76,6 +83,12 @@ type NavStore = {
   cursor: number;
   /** The sidebar's column folded away to its rail. */
   collapsed: boolean;
+  /** Whether the right column is showing. The header's right-panel toggle folds it, and the transcript
+   * takes the width it gives back. */
+  rightOpen: boolean;
+  /** Whether the strip under the composer is showing. It repeats the engine state the run's own rows
+   * carry, which is why it can be put away. */
+  statusOpen: boolean;
   /** Which of the two reports the right column is holding. */
   panel: Panel;
   /** The file the review column was asked to show, and which it scrolls to when it does. Cleared by
@@ -89,6 +102,8 @@ type NavStore = {
   /** Step forward again. Same answer for the same reason: an arrow with nowhere to go is a no-op. */
   forward: () => boolean;
   toggleSidebar: () => void;
+  toggleRight: () => void;
+  toggleStatus: () => void;
   /** The diff pill and the panel's own close control are the same press seen from either side. */
   toggleReview: () => void;
   showInspector: () => void;
@@ -123,6 +138,8 @@ export const useNav = create<NavStore>((set, get) => ({
     return true;
   },
   toggleSidebar: () => set((s) => ({ collapsed: !s.collapsed })),
+  toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
+  toggleStatus: () => set((s) => ({ statusOpen: !s.statusOpen })),
   toggleReview: () => set((s) => ({ panel: s.panel === "review" ? "inspector" : "review" })),
   showInspector: () => set({ panel: "inspector", reviewFile: null }),
   openReviewAt: (path) => set({ panel: "review", reviewFile: path }),

@@ -311,6 +311,13 @@ details[open] > summary .disclosure-icon {
   background: transparent;
   color: var(--text-faint);
 }
+/* A toggle that is holding something open: the wash hover leaves behind, held rather than passing
+ * under the pointer. `aria-pressed` is the state, so the header says the same thing to a screen
+ * reader that the tile says on screen. */
+.icon-btn[aria-pressed="true"] {
+  background: var(--bg-hover);
+  color: var(--text);
+}
 
 /* Folded, the sidebar's rail is narrower than the space the traffic lights take, so the third light
  * overhangs into whatever column comes next — which is the transcript's header, whose title is the
@@ -743,7 +750,7 @@ select.field-input {
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
-.plan-btn-open {
+.icon-btn.plan-btn-open {
   background: var(--accent-soft);
   color: var(--text);
 }
