@@ -1,4 +1,4 @@
-//! SmoLLM Studio's Tauri host.
+//! OpenFree's Tauri host.
 //!
 //! The crate's only jobs are to expose the Rust side to React and to keep that surface honest: the
 //! UI never computes a packing choice, an engine path or a refusal — it asks, and this host answers
@@ -439,7 +439,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building SmoLLM Studio");
+        .expect("error while building OpenFree");
 
     app.run(|app_handle, event| match event {
         // The mascot goes on the Dock here rather than in `setup`, because in a dev build Tauri puts

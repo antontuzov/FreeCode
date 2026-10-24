@@ -1,7 +1,8 @@
-# SmoLLM Studio
+# OpenFree
 
-A local-first desktop chat and coding agent for [PrismML's ternary Bonsai models](https://huggingface.co/prism-ml).
-Tauri v2 shell, Rust host, one supervised `llama-server` on loopback, and weights that stay on your disk.
+A local-first desktop chat and coding agent for [PrismML's ternary Bonsai models](https://huggingface.co/prism-ml),
+with a free-model tier answered by the OpenCode app already on this Mac. Tauri v2 shell, Rust host, one
+supervised `llama-server` on loopback, and weights that stay on your disk.
 
 The interface is modelled on a three-column AI workbench — transcript in the middle, workspace on the left,
 a run inspector on the right — and it is built to say what it did: every tool call leaves a row, every
@@ -241,5 +242,5 @@ docs/KNOWN_ISSUES.md    every model limit the code defends against, and where th
   trademarks; only the icon geometry is shared.
 - **KaTeX** fonts and stylesheet, bundled with the frontend build.
 
-SmoLLM Studio is MIT licensed; see [`LICENSE`](LICENSE). The engine and the model weights keep their own
+OpenFree is MIT licensed; see [`LICENSE`](LICENSE). The engine and the model weights keep their own
 terms, listed above.

@@ -1,4 +1,4 @@
-//! Settings schema + persistence for SmoLLM Studio.
+//! Settings schema + persistence for OpenFree.
 //!
 //! One `Settings` document is the single source of truth for the desktop app, the engine launcher
 //! and the agent loop. It is written atomically as JSON so a crash mid-save cannot leave a
@@ -43,7 +43,7 @@ pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
 /// contract below is written for the loop this app actually runs — read-only tools, sandboxed
 /// writes, an optional shell — and stays short enough that a 1.7B can hold it.
 pub const DEFAULT_SYSTEM_PROMPT: &str = "\
-You are SmoLLM Studio, a coding assistant running locally on the user's machine.
+You are OpenFree, a coding assistant running locally on the user's machine.
 
 Your job is to make the change the user asked for, correctly, in their workspace — not to describe how it could be made.
 

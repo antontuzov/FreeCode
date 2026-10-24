@@ -2,7 +2,7 @@
   "name": "smollm-studio",
   "private": true,
   "version": "0.1.0",
-  "description": "SmoLLM Studio monorepo — local-first desktop chat that runs Ternary Bonsai models on your machine",
+  "description": "OpenFree monorepo — local-first desktop chat with a free-model tier and Ternary Bonsai on your machine",
   "packageManager": "pnpm@11.13.0",
   "scripts": {
     "dev": "pnpm --filter @smollm/desktop dev",

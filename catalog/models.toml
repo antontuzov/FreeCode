@@ -1,4 +1,4 @@
-# SmoLLM Studio model catalog
+# OpenFree model catalog
 #
 # Source of truth for every number below, per model entry:
 #   HF model card : https://huggingface.co/<repo_id>/raw/main/README.md
