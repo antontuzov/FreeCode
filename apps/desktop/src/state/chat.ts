@@ -154,8 +154,9 @@ export const useChat = create<ChatStore>((set, get) => ({
 }));
 
 /**
- * Wire the host's event channel into the transcript for the lifetime of the window. Subscribed once
- * at mount rather than per send, so an event that arrives while the command is still settling — a
+ * Wire the host's event channel into the transcript for the lifetime of the window. Called once at
+ * module scope in main.tsx, before the React tree exists, so StrictMode's dev double-mount cannot
+ * register a second listener — and so an event that arrives while a command is still settling — a
  * relaunch warning, a refusal — is never missed by a listener that already went away.
  */
 export function connectAgentEvents(): Promise<() => void> {

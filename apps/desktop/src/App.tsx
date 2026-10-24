@@ -15,7 +15,7 @@ import type { Locale } from "./i18n";
 import { ipc } from "./lib/ipc";
 import { useShortcuts } from "./lib/shortcuts";
 import { useAppearance } from "./state/appearance";
-import { connectAgentEvents, useChat } from "./state/chat";
+import { useChat } from "./state/chat";
 import { currentView, useNav } from "./state/nav";
 import { useSessions } from "./state/sessions";
 import { FIXTURE_DIFF, FIXTURE_ROUNDS, FIXTURE_ROWS, useTranscript } from "./state/transcript";
@@ -82,24 +82,15 @@ export default function App() {
     void load();
   }, [load]);
 
-  // One subscription for the window's lifetime: a run's events keep arriving whether or not this
-  // component re-rendered, and the engine row has to agree with the server that is actually up.
+  // The engine row has to agree with the server that is actually up, so the window asks once it
+  // opens — the event channel itself is wired at module scope in main.tsx, outside StrictMode's
+  // dev double-mount. The sidebar's rows are conversations the host filed on a previous run, so the
+  // window has to ask for those too. The fixture does not: it draws its own workspace list to
+  // compare against docs/reference-ui, and a real list arriving underneath it would be a second
+  // truth.
   useEffect(() => {
-    let live = true;
-    let unlisten: (() => void) | null = null;
-    void connectAgentEvents().then((off) => {
-      if (live) unlisten = off;
-      else off();
-    });
     void refreshEngine();
-    // The sidebar's rows are conversations the host filed on a previous run, so the window has to ask
-    // for them once it opens. The fixture does not: it draws its own workspace list to compare
-    // against docs/reference-ui, and a real list arriving underneath it would be a second truth.
     if (!fixture) void refreshFiled();
-    return () => {
-      live = false;
-      unlisten?.();
-    };
   }, [fixture, refreshEngine, refreshFiled]);
 
   // `?fixture=1` renders the shell with a scripted run so the layout can be compared against
