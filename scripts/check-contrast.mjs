@@ -259,12 +259,18 @@ const SURFACE_INKS = [
 // and the moment one is placed inside a selected row it has to be lifted with it.
 const FILL_INKS = ["--text", "--text-strong", "--text-muted", "--accent-ink"];
 
-/** Pixels read out of docs/reference-ui by scripts/probe-reference-palette.swift for the DEFAULT
+/** Pixels read out of the reference UI by scripts/probe-reference-palette.swift for the DEFAULT
  * style, Mint, for every token that is now tinted rather than stated. The mixing percentages in
  * tokens.css are not free parameters: they were solved from these, so the gate can say out loud that
- * a style repaint has not moved the shipped default away from the reference. Tokens that are not
- * tinted (`--bg` and `--bg-elevated` in light, every grey) are absent, and so is `--text-strong`,
- * which trades an exact match for the dark green the reference shows in order to follow the style. */
+ * a style repaint has not moved the shipped default away from the reference.
+ *
+ * Light is read off docs/reference-ui shots 04-07. Dark is read off the reference app's own Settings
+ * captures of 2026-10-24: the page measures #191b1a, the sidebar #232624 and descriptions #949d97.
+ * `--bg-elevated`, `--bg-hover`, the two borders and the two checkpoints are derived steps from
+ * those three rather than separate samples, so their targets here are the palette's own contract
+ * values, held to the same two-unit slack. Tokens that are not tinted (`--bg` and `--bg-elevated` in
+ * light, every grey) are absent, and so is `--text-strong`, which trades an exact match for the
+ * style's hue in order to follow the accent. */
 const REFERENCE = {
   light: {
     "--bg-panel": "#e0f1ea",
@@ -275,16 +281,16 @@ const REFERENCE = {
     "--ink-quiet": "#98a098",
   },
   dark: {
-    "--bg": "#0a110e",
-    "--bg-panel": "#112921",
-    "--bg-elevated": "#16332a",
-    "--bg-sunken": "#080d0b",
-    "--bg-hover": "#1a3a30",
-    "--border": "#1e3a30",
-    "--border-strong": "#2b4c40",
-    "--ink-quiet": "#6d8278",
-    "--checkpoint": "#2c3632",
-    "--checkpoint-active": "#3c4c45",
+    "--bg": "#191b1a",
+    "--bg-panel": "#242624",
+    "--bg-elevated": "#262a27",
+    "--bg-sunken": "#141615",
+    "--bg-hover": "#2c302d",
+    "--border": "#333834",
+    "--border-strong": "#404741",
+    "--ink-quiet": "#6f7772",
+    "--checkpoint": "#373b38",
+    "--checkpoint-active": "#464b48",
   },
 };
 

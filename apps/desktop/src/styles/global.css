@@ -164,9 +164,12 @@ details[open] > summary .disclosure-icon {
   color: var(--text);
 }
 .nav-item[data-active="true"] {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--text-strong);
+  /* The reference marks the current page with a lifted neutral row and white label, not an accent
+   * outline: in a sidebar of eleven pages the style's colour is for actions, and a green outline on
+   * a navigation row reads as "this one is enabled" rather than "you are here". */
+  background: var(--nav-selected);
+  border-color: transparent;
+  color: var(--text);
 }
 
 /* A conversation sits under its workspace rather than beside it, so its label starts past the
@@ -232,11 +235,13 @@ details[open] > summary .disclosure-icon {
   border-radius: var(--radius-pill);
 }
 
-/* Settings rows and inspector groups sit in a rounded card separated by dashed hairlines. */
+/* Settings rows and inspector groups sit in a rounded, outlined card separated by dashed hairlines.
+ * The card is an outline rather than a raised fill: the reference's page and its cards are the same
+ * charcoal, and the 1px rule is what makes the group read. */
 .card {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--bg-elevated);
+  background: var(--bg);
   overflow: hidden;
 }
 /* The Glass toggle is about the one card that floats over something scrolling rather than sitting in
@@ -252,7 +257,7 @@ details[open] > summary .disclosure-icon {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-4);
+  padding: var(--space-6) var(--space-4);
   border-bottom: 1px dashed var(--border);
 }
 .card-row:last-child {
@@ -396,6 +401,9 @@ details[open] > summary .disclosure-icon {
 .row-title {
   color: var(--text-strong);
   font-size: var(--size-ui);
+  /* The captures set a Settings row's title at medium weight: it is a label, and the description
+   * under it is the sentence. At 400 the two lines were the same voice and the row read as prose. */
+  font-weight: 500;
 }
 .row-desc {
   color: var(--text-muted);
@@ -500,7 +508,7 @@ select.field-input {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--bg-elevated);
+  background: var(--toggle-knob);
   box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
   transition: transform var(--dur-quick) var(--ease-standard);
 }
@@ -752,14 +760,15 @@ select.field-input {
   cursor: pointer;
 }
 .style-preview {
+  /* The card shows a window, and a window's ground is the style's wash over the page. The percentage
+   * is a whisper on purpose: the captures' tiles sit within a few units of the page they stand on,
+   * and it is the bar and the dot that say which style the tile is. */
+  --preview-fill: color-mix(in oklab, var(--preview-chrome) 10%, var(--bg));
   padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  /* The card shows a window, and a window's ground is the style's wash rather than its action colour.
-   * Mixed from `--preview` the eight cards were eight different brightnesses — Ink's near-black square
-   * at 12% is a grey field beside Mint's faint one — which is the one thing the normalized tints exist
-   * to prevent. The bar and the dot below stay the accent, because those are the action colour. */
-  background: color-mix(in oklab, var(--preview-chrome) 12%, var(--bg-elevated));
+  /* The bar and the dot stay the action colour, because those are the accent. */
+  background: var(--preview-fill);
 }
 .style-card[data-selected="true"] .style-preview {
   border-color: var(--accent);
@@ -788,14 +797,15 @@ select.field-input {
   right: var(--space-3);
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border: 1.5px solid var(--preview);
   border-radius: 50%;
 }
+/* Selected is a filled dot in the captures, not a ring with a hole: the tile's own wash is already
+ * the shape under it, and a second ring inside a small circle reads as two marks. */
 .style-card[data-selected="true"] .style-dot {
   background: var(--preview);
-  box-shadow: inset 0 0 0 5px color-mix(in oklab, var(--preview-chrome) 12%, var(--bg-elevated));
 }
 .style-panel {
   display: flex;
@@ -805,7 +815,7 @@ select.field-input {
   padding: var(--space-2);
   border: 1px solid color-mix(in oklab, var(--preview-chrome) 25%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in oklab, var(--preview-chrome) 6%, var(--bg-elevated));
+  background: color-mix(in oklab, var(--preview-chrome) 6%, var(--bg));
 }
 .style-line {
   height: 5px;

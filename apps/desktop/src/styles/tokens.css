@@ -19,10 +19,12 @@
  *   data-code-lines   = on | off     data-code-wrap = on | off   (an answer's fenced code)
  *
  * The neutrals below are measured, not eyeballed: each one is a pixel read out of
- * docs/reference-ui with scripts/probe-reference-palette.swift (see the citation on the line).
+ * docs/reference-ui with scripts/probe-reference-palette.swift (see the citation on the line), except
+ * the dark surfaces retuned on 2026-10-24, whose targets are the same probe read off the reference
+ * app's own Settings captures — page #191b1a, sidebar #232624, description #949d97.
  * The first four accent families are measured in light mode from the interface-style cards in
- * shot 02; their dark-mode counterparts are the same hues lifted for contrast on the near-black
- * green, and are marked as derived rather than claimed as measurements. The fifth, Rain, is measured
+ * shot 02; their dark-mode counterparts are the same hues lifted for contrast on charcoal, and are
+ * marked as derived rather than claimed as measurements. The fifth, Rain, is measured
  * off the 2026-10-17 shots of the reference app's own cool chrome, and is the one family whose wash
  * and whose action colour are deliberately not the same hue — see its block.
  * The last three — Ink, Rose, Slate — are the styles the user asked for on 2026-10-20 and no shot
@@ -85,56 +87,60 @@
 }
 
 /* ---- mode: dark ----
- * The reference dark is not neutral grey — every surface carries a green cast, and the sidebar is
- * LIGHTER than the transcript column, which is the opposite of the usual raised-panel convention.
+ * Dark is near-neutral charcoal, and the style is a whisper over it. The 2026-10-24 captures read the
+ * page at #191b1a and the sidebar a step lighter at #232624, with a 13px description in #949d97 — the
+ * green cast the earlier shots carried was the app's, not the reference's, and at 8-16% of the tint it
+ * read as a repaint rather than as a theme. Every surface is still the style mixed into an untinted
+ * ground, so choosing Parchment still warms the whole window; the percentages are now small enough
+ * that the default reads as charcoal and the accent stays where it belongs, on actions, selection and
+ * the style tiles. The sidebar stays LIGHTER than the transcript column, which is the captures'
+ * relationship and the opposite of the usual raised-panel convention.
  *
- * Every surface below is the style mixed into an untinted ground, so picking Parchment warms the
- * whole window instead of only its buttons — which is what the interface-style cards in shot 02
- * promise and this file used to break: the sidebar stayed forest whatever the style was. The literal
- * in each `color-mix` is the ground with no style in it, and the percentage is how much style goes
- * in; they are solved from the measured pixels of the DEFAULT style, so Mint still paints exactly
- * what shots 05 and 06 measure and the other three inherit that lightness in their own hue.
- * scripts/check-contrast.mjs holds both halves of the claim — Mint's grounds against the reference,
- * and every ink against all four styles' grounds, since a Bee card sits lighter than a Mint one and
- * a faint grey loses contrast when the surface under it rises. */
+ * The literals are solved from the targets the captures set for the DEFAULT style, so Mint paints the
+ * measured page and sidebar and the other seven inherit that lightness in their own hue.
+ * scripts/check-contrast.mjs holds both halves of the claim — Mint's grounds against those targets,
+ * and every ink against all eight styles' grounds, since a Bee card sits differently from a Mint one
+ * and a faint grey loses contrast when the surface under it moves. */
 [data-theme-mode="dark"] {
-  /* 05: the transcript column and the right panel; the left sidebar; cards and popovers, lifted one
-     step from the sidebar; the code and diff gutters; the ground a row takes under the pointer. */
-  --bg: color-mix(in oklab, var(--accent-tint) 8%, #040605);
-  --bg-panel: color-mix(in oklab, var(--accent-tint) 16%, #05100c);
-  --bg-elevated: color-mix(in oklab, var(--accent-tint) 14%, #0b1f19);
-  --bg-sunken: color-mix(in oklab, var(--accent-tint) 8%, #030303);
-  --bg-hover: color-mix(in oklab, var(--accent-tint) 16%, #0e231d);
-  --text: #e8f0e8; /* 05: primary text */
-  /* A heading is the accent read at heading weight, not a different colour: 30% of the style's ink
-     over the body text keeps the near-white lightness and takes the hue from the style. It lands a
-     little off shot 05's #cfe9d8 for Mint, because the same rule now has to serve four styles. */
-  --text-strong: color-mix(in oklab, var(--accent-ink) 30%, var(--text));
+  /* The captures: the transcript column and the right panel; the left sidebar; cards and popovers,
+     lifted one step from the sidebar; the code and diff gutters; the ground a row takes under the
+     pointer. */
+  --bg: color-mix(in oklab, var(--accent-tint) 6%, #141213);
+  --bg-panel: color-mix(in oklab, var(--accent-tint) 8%, #1d1a1a);
+  --bg-elevated: color-mix(in oklab, var(--accent-tint) 6%, #212120);
+  --bg-sunken: color-mix(in oklab, var(--accent-tint) 5%, #100f0f);
+  --bg-hover: color-mix(in oklab, var(--accent-tint) 8%, #262524);
+  /* The current page's row: a lifted neutral, not the accent. In a sidebar of eleven pages an accent
+   * outline reads as "enabled" rather than "you are here"; the captures mark the row with a fill. */
+  --nav-selected: color-mix(in oklab, var(--ink-quiet) 45%, var(--bg-panel));
+  --text: #e2e6e2; /* captures: primary text, a near-white with the faintest warm cast */
+  /* A heading takes only a whisper of the style: the captures set headings in the body's own white,
+     so 15% of the style's ink is enough to say which theme is live without tinting a sentence. */
+  --text-strong: color-mix(in oklab, var(--accent-ink) 15%, var(--text));
   /* Three greys for text, and all three have to clear WCAG AA at the size they are read, which is
-     11-13px for the bottom two. The shots measure #93a89c and #6d8278; #6d8278 is 3.3:1 on a card
-     (`--bg-elevated`), and the smallest text in the window is exactly what sits on it — turn meta,
-     disclosure labels, the language chip on a code fence. So the ladder is re-spaced from the same
-     hues: `--text-faint` rises to the floor (4.6:1 on every surface in this mode) and `--text-muted`
-     one step above it, so the two stay distinguishable instead of meeting at the floor. They stay
-     neutral rather than tinted: an ink that follows the style would have to be re-measured for every
-     style, and the gate would then be proving a palette instead of a legibility floor. */
-  --text-muted: #a4b9ad; /* derived from 05's #93a89c, one rung above the faint below */
-  --text-faint: #899a92; /* derived from 05's #6d8278, which read 3.3:1 on a card */
-  /* The measured greys are not thrown away. A skeleton line, a preview rule and the inactive turn
-     dash are not information, and at the readable grey they would outshine the text around them —
-     WCAG itself puts non-text decoration outside the contrast rule for exactly that reason. This one
-     is decoration, so it takes the style: a green rule in a parchment window is the same mistake as
-     a green sidebar. The untinted ground is 05's measurement. */
-  --ink-quiet: color-mix(in oklab, var(--accent-tint) 12%, #6c7972);
-  --border: color-mix(in oklab, var(--accent-tint) 16%, #12231d);
-  --border-strong: color-mix(in oklab, var(--accent-tint) 18%, #1f342c);
+     11-13px for the bottom two: turn meta, disclosure labels, the language chip on a code fence. The
+     captures measure #949d97 for descriptions; `--text-faint` sits at the floor those small words
+     need on every surface in this mode, and the greys stay neutral rather than tinted — an ink that
+     followed the style would have to be re-measured for every style, and the gate would then be
+     proving a palette instead of a legibility floor. */
+  --text-muted: #9ca59f; /* the captures' #949d97, one rung up: a muted word also has to survive a
+     selected fill, and on charcoal that fill costs it more than the old near-black page did */
+  --text-faint: #8e9891; /* one rung under the muted, at the 4.5:1 floor on a card */
+  /* A skeleton line, a preview rule and the inactive turn dash are decoration, not information, and
+     WCAG puts non-text decoration outside the contrast rule for exactly that reason. Decoration is
+     also the one place the style can be felt without the window turning green, so it keeps a 6% tint
+     of the style over a neutral grey. */
+  --ink-quiet: color-mix(in oklab, var(--accent-tint) 6%, #6f726f);
+  --border: color-mix(in oklab, var(--accent-tint) 8%, #2e2d2b);
+  --border-strong: color-mix(in oklab, var(--accent-tint) 10%, #3a3a37);
   --shadow: 0 12px 32px rgb(0 0 0 / 45%);
   /* The ground a floating panel dims the shell to. Only the palette uses it, and it has to be a token
      because this is the one file allowed to state a colour. It stays a dimmer rather than a tint:
      at 62% it is the page with the lights turned down, and a style that warmed it would look like a
      fifth mode rather than a repaint. */
-  --scrim: rgb(4 10 8 / 62%);
-  --code-bg: #0a0f0d; /* 06: review panel code surface — neutral on purpose, so a syntax theme's own
+  --scrim: rgb(5 6 6 / 62%);
+  --code-bg: #121514; /* the code surface sits one step under the page rather than at black, so a
+     fence is a well in the column instead of a hole; neutral on purpose, so a syntax theme's own
      colours are the only ones competing with the accent */
   --code-theme: "github-dark";
   --success: #4caf7d;
@@ -145,8 +151,7 @@
   --diff-added: #19321d; /* 06: added-line background */
   --diff-removed: #3a1a1a;
   /* An inactive turn marker is one step off the column's own ground, and the active one is a step up
-     from that — both read off `--ink-quiet`, so the dashes in the gutter turn with the style too.
-     Shot 07 measures the inactive one. */
+     from that — both read off `--ink-quiet`, so the dashes in the gutter turn with the style too. */
   --checkpoint: color-mix(in oklab, var(--ink-quiet) 37%, var(--bg));
   --checkpoint-active: color-mix(in oklab, var(--ink-quiet) 55%, var(--bg));
   color-scheme: dark;
@@ -168,6 +173,9 @@
   --bg-elevated: #ffffff;
   --bg-sunken: color-mix(in oklab, var(--accent-tint) 9%, #fdfdfc);
   --bg-hover: color-mix(in oklab, var(--accent-tint) 16%, #edf5f0);
+  /* The current page's row. Light mode has far less room between the sidebar wash and the ink, so the
+   * fill is one step, not the dark mode's four: the row must read as lifted, not as a grey button. */
+  --nav-selected: color-mix(in oklab, var(--ink-quiet) 22%, var(--bg-panel));
   --text: #1b2420;
   /* The reference's headings are dark green, not black — the style, read at heading weight. Mixed
      from `--accent-ink` rather than `--accent` because a heading has to clear the same floor as body
@@ -330,8 +338,8 @@
   --accent-tint: var(--style-slate-tint);
 }
 
-/* On the near-black green a light-mode accent sinks in; the same hue lifted ~14% is what shots 05
- * and 06 actually show (mint measures #62c9a8 there). */
+/* On a charcoal page a light-mode accent sinks in; the same hue lifted until it reads as its own
+ * colour is what the captures show (mint measures #62c9a8 there). */
 [data-theme-mode="dark"] {
   --style-forest: #5fae7f;
   --style-mint: #62c9a8; /* 05: measured */
@@ -397,12 +405,23 @@
   --accent-line: color-mix(in oklab, var(--accent) 55%, transparent);
 }
 
+/* On charcoal the same 16% costs a grey more than it did on the near-black page: the fill lands a
+ * step higher, and a muted word standing on it drops from 4.6:1 to 3.9:1. Twelve per cent keeps the
+ * selected row visible and the word on it legible; light mode's pale grounds had room for the larger
+ * fill, so the override is dark-only. */
+[data-theme-mode="dark"] {
+  --accent-soft: color-mix(in oklab, var(--accent-tint) 12%, transparent);
+}
+
 /* The ground a row's icon chip paints itself with. `--ink-quiet` is already the token for fills that
  * carry no words, and 20% of it over the panel is the reference's chip in light: shot 04 measures the
  * chip at #e8e9e7 and the app renders #e7e9e6. Dark lands a little under shot 05's #252e29, at
  * #1f2723 — the same step read against a ground that is itself four units darker. */
 :root {
   --chip-fill: color-mix(in oklab, var(--ink-quiet) 20%, transparent);
+  /* The switch knob is white in both modes. The captures' off track is a mid grey and their on track
+   * is the accent, and a white knob reads on either without the knob changing with the page. */
+  --toggle-knob: #f5f8f6;
 }
 
 /* ---- surface: glass falls back to solid, never to a half-blurred nothing ---- */
