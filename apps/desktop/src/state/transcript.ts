@@ -227,6 +227,32 @@ export function isTurn(row: Row): row is Turn {
   return row.kind === "turn";
 }
 
+/** The length `sessions::title_of` files a conversation's name at. */
+const TITLE_MAX = 60;
+
+/**
+ * The task's own name: its first prompt, on one line and shortened.
+ *
+ * This is the string the host files the conversation under and the sidebar row prints, restated here
+ * because the header has to carry it while the first answer is still streaming — before there is a
+ * filed session to ask. It is a label rather than a lookup, so the two rules drifting apart would
+ * cost a slightly different truncation point, not a wrong claim.
+ */
+export function taskTitle(rows: Row[]): string | null {
+  const prompt = rows.find((row) => isTurn(row) && row.role === "user");
+  if (!prompt || !isTurn(prompt)) return null;
+  const collapsed = prompt.text.trim().split(/\s+/).join(" ");
+  if (!collapsed) return null;
+  const chars = [...collapsed];
+  if (chars.length <= TITLE_MAX) return collapsed;
+  let title = chars.slice(0, TITLE_MAX).join("");
+  // End on a word when the prefix holds a boundary worth cutting at, as the host does; a single
+  // unbroken token longer than the cap gets the raw cut and the ellipsis.
+  const space = title.lastIndexOf(" ");
+  if (space > TITLE_MAX / 2) title = title.slice(0, space);
+  return `${title}…`;
+}
+
 export function stepLabel(locale: Locale, step: Step): string {
   if (step.kind === "toolBatch") {
     // A batch of one would read "Ran 1 tools". The count only earns its place above one, and the

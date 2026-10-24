@@ -70,7 +70,7 @@
   "review.revertAll": "Put every file in this change back the way it was",
   "review.reverted": "Reverted",
   "review.revertFailed": "Nothing was put back: {{why}}",
-  "transcript.title": "Task",
+  "transcript.untitled": "New task",
   "topbar.effort": "Reasoning effort: {{level}}",
   "topbar.status": "Status bar",
   "topbar.rightPanel": "Run inspector",

@@ -466,13 +466,19 @@
  * sideways room and its first control clears them downward instead.
  *
  * These numbers are measured off a window capture of this build, not copied from AppKit's defaults:
- * the three lights run from x=21 to x=75 and their centres sit on y=18, so 78 is the first column
- * clear of them and `--traffic-light-center` is the line the header row's own glyphs are set on. The
- * reference hangs its panel toggle and its history arrows on that same line — the row is the
- * titlebar's band, not a strip stacked under it — which is why the band is twice the centre rather
- * than a padding value that happened to land eight pixels low. */
+ * the three lights run from x=21 to x=80.5 and their centres sit on y=18, and `--traffic-light-center`
+ * is the line the header row's own glyphs are set on. The reference hangs its panel toggle and its
+ * history arrows on that same line — the row is the titlebar's band, not a strip stacked under it —
+ * which is why the band is twice the centre rather than a padding value that happened to land eight
+ * pixels low.
+ *
+ * The inset is two `--space-2` steps past the last light, which is where the reference's first control
+ * sits: measured against its own titlebar, that control's centre is 26px past the green. The old 78
+ * was inside the green light's own column, so the toggle read as crowded against the window's chrome.
+ * Every row that dodges the lights moves on this one token, so the sidebar's band, the transcript
+ * header folded beside it, and the pages' own headers keep one left edge. */
 [data-platform="darwin"] {
-  --traffic-light-inset: 78px;
+  --traffic-light-inset: 94px;
   --traffic-light-center: 18px;
   --traffic-light-clear: 34px;
 }

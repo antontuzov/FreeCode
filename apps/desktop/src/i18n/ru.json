@@ -70,7 +70,7 @@
   "review.revertAll": "Вернуть все файлы изменения к состоянию до запуска",
   "review.reverted": "Возвращено",
   "review.revertFailed": "Вернуть не удалось: {{why}}",
-  "transcript.title": "Задача",
+  "transcript.untitled": "Новая задача",
   "topbar.effort": "Уровень рассуждений: {{level}}",
   "topbar.status": "Строка состояния",
   "topbar.rightPanel": "Инспектор запуска",

@@ -9,6 +9,7 @@ import {
   isTurn,
   stepLabel,
   stepText,
+  taskTitle,
   useTranscript,
   type Row,
   type Step,
@@ -643,6 +644,11 @@ export function Transcript({
     flashTimer.current = window.setTimeout(() => setFlash(""), 1400);
   };
 
+  // The header names the task rather than saying "Task": the first prompt is the title the sidebar
+  // files this conversation under, so the two agree on what the task is called. Only a window that
+  // has been asked nothing yet falls back to the plain label.
+  const heading = taskTitle(rows) ?? translate(locale, "transcript.untitled");
+
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <header
@@ -653,8 +659,11 @@ export function Transcript({
         {/* Folded, the sidebar's header row is gone with the column, so the steps it carried — back,
             forward, search — stand here instead, clear of the traffic lights by the same padding. */}
         {rail && <NavSteps locale={locale} onOpenPalette={onOpenPalette} />}
-        <h1 className="min-w-0 flex-1 truncate text-ui font-medium text-fg">
-          {translate(locale, "transcript.title")}
+        <h1
+          className="min-w-0 flex-1 truncate text-ui font-medium text-fg"
+          title={heading ?? undefined}
+        >
+          {heading}
         </h1>
         {/* The reference's top-bar cluster, at the conversation's own header: the effort dial, the
             plan, and the two strips this column shares the window with. */}

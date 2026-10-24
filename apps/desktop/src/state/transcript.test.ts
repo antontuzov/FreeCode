@@ -13,6 +13,7 @@ import {
   stepLabel,
   stepText,
   subagents,
+  taskTitle,
   useTranscript,
   usedCapabilities,
   type Row,
@@ -716,5 +717,41 @@ describe("prompt rows", () => {
     expect(typeof useTranscript.getState().runStartedAt).toBe("number");
     useTranscript.getState().setRunning(false);
     expect(useTranscript.getState().runStartedAt).toBeNull();
+  });
+});
+
+describe("task title", () => {
+  // A step row ahead of the prompt, because the transcript can hold one before a turn: the name has
+  // to come from the question, not from whatever row happens to be first.
+  const asked = (text: string): Row[] => [
+    { id: "s0", kind: "readFile" },
+    { id: "u1", kind: "turn", role: "user", text },
+    { id: "a1", kind: "turn", role: "assistant", text: "an answer" },
+  ];
+
+  it("names the task off its own first prompt", () => {
+    expect(taskTitle(asked("rename the config loader"))).toBe("rename the config loader");
+  });
+
+  it("puts a prompt typed across lines on one line", () => {
+    expect(taskTitle(asked("summarise\n\n  the attached   picture "))).toBe(
+      "summarise the attached picture",
+    );
+  });
+
+  // 60 is `sessions::TITLE_MAX`, the length the host files the same name at: the header and the
+  // sidebar row are the same task, so they cut it the same way.
+  it("cuts a prompt longer than the filed name at a word, and says so", () => {
+    const title = taskTitle(asked("count the words here ".repeat(6)))!;
+    expect([...title].length).toBeLessThanOrEqual(61);
+    expect(title.endsWith("words…")).toBe(true);
+  });
+
+  it("has no name for a window nothing has been asked of", () => {
+    expect(taskTitle([])).toBeNull();
+    expect(
+      taskTitle([{ id: "a1", kind: "turn", role: "assistant", text: "an answer" }]),
+    ).toBeNull();
+    expect(taskTitle(asked("   "))).toBeNull();
   });
 });
