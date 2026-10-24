@@ -169,7 +169,7 @@ export function NavSteps({ locale, onOpenPalette }: { locale: Locale; onOpenPale
   const canForward = useNav((s) => s.cursor < s.history.length - 1);
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1.5">
       <button
         type="button"
         aria-label={translate(locale, "nav.back")}
@@ -178,7 +178,7 @@ export function NavSteps({ locale, onOpenPalette }: { locale: Locale; onOpenPale
         className="icon-btn"
         onClick={back}
       >
-        <Icon name="back" />
+        <Icon name="back" size={14} />
       </button>
       <button
         type="button"
@@ -190,7 +190,7 @@ export function NavSteps({ locale, onOpenPalette }: { locale: Locale; onOpenPale
         className="icon-btn"
         onClick={forward}
       >
-        <Icon name="forward" />
+        <Icon name="forward" size={14} />
       </button>
       {/* The crop carries the magnifier a step apart from the arrows, and the palette it opens is
           the same one the nav row and ⌘K reach. */}
@@ -201,7 +201,7 @@ export function NavSteps({ locale, onOpenPalette }: { locale: Locale; onOpenPale
         className="icon-btn ml-[var(--space-2)]"
         onClick={onOpenPalette}
       >
-        <Icon name="search" />
+        <Icon name="search" size={14} />
       </button>
     </div>
   );
@@ -320,12 +320,14 @@ export function Sidebar({
           sits on their centre line: this band is the titlebar's, and the reference draws the toggle
           and the two history arrows on that line rather than stacked under it. */}
       <div
-        className="flex h-[calc(var(--traffic-light-center)*2)] items-center gap-1 px-[var(--space-3)]"
+        className="flex h-[calc(var(--traffic-light-center)*2)] items-center gap-1.5 px-[var(--space-3)]"
         style={{ paddingLeft: "max(var(--space-3), var(--traffic-light-inset))" }}
       >
         {/* The reference's header row: a column that folds, the two steps along the surfaces this
             window has opened, and the search over everything. Each of the arrows says so when the
-            stack has nothing on that side of it rather than firing into a no-op. */}
+            stack has nothing on that side of it rather than firing into a no-op. The glyphs are
+            drawn at 14px in the 28px hit area: at 16 they left roughly half the air the reference
+            keeps between one control and the next, which is what made the row read as one blob. */}
         <button
           type="button"
           aria-label={toggleLabel}
@@ -333,7 +335,7 @@ export function Sidebar({
           className="icon-btn"
           onClick={toggleSidebar}
         >
-          <Icon name="sidebar" />
+          <Icon name="sidebar" size={14} />
         </button>
         <NavSteps locale={locale} onOpenPalette={actions.openPalette} />
       </div>

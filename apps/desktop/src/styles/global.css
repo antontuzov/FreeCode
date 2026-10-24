@@ -737,8 +737,8 @@ select.field-input {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-/* The count rides inside the control, as the reference's badge does, so the header says "2/5"
- * without the panel being opened. */
+/* The count heads the panel, on the title's line: a 28px header square has no room beside the glyph,
+ * and a badge that wrapped under it crowded the control next door. */
 .plan-badge {
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;

@@ -33,10 +33,12 @@ const PATHS = {
   // The glass and its handle inside one box with the panel glyph: the handle used to run to the 24's
   // corner, which made this the widest shape in the header row by a unit and a half of stroke.
   search: "M11 18.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15zM20 20l-3.9-3.9",
-  /* The run's plan, as the reference draws its task-list control: two rows of a list, the first
-     still to do (an empty box) and the second already checked. The check sits where the box was,
-     so the two rows read as one list changing state rather than two different lists. */
-  checklist: "M4 7.5h2.5V10H4zM10 8.75h9M4 15.5l1.9 1.9 3.1-3.7M11.5 16h7.5",
+  /* The run's plan, as the reference draws its task-list control: three rows of a list — a box and
+     a line, a line alone, then a check and a line — on the same left edge, so the column reads as
+     one list at three states rather than three different lists. The rows sit 5.3 units apart on the
+     24 grid because the reference's three lines are evenly spread across the glyph's full height,
+     not stacked at its middle with air above and below. */
+  checklist: "M4 4h4.75v4.75H4zM12 6.4h8M12 11.7h8M4 15l2 2.2 4.1-4.8M12 17.3h8",
   workspace: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   knowledge: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 3v17",
   sites: "M3 5h18v14H3zM3 10h18M8 5v5",
@@ -92,7 +94,10 @@ const PATHS = {
   mic: "M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zM19 10a7 7 0 0 1-14 0M12 17v4",
   stop: "M6 6h12v12H6z",
   send: "M12 19V5M5 12l7-7 7 7",
-  attach: "M21 12.5 12.5 21a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10.5 19",
+  // The reference's clip is the two-loop paperclip, not one curve bent twice: at 14px the inner
+  // loop is the only thing that separates it from a stray comma in the row.
+  attach:
+    "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48",
   plus: "M12 5v14M5 12h14",
   help: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4.5M12 17.5h.01",
   chevronDown: "M6 9l6 6 6-6",
@@ -168,12 +173,22 @@ export type IconName = keyof typeof PATHS;
  */
 const SOLID = new Set<IconName>(["github", "huggingFace", "wikipedia"]);
 
+/**
+ * The two glyphs the reference cuts rather than draws. Its bolt ends in square tips and turns at
+ * sharp corners, and the checklist's box and bars are cut square too — the round join the rest of
+ * the set uses softens a 14px lightning into a blob and rounds a checkbox into a pill. The miter
+ * limit is raised for the same reason: the bolt's tips are sharper than the default limit allows,
+ * which would bevel them back into the soft shape this set is trying not to draw.
+ */
+const SHARP = new Set<IconName>(["bolt", "checklist"]);
+
 export function Icon({
   name,
   size = 16,
   ...rest
 }: { name: IconName; size?: number } & Omit<SVGProps<SVGSVGElement>, "name">) {
   const solid = SOLID.has(name);
+  const sharp = SHARP.has(name);
   return (
     <svg
       aria-hidden
@@ -183,8 +198,9 @@ export function Icon({
       fill={solid ? "currentColor" : "none"}
       stroke={solid ? "none" : "currentColor"}
       strokeWidth={1.7}
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      strokeLinecap={sharp ? "butt" : "round"}
+      strokeLinejoin={sharp ? "miter" : "round"}
+      strokeMiterlimit={sharp ? 8 : undefined}
       {...rest}
     >
       <path d={PATHS[name]} />

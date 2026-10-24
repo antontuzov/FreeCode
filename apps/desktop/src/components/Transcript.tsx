@@ -437,9 +437,10 @@ function PlanList({ items, className }: { items: HostPlanItem[]; className?: str
 }
 
 /**
- * The run's plan, behind the header's checklist control. It reports the count on the button, so a
- * run that is three steps in says so without the panel being opened, and the panel is the list
- * itself — the steps are the model's words, not the app's summary of them.
+ * The run's plan, behind the header's checklist control. The control is the reference's square
+ * glyph and nothing else: the count used to ride beside the icon, which does not fit a 28px square —
+ * it wrapped onto a second line and pushed the button into its neighbour. The count heads the panel
+ * instead, where it has a row to itself, and the transcript's plan row already states it in words.
  */
 function PlanButton({ locale, plan }: { locale: Locale; plan: HostPlanItem[] | null }) {
   const [open, setOpen] = useState(false);
@@ -459,7 +460,7 @@ function PlanButton({ locale, plan }: { locale: Locale; plan: HostPlanItem[] | n
     <span className="relative">
       <button
         type="button"
-        className={`icon-btn gap-1 ${open && plan ? "plan-btn-open" : ""} ${plan ? "" : "opacity-55"}`}
+        className={`icon-btn ${open && plan ? "plan-btn-open" : ""} ${plan ? "" : "opacity-55"}`}
         aria-label={translate(locale, "transcript.plan.title")}
         aria-pressed={plan ? open : undefined}
         aria-disabled={plan ? undefined : true}
@@ -472,12 +473,7 @@ function PlanButton({ locale, plan }: { locale: Locale; plan: HostPlanItem[] | n
           if (plan) setOpen((was) => !was);
         }}
       >
-        <Icon name="checklist" />
-        {plan && (
-          <span className="plan-badge font-mono text-micro">
-            {done}/{total}
-          </span>
-        )}
+        <Icon name="checklist" size={14} />
       </button>
       {open && plan && (
         <>
@@ -494,9 +490,12 @@ function PlanButton({ locale, plan }: { locale: Locale; plan: HostPlanItem[] | n
               }
             }}
           >
-            <p className="section-label px-[var(--space-3)] pt-[var(--space-2)]">
-              {translate(locale, "transcript.plan.title")}
-            </p>
+            <div className="flex items-baseline justify-between px-[var(--space-3)] pt-[var(--space-2)]">
+              <p className="section-label">{translate(locale, "transcript.plan.title")}</p>
+              <span className="plan-badge font-mono text-micro">
+                {done}/{total}
+              </span>
+            </div>
             <PlanList items={plan} />
             <p className="px-[var(--space-3)] pb-[var(--space-2)] text-fine text-faint">
               {translate(locale, "transcript.plan.hint")}
@@ -601,7 +600,7 @@ export function Transcript({
           aria-disabled
           title={translate(locale, "common.notInBuild")}
         >
-          <Icon name="extensions" />
+          <Icon name="extensions" size={14} />
         </button>
       </header>
 

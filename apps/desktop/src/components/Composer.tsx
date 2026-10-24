@@ -234,15 +234,17 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           />
           {/* Still nothing to add a prompt but a picture: context attachments wait on the retrieval
               path, voice on the input it would transcribe into. Named on hover, like the sidebar's
-              unbuilt rows. */}
+              unbuilt rows. The reference draws this one as an outlined square rather than a bare
+              glyph — the border is what separates the row's first control from the box it sits in,
+              and a disabled control still keeps its shape. */}
           <button
             type="button"
-            className="icon-btn"
+            className="icon-btn border border-line"
             aria-label={translate(locale, "composer.add")}
             aria-disabled
             title={notInBuild}
           >
-            <Icon name="plus" />
+            <Icon name="plus" size={14} />
           </button>
           <button
             type="button"
@@ -256,7 +258,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
                 : translate(locale, "composer.attach")
             }
           >
-            <Icon name="attach" />
+            <Icon name="attach" size={14} />
           </button>
           {/* The Coding control, as the reference draws it: one line icon in the row, not a second
               labelled pill. It reads as pressed because the state is the whole point of the click —
@@ -281,8 +283,13 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
               ...(coding && subagents ? [translate(locale, "composer.coding.subagents")] : []),
             ].join(" ")}
           >
-            <Icon name="coding" />
+            <Icon name="coding" size={14} />
           </button>
+          {/* The reference marks this dial with the warning triangle and colours the whole pill when
+              the policy is the wide one: auto approve is the mode that lets the run change files and
+              run a command without being asked, which is the one state the row should not whisper.
+              The narrower modes keep the same glyph in the muted ink, because the shape names the
+              kind of control and the colour names the risk. */}
           <button
             type="button"
             onClick={() => void cycleApproval()}
@@ -292,9 +299,11 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
               locale,
               mode ? `composer.approve.${mode}` : "settings.row.approvalMode",
             )}
-            className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-fine text-muted hover:bg-hover hover:text-fg"
+            className={`flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-fine ${
+              mode === "auto_approve" ? "text-danger" : "text-muted hover:bg-hover hover:text-fg"
+            }`}
           >
-            <Icon name="review" size={13} />
+            <Icon name="warning" size={14} />
             {translate(locale, mode ? `settings.opt.${mode}` : "settings.section.approvals")}
             <Icon name="chevronDown" size={12} />
           </button>
@@ -309,7 +318,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
             aria-disabled
             title={notInBuild}
           >
-            <Icon name="mic" />
+            <Icon name="mic" size={14} />
           </button>
           <button
             type="button"
@@ -318,11 +327,11 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
             aria-label={translate(locale, running ? "composer.stop" : "composer.send")}
             // The key the interrupt answers to, named only while there is a reply to interrupt.
             title={running ? shortcutLabel("escape") : undefined}
-            className="grid size-8 place-items-center rounded-[var(--radius-md)] bg-accent text-accent-contrast disabled:opacity-60"
+            className="grid size-7 place-items-center rounded-[var(--radius-md)] bg-accent text-accent-contrast disabled:opacity-60"
           >
             {/* Interrupting a reply cuts its stream and keeps the server, so the next prompt is
                 answered without reloading the weights. */}
-            <Icon name={running ? "stop" : "send"} size={15} />
+            <Icon name={running ? "stop" : "send"} size={14} />
           </button>
         </div>
       </div>
