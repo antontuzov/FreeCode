@@ -263,6 +263,12 @@ details[open] > summary .disclosure-icon {
 .card-row:last-child {
   border-bottom: none;
 }
+/* A card that states its options in one screen rather than listing a page of them: onboarding's
+ * route rows have to leave room for the note under them at the app's own 794px window. */
+.card-row[data-compact="true"] {
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-4);
+}
 
 .pill {
   display: inline-flex;

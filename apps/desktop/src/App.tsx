@@ -4,6 +4,7 @@ import { Extensions } from "./components/Extensions";
 import { Inspector } from "./components/Inspector";
 import { Knowledge } from "./components/Knowledge";
 import { ModelStatus } from "./components/ModelStatus";
+import { Onboarding } from "./components/Onboarding";
 import { Palette } from "./components/Palette";
 import { Preview } from "./components/Preview";
 import { Review } from "./components/Review";
@@ -17,6 +18,8 @@ import { useShortcuts } from "./lib/shortcuts";
 import { useAppearance } from "./state/appearance";
 import { useChat } from "./state/chat";
 import { currentView, useNav } from "./state/nav";
+import { useOnboarding } from "./state/onboarding";
+import { useSettings } from "./state/settings";
 import { useSessions } from "./state/sessions";
 import { FIXTURE_DIFF, FIXTURE_ROUNDS, FIXTURE_ROWS, useTranscript } from "./state/transcript";
 
@@ -69,6 +72,12 @@ export default function App() {
   const filed = useSessions((s) => s.items);
   const openFiled = useSessions((s) => s.open);
   const refreshFiled = useSessions((s) => s.refresh);
+  // Setup reads the same document the Settings surface edits, so the window loads it whether or not
+  // that page has been opened: the first launch has to know whether the flow was already answered.
+  const loadSettings = useSettings((s) => s.load);
+  const settingsDoc = useSettings((s) => s.doc);
+  const setupOpen = useOnboarding((s) => s.open);
+  const openSetup = useOnboarding((s) => s.openSetup);
 
   // The catalog language is the setting, so switching it in Settings repaints every label.
   // `?lang=` is the dev-only press of that menu row. It cannot ride the appearance levers in
@@ -81,6 +90,33 @@ export default function App() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
+
+  // The setup flow opens on a first launch, and on every `?onboarding=<step>` capture. The deep links
+  // that name another surface keep it shut: a card over the page a capture asked for would hide the
+  // thing the capture exists to show.
+  const forcedSetup = query("onboarding");
+  useEffect(() => {
+    if (forcedSetup === null) return;
+    const asked = Number(forcedSetup);
+    openSetup(Number.isInteger(asked) && asked >= 1 ? asked - 1 : 0);
+  }, [forcedSetup, openSetup]);
+  useEffect(() => {
+    if (forcedSetup !== null || fixture) return;
+    if (
+      query("settings") !== null ||
+      query("knowledge") !== null ||
+      query("extensions") !== null ||
+      query("ask") !== null ||
+      query("preview") !== null
+    )
+      return;
+    if (!settingsDoc || settingsDoc.onboarding.completed) return;
+    openSetup(0);
+  }, [fixture, forcedSetup, settingsDoc, openSetup]);
 
   // The engine row has to agree with the server that is actually up, so the window asks once it
   // opens — the event channel itself is wired at module scope in main.tsx, outside StrictMode's
@@ -166,17 +202,23 @@ export default function App() {
   useShortcuts({
     newTask: () => {
       // The palette and the surfaces each own the keyboard the same way: a New task fired from under
-      // one would empty the transcript the thing in front of the user describes.
+      // one would empty the transcript the thing in front of the user describes. Setup owns it too —
+      // it covers the window, and a shortcut that edits what is behind it is a shortcut into a hidden page.
+      if (setupOpen) return;
       if (view.kind !== "chat" || paletteOpen) return;
       void newTask();
     },
     // ⌘, opens Settings over whatever is under it, and a second press does not bury the page the user
     // is reading under a fresh copy of Appearance.
     settings: () => {
+      if (setupOpen) return;
       if (view.kind !== "settings") push({ kind: "settings", page: "appearance" });
     },
     // Twice closes it, because the second press is the user changing their mind.
-    palette: () => setPaletteOpen((open) => !open),
+    palette: () => {
+      if (setupOpen) return;
+      setPaletteOpen((open) => !open);
+    },
     // Esc leaves a step of the history when there is one to leave and stops the run when the window is
     // already back at the conversation. The one control that means two things takes three in hand: a
     // review panel the user opened is the nearest thing to close, and it is not on the stack. The
@@ -195,89 +237,109 @@ export default function App() {
     },
   });
 
+  // One overlay whatever surface is underneath it: the flow can be re-run from Settings, so its
+  // "open a settings page" buttons push onto the same history the window's header moves along.
+  const setup = setupOpen ? (
+    <Onboarding locale={locale} onOpenPage={(page) => push({ kind: "settings", page })} />
+  ) : null;
+
   if (view.kind === "settings") {
     return (
-      <Settings
-        locale={locale}
-        page={view.page}
-        onOpen={(page) => push({ kind: "settings", page })}
-        onBack={back}
-      />
+      <>
+        <Settings
+          locale={locale}
+          page={view.page}
+          onOpen={(page) => push({ kind: "settings", page })}
+          onBack={back}
+        />
+        {setup}
+      </>
     );
   }
 
   if (view.kind === "knowledge") {
     return (
-      <Knowledge
-        locale={locale}
-        page={view.model}
-        onOpen={(model) => push({ kind: "knowledge", model })}
-        onBack={back}
-      />
+      <>
+        <Knowledge
+          locale={locale}
+          page={view.model}
+          onOpen={(model) => push({ kind: "knowledge", model })}
+          onBack={back}
+        />
+        {setup}
+      </>
     );
   }
 
   if (view.kind === "extensions") {
-    return <Extensions locale={locale} onBack={back} />;
+    return (
+      <>
+        <Extensions locale={locale} onBack={back} />
+        {setup}
+      </>
+    );
   }
 
   return (
-    <div className="flex h-full flex-col bg-bg text-fg">
-      <div className="flex min-h-0 flex-1">
-        <Sidebar
-          locale={locale}
-          fixture={fixture}
-          onOpenSettings={() => push({ kind: "settings", page: "appearance" })}
-          actions={{
-            newTask: () => void newTask(),
-            openPalette: () => setPaletteOpen(true),
-            openKnowledge: () => push({ kind: "knowledge", model: "" }),
-            openExtensions: () => push({ kind: "extensions" }),
-          }}
-        />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <Transcript
+    <>
+      <div className="flex h-full flex-col bg-bg text-fg">
+        <div className="flex min-h-0 flex-1">
+          <Sidebar
             locale={locale}
-            onPickModel={() => push({ kind: "settings", page: "model" })}
-            onOpenPalette={() => setPaletteOpen(true)}
+            fixture={fixture}
+            onOpenSettings={() => push({ kind: "settings", page: "appearance" })}
+            actions={{
+              newTask: () => void newTask(),
+              openPalette: () => setPaletteOpen(true),
+              openKnowledge: () => push({ kind: "knowledge", model: "" }),
+              openExtensions: () => push({ kind: "extensions" }),
+            }}
           />
-          {statusOpen && <StatusBar locale={locale} />}
-        </div>
-        {/* The column owns its width, not either report inside it: both are the same column's turn, and
+          <div className="flex min-w-0 flex-1 flex-col">
+            <Transcript
+              locale={locale}
+              onPickModel={() => push({ kind: "settings", page: "model" })}
+              onOpenPalette={() => setPaletteOpen(true)}
+            />
+            {statusOpen && <StatusBar locale={locale} />}
+          </div>
+          {/* The column owns its width, not either report inside it: both are the same column's turn, and
             a height the pair has to share is one constraint the reports should not each re-declare. */}
-        {rightOpen && (
-          <div
-            className={`flex min-h-0 shrink-0 flex-col ${
-              previewOpen || panel === "review"
-                ? "w-[var(--review-width)]"
-                : "w-[var(--inspector-width)]"
-            }`}
-          >
-            {!previewOpen && <ModelStatus locale={locale} />}
-            {/* One column, three reports: the run's numbers, the change those numbers name, or the
+          {rightOpen && (
+            <div
+              className={`flex min-h-0 shrink-0 flex-col ${
+                previewOpen || panel === "review"
+                  ? "w-[var(--review-width)]"
+                  : "w-[var(--inspector-width)]"
+              }`}
+            >
+              {!previewOpen && <ModelStatus locale={locale} />}
+              {/* One column, three reports: the run's numbers, the change those numbers name, or the
                 page that change built. Shot 06 has the diff here rather than under the answer,
                 because a code line needs the width the transcript would have to give up to show it —
                 and the game the diff produced gets the same column rather than the whole window,
                 because it is the run's answer, not the app's. The model card steps aside for it: the
                 page being played is the point, and the route it came from is the chat's business. */}
-            {previewOpen ? (
-              <Preview locale={locale} />
-            ) : panel === "review" ? (
-              <Review locale={locale} />
-            ) : (
-              <Inspector locale={locale} fixture={fixture} />
-            )}
-          </div>
+              {previewOpen ? (
+                <Preview locale={locale} />
+              ) : panel === "review" ? (
+                <Review locale={locale} />
+              ) : (
+                <Inspector locale={locale} fixture={fixture} />
+              )}
+            </div>
+          )}
+        </div>
+        {paletteOpen && (
+          <Palette
+            locale={locale}
+            initial={paletteQuery ?? ""}
+            onClose={() => setPaletteOpen(false)}
+          />
         )}
       </div>
-      {paletteOpen && (
-        <Palette
-          locale={locale}
-          initial={paletteQuery ?? ""}
-          onClose={() => setPaletteOpen(false)}
-        />
-      )}
-    </div>
+      {setup}
+    </>
   );
 }
 

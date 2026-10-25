@@ -541,6 +541,15 @@ export type RemoteProviderDoc = {
   contextTokens: number;
 };
 
+/** Where the first-run flow pointed a run. `undecided` is a document written before the flow
+ * existed; `later` is the user closing it on purpose. */
+export type OnboardingPlace = "undecided" | "this_mac" | "project_folder" | "later";
+
+export type OnboardingDoc = {
+  completed: boolean;
+  place: OnboardingPlace;
+};
+
 export type SettingsDoc = {
   schemaVersion: number;
   appearance: AppearanceDoc;
@@ -552,6 +561,7 @@ export type SettingsDoc = {
   /** The free-model picker's choice, by registry id. `null` means no free model is selected, and
    * the answer order is free first, then the remote provider, then the local engine. */
   freeModel: string | null;
+  onboarding: OnboardingDoc;
   context: { compressAtRatio: number; keepRecentTurns: number };
   /** The folder a run works in. Empty means the root the host resolved; anything else must be an
    * absolute path the host can open, or the run is refused by name. */

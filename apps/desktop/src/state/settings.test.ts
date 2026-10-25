@@ -88,6 +88,7 @@ function document_(): SettingsDoc {
       contextTokens: 32_768,
     },
     freeModel: null,
+    onboarding: { completed: true, place: "later" },
     context: { compressAtRatio: 0.8, keepRecentTurns: 4 },
     project: { root: "" },
     localModel: {

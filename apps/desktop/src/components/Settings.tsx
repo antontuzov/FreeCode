@@ -30,6 +30,7 @@ import {
 } from "../lib/ipc";
 import { SHORTCUTS, shortcutLabel } from "../lib/shortcuts";
 import { useModel } from "../state/model";
+import { useOnboarding } from "../state/onboarding";
 import { effortReachesRoute, useSettings } from "../state/settings";
 
 const PAGE_IDS = [
@@ -85,6 +86,7 @@ const GROUPS: { key: string; items: { id: Page; icon: IconName }[] }[] = [
  */
 const CONTROLS: Record<Page, string[]> = {
   appearance: [
+    "setup",
     "themeMode",
     "appIcon",
     "appIconRoll",
@@ -128,6 +130,7 @@ const CONTROLS: Record<Page, string[]> = {
     "remoteModel",
     "remoteContext",
     "remoteKey",
+    "freeKey",
     "packing",
     "modelDir",
     "hfTokenEnv",
@@ -457,6 +460,18 @@ function Appearance({
   const inert = translate(locale, "common.notInBuild");
   return (
     <>
+      <Section label={t("section.setup")} description={t("section.setup.desc")}>
+        <Row title={t("row.setup")} description={t("row.setup.desc")}>
+          <button
+            type="button"
+            className="rounded-[var(--radius-md)] border border-line bg-elevated px-3 py-1.5 text-quiet hover:bg-hover"
+            onClick={() => useOnboarding.getState().openSetup(0)}
+          >
+            {t("row.setup.action")}
+          </button>
+        </Row>
+      </Section>
+
       <Section label={t("section.interfaceStyle")}>
         <Row title={t("row.themeMode")} description={t("row.themeMode.desc")}>
           <Select

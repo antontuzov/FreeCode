@@ -110,6 +110,7 @@ pub struct Settings {
     /// The answer order is free first, then the remote provider, then the local engine — the picker
     /// is the most recent intent, and picking a local model clears this field.
     pub free_model: Option<String>,
+    pub onboarding: Onboarding,
 }
 
 impl Default for Settings {
@@ -126,6 +127,40 @@ impl Default for Settings {
             local_model: LocalModel::default(),
             remote_provider: RemoteProvider::default(),
             free_model: None,
+            onboarding: Onboarding::default(),
+        }
+    }
+}
+
+/// Where the setup flow pointed a run, kept beside the folder itself.
+///
+/// `Project::root` cannot answer this: an empty root is both "set up in this app's folder" and
+/// "never decided", and re-running setup would then have to guess which one the user meant. The
+/// place is the flow's own answer, and `folder` is only recorded once a chooser returned a path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OnboardingPlace {
+    #[default]
+    Undecided,
+    ThisMac,
+    ProjectFolder,
+    Later,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Onboarding {
+    /// Written when the user finishes the flow or chooses "set up later". A build that adds a step
+    /// can raise the schema instead of re-opening a flow the user already completed.
+    pub completed: bool,
+    pub place: OnboardingPlace,
+}
+
+impl Default for Onboarding {
+    fn default() -> Self {
+        Self {
+            completed: false,
+            place: OnboardingPlace::Undecided,
         }
     }
 }
@@ -330,5 +365,27 @@ mod tests {
         Settings::default().save(&path).unwrap();
         assert!(path.exists());
         assert!(!path.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn onboarding_starts_open_and_remembers_where_it_pointed() {
+        let s = Settings::default();
+        assert!(!s.onboarding.completed);
+        assert_eq!(s.onboarding.place, OnboardingPlace::Undecided);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut done = Settings::default();
+        done.onboarding.completed = true;
+        done.onboarding.place = OnboardingPlace::ProjectFolder;
+        done.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap().onboarding, done.onboarding);
+
+        // A document written before the flow existed loads as a first run rather than as a file the
+        // app cannot read: the flow is the one thing a fresh install has not answered yet.
+        let old: Settings =
+            serde_json::from_value(serde_json::json!({ "freeModel": null })).unwrap();
+        assert!(!old.onboarding.completed);
+        assert_eq!(old.onboarding.place, OnboardingPlace::Undecided);
     }
 }
