@@ -148,6 +148,31 @@ pub async fn preview_url(app: AppHandle, path: String) -> Result<String, String>
     url_for(&policy, &path)
 }
 
+/// The page a project's browser starts on: `index.html`, or `index.htm`, which are the names a
+/// static server answers a folder with.
+///
+/// A blank tab's Start browser control asks this rather than guessing an address, because the panel
+/// is handed paths one at a time by the review and knows no folder to look in on its own. A project
+/// with neither page gets a sentence instead of a dead frame; the address field above the button is
+/// still the way to any other page.
+fn entry_for(policy: &SandboxPolicy) -> Result<String, String> {
+    for name in ["index.html", "index.htm"] {
+        if policy.workspace_root.join(name).is_file() {
+            return url_for(policy, name);
+        }
+    }
+    Err(format!(
+        "{} has no index.html to start from; enter a page's path above.",
+        policy.workspace_root.display()
+    ))
+}
+
+#[tauri::command]
+pub async fn preview_entry(app: AppHandle) -> Result<String, String> {
+    let policy = crate::reveal::policy(&app)?;
+    entry_for(&policy)
+}
+
 /// The unreserved set is the only text a URL component may hold unencoded; everything else — a
 /// space in "my game.html", a non-ASCII letter — travels as `%XX` and is decoded on the way back
 /// in [`decode_component`].
@@ -294,6 +319,44 @@ mod tests {
         let (_root, policy) = fixture();
         let (_, why) = file_for(&policy, "my-app").unwrap_err();
         assert!(why.contains("nothing to open"), "{why}");
+    }
+
+    #[test]
+    fn a_project_starts_on_its_index_page() {
+        let (root, policy) = fixture();
+        std::fs::write(root.path().join("index.html"), b"<html></html>").unwrap();
+        assert_eq!(
+            entry_for(&policy).unwrap(),
+            "preview://localhost/index.html"
+        );
+    }
+
+    #[test]
+    fn index_htm_is_an_entry_page_too() {
+        let (root, policy) = fixture();
+        std::fs::write(root.path().join("index.htm"), b"<html></html>").unwrap();
+        assert_eq!(entry_for(&policy).unwrap(), "preview://localhost/index.htm");
+    }
+
+    #[test]
+    fn a_project_without_an_entry_page_says_so_instead_of_guessing_one() {
+        // The fixture's only page is under `my-app/`: a start control that opened it would be
+        // choosing among the run's files for the user, and one that opened nothing would be silent.
+        let (_root, policy) = fixture();
+        let why = entry_for(&policy).unwrap_err();
+        assert!(why.contains("no index.html"), "{why}");
+        assert!(why.contains("enter a page's path"), "{why}");
+    }
+
+    #[test]
+    fn entry_is_resolved_through_the_same_sandbox_the_scheme_serves() {
+        // The entry is answered as an address by the same function every served page goes through,
+        // so it cannot become a door around the confinement that one keeps.
+        let (root, policy) = fixture();
+        std::fs::write(root.path().join("index.html"), b"<html></html>").unwrap();
+        let url = entry_for(&policy).unwrap();
+        let raw = decode_component(url.strip_prefix("preview://localhost/").unwrap());
+        assert!(file_for(&policy, &raw).is_ok());
     }
 
     #[test]

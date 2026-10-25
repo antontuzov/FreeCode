@@ -18,9 +18,11 @@ function nameOf(path: string): string {
  * a run built plays beside the conversation instead of taking over the window or being handed to the
  * desktop. The chrome is the reference's: a strip of tabs over a toolbar with the few things this
  * browser can honestly do — a new tab, the tab's own history, a reload, the address the tab is
- * standing on, and the way out to the default browser. The reference also draws download and
- * edit-page glyphs; this build has no answer for either yet, and a control that pressed and did
- * nothing would be the lie the rest of this window is written to avoid.
+ * standing on, and the way out to the default browser. A tab with no page is the reference's empty
+ * state in this build's words: what the panel reads, and Start browser for the project's own index
+ * page. The reference also draws download, edit-page and send glyphs; this build has no answer for
+ * any of them yet, and a control that pressed and did nothing would be the lie the rest of this
+ * window is written to avoid.
  */
 export function Preview({ locale }: { locale: Locale }) {
   const tabs = useNav((s) => s.previewTabs);
@@ -76,6 +78,22 @@ export function Preview({ locale }: { locale: Locale }) {
       await ipc.openFile(page.path);
     } catch (why) {
       setRefused(translate(locale, "preview.externalFailed", { why: String(why) }));
+    }
+  };
+
+  // The empty tab's one control: ask the host for the project's entry page and show it here. The
+  // address it answers with is the same `preview://` form every other page in this panel arrives
+  // as, so it goes back through the same parser — and a project without an entry page says so in
+  // the host's own sentence rather than sitting behind a button that never answers.
+  const start = async () => {
+    setRefused(null);
+    try {
+      const url = await ipc.previewEntry();
+      const path = previewPathOf(url);
+      if (path === null) return;
+      navigate(url, path);
+    } catch (why) {
+      setRefused(String(why));
     }
   };
 
@@ -244,6 +262,13 @@ export function Preview({ locale }: { locale: Locale }) {
           <p className="max-w-[36ch] text-fine text-muted">
             {translate(locale, "preview.emptyBody")}
           </p>
+          <button
+            type="button"
+            onClick={() => void start()}
+            className="mt-[var(--space-1)] inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-[var(--space-3)] py-1 text-quiet text-muted hover:bg-hover hover:text-fg"
+          >
+            {translate(locale, "preview.start")}
+          </button>
         </div>
       )}
     </div>

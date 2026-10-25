@@ -103,6 +103,18 @@ function withTab(tabs: PreviewTab[], index: number, tab: PreviewTab): PreviewTab
 
 const blankTab = (): PreviewTab => ({ trail: [], cursor: -1, reloads: 0 });
 
+/**
+ * The strip a capture starts on.
+ *
+ * `?browser=blank` opens the browser on a page-less tab, which is the press the plus makes. The
+ * native window takes no injected clicks, so a state only a press reaches — the empty tab, and the
+ * Start browser control under it — is a state a capture can never show without a door like this.
+ */
+function seedPreview(): Pick<NavStore, "previewTabs" | "previewActive"> {
+  if (query("browser") !== "blank") return { previewTabs: [], previewActive: -1 };
+  return { previewTabs: [blankTab()], previewActive: 0 };
+}
+
 function query(name: string): string | null {
   return new URLSearchParams(window.location.search).get(name);
 }
@@ -202,8 +214,7 @@ type NavStore = {
 
 export const useNav = create<NavStore>((set, get) => ({
   ...seed(),
-  previewTabs: [],
-  previewActive: -1,
+  ...seedPreview(),
   push: (view) => {
     const { history, cursor } = get();
     const current = history[cursor];

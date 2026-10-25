@@ -149,6 +149,13 @@ describe("deep links", () => {
     expect(state.statusOpen).toBe(false);
   });
 
+  it("opens the browser on a page-less tab for a capture", async () => {
+    const state = await seeded("?browser=blank");
+    expect(state.previewTabs).toHaveLength(1);
+    expect(state.previewActive).toBe(0);
+    expect(previewPage(previewTab(state))).toBeNull();
+  });
+
   it("starts on the conversation with the inspector when the URL says nothing", async () => {
     const state = await seeded("");
     expect(currentView(state)).toEqual({ kind: "chat" });
@@ -157,6 +164,8 @@ describe("deep links", () => {
     expect(state.reviewFile).toBeNull();
     expect(state.rightOpen).toBe(true);
     expect(state.statusOpen).toBe(true);
+    expect(state.previewTabs).toHaveLength(0);
+    expect(state.previewActive).toBe(-1);
   });
 });
 

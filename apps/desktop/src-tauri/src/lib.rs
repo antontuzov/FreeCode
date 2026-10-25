@@ -423,6 +423,8 @@ pub fn run() {
             // The in-app address of one of the run's pages, which the review's open control frames
             // instead of leaving the app — see `preview`.
             preview::preview_url,
+            // The page a blank browser tab starts on, in the same scheme and under the same policy.
+            preview::preview_entry,
             chat::start_engine,
             chat::stop_engine,
             chat::engine_status,

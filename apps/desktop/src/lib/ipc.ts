@@ -885,6 +885,13 @@ export const ipc = {
    */
   previewUrl: (path: string) => invoke<string>("preview_url", { path }),
   /**
+   * The page a project's browser starts on — its `index.html` or `index.htm` — as the same
+   * `preview://` address `previewUrl` answers with. A blank tab's Start browser control asks this
+   * rather than guessing a name, so a project without an entry page gets the host's sentence instead
+   * of a frame that was never going to load.
+   */
+  previewEntry: () => invoke<string>("preview_entry"),
+  /**
    * Put files a run wrote back to the text they held before it touched them.
    *
    * The before-images live in the host's journal for the conversation on screen, so a reopened
