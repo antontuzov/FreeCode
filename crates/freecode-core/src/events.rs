@@ -138,6 +138,12 @@ pub struct ArtifactRef {
 pub enum NoticeCode {
     /// The saved reasoning effort is not among the selected model's accepted ones.
     EffortNotSupported,
+    /// The saved reasoning effort went nowhere because this route sends no effort field at all.
+    ///
+    /// The free gateway, a remote provider and the FreeCode service each answer without one, and
+    /// none of them falls back to the local engine. Said rather than left to the dial's own silence,
+    /// because the user's choice is a promise the run could not keep.
+    EffortNotSent,
     /// The supervised server died between runs and is being started again.
     EngineRestarted,
     /// The model emitted a tool call in a chat that offers it no tools.
@@ -188,8 +194,9 @@ impl NoticeCode {
     /// Every code the host can emit. `verify-transcript-i18n` walks this to require one catalog entry
     /// per code, so a notice added here without its sentence in both locales fails the build instead
     /// of rendering its own key in the middle of a transcript.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::EffortNotSupported,
+        Self::EffortNotSent,
         Self::EngineRestarted,
         Self::ToolCallWithoutTools,
         Self::ToolNotOffered,
@@ -211,6 +218,7 @@ impl NoticeCode {
     pub fn i18n_key(self) -> &'static str {
         match self {
             Self::EffortNotSupported => "notice.effort-not-supported",
+            Self::EffortNotSent => "notice.effort-not-sent",
             Self::EngineRestarted => "notice.engine-restarted",
             Self::ToolCallWithoutTools => "notice.tool-call-without-tools",
             Self::ToolNotOffered => "notice.tool-not-offered",
@@ -237,6 +245,7 @@ impl NoticeCode {
     pub fn params(self) -> &'static [&'static str] {
         match self {
             Self::EffortNotSupported => &["model", "accepted", "chosen", "sent"],
+            Self::EffortNotSent => &["model", "chosen"],
             Self::EngineRestarted => &["attempt", "max", "log"],
             Self::ToolCallWithoutTools => &["name"],
             Self::ToolNotOffered => &["name"],

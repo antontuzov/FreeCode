@@ -18,6 +18,18 @@ export function nextEffort(current: ReasoningEffort): ReasoningEffort {
   return EFFORT_ORDER[(at + 1) % EFFORT_ORDER.length] ?? "auto";
 }
 
+/**
+ * Whether the saved effort reaches the route the next run will take.
+ *
+ * The route is the document's own to decide, in the host's order: a free pick answers without an
+ * effort field, then a remote provider answers without one, and only then does the local engine —
+ * the one route that takes the field — run. Read here so the bolt and Settings agree before a run
+ * starts; the run's own notice is the host's word for the route it actually got.
+ */
+export function effortReachesRoute(doc: SettingsDoc): boolean {
+  return doc.freeModel === null && doc.remoteProvider.source !== "remote";
+}
+
 type SettingsStore = {
   doc: SettingsDoc | null;
   loaded: boolean;

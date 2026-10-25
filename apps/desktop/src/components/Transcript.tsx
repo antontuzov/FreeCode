@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { translate, type Locale } from "../i18n";
 import type { HostPlanItem } from "../lib/ipc";
 import { useNav } from "../state/nav";
-import { nextEffort, useSettings } from "../state/settings";
+import { effortReachesRoute, nextEffort, useSettings } from "../state/settings";
 import {
   ctaLabel,
   isTurn,
@@ -443,13 +443,15 @@ function PlanList({ items, className }: { items: HostPlanItem[]; className?: str
  * the run's plan, the strip under the composer, and the column beside it.
  *
  * Each one answers to something this window has. The bolt walks the same effort order Settings lists
- * and writes the same value its select does, so the lit tile means "not the model's own choice". The
- * two panel toggles carry their strip's state to a screen reader as `aria-expanded` and stay quiet on
- * screen: the reference's four glyphs sit unlit on a window that has both strips open, and a fold
- * that hides a column has already said itself in the layout.
+ * and writes the same value its select does, so the lit tile means "not the model's own choice". Its
+ * label also says when the route ahead sends no effort field, so the press is not presented as one
+ * an answer will keep. The two panel toggles carry their strip's state to a screen reader as
+ * `aria-expanded` and stay quiet on screen: the reference's four glyphs sit unlit on a window that
+ * has both strips open, and a fold that hides a column has already said itself in the layout.
  */
 function HeaderControls({ locale, plan }: { locale: Locale; plan: HostPlanItem[] | null }) {
-  const effort = useSettings((s) => s.doc?.sampling.effort);
+  const doc = useSettings((s) => s.doc);
+  const effort = doc?.sampling.effort;
   const rightOpen = useNav((s) => s.rightOpen);
   const statusOpen = useNav((s) => s.statusOpen);
   const toggleRight = useNav((s) => s.toggleRight);
@@ -463,7 +465,12 @@ function HeaderControls({ locale, plan }: { locale: Locale; plan: HostPlanItem[]
   }, []);
 
   const level = translate(locale, `settings.opt.${effort ?? "auto"}`);
-  const effortLabel = translate(locale, "topbar.effort", { level });
+  // Before the document lands, the ordinary label is the honest one: nothing is known to be lost.
+  const effortLabel = translate(
+    locale,
+    doc === null || effortReachesRoute(doc) ? "topbar.effort" : "topbar.effortNotSent",
+    { level },
+  );
 
   return (
     <div className="flex items-center gap-1.5">

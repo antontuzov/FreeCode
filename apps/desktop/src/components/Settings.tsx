@@ -30,7 +30,7 @@ import {
 } from "../lib/ipc";
 import { SHORTCUTS, shortcutLabel } from "../lib/shortcuts";
 import { useModel } from "../state/model";
-import { useSettings } from "../state/settings";
+import { effortReachesRoute, useSettings } from "../state/settings";
 
 const PAGE_IDS = [
   "appearance",
@@ -1234,7 +1234,12 @@ function Reasoning({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
   return (
     <>
       <Section label={t("section.reasoning")}>
-        <Row title={t("row.effort")} description={t("row.effort.desc")}>
+        <Row
+          title={t("row.effort")}
+          // The listed routes answer without this field, so the page must not describe a choice
+          // the next run will keep when it cannot.
+          description={t(effortReachesRoute(doc) ? "row.effort.desc" : "row.effort.descNonLocal")}
+        >
           <Select
             label={t("row.effort")}
             value={s.effort}

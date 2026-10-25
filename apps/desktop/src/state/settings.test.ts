@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ipc, type ReasoningEffort, type SettingsDoc } from "../lib/ipc";
 import { useAppearance } from "./appearance";
-import { EFFORT_ORDER, nextEffort, useSettings } from "./settings";
+import { EFFORT_ORDER, effortReachesRoute, nextEffort, useSettings } from "./settings";
 
 vi.mock("../lib/ipc", () => ({
   ACCENTS: [],
@@ -199,5 +199,20 @@ describe("the effort dial", () => {
     }
     expect(walked).toEqual(EFFORT_ORDER);
     expect(nextEffort(effort)).toBe("auto");
+  });
+
+  it("says which routes take the saved level, in the host's own order", () => {
+    const doc = document_();
+    // With neither a free pick nor a remote source, the next run is the local engine's and it takes
+    // the field.
+    expect(effortReachesRoute(doc)).toBe(true);
+    // A remote provider answers without one.
+    doc.remoteProvider.source = "remote";
+    expect(effortReachesRoute(doc)).toBe(false);
+    // A free pick is checked before the remote source, and neither of the transports behind it
+    // takes the field — so the answer stays the same whatever the source says.
+    doc.freeModel = "opencode/qwen3";
+    doc.remoteProvider.source = "local";
+    expect(effortReachesRoute(doc)).toBe(false);
   });
 });

@@ -488,6 +488,10 @@ pub struct ChatState {
     /// The text each write replaced, for the review panel's revert. Belongs to this conversation, so
     /// New task and opening a filed one both clear it: their files are not at the states held here.
     undo: Mutex<undo::Journal>,
+    /// The last "this route sends no effort field" announcement, as `(model label, chosen word)`.
+    /// Keyed rather than a plain flag because changing the model or the dial is a new fact to
+    /// report, while repeating the same sentence beside every prompt is only noise.
+    effort_noted: Mutex<Option<(String, String)>>,
     /// Set by [`chat_stop`] and read by the run in flight at the next batch of deltas. A plain
     /// flag rather than a dropped future because the answer streamed so far has to survive: the
     /// request ends at a chunk boundary and returns what it had.
@@ -655,6 +659,18 @@ fn effort_word(effort: ReasoningEffort) -> &'static str {
         ReasoningEffort::Xhigh => "xhigh",
         ReasoningEffort::None => "none",
     }
+}
+
+/// The saved choice a run has to report as unsent, if it made one this route cannot keep.
+///
+/// `auto` is not a promise: it asks for whatever the model does by itself, which is exactly what a
+/// route with no effort field does. The other four words are choices, and a route that sends none of
+/// them would otherwise look like the dial had taken effect.
+fn unheard_effort(stored: ReasoningEffort, sends_field: bool) -> Option<&'static str> {
+    if sends_field {
+        return None;
+    }
+    (stored != ReasoningEffort::Auto).then_some(effort_word(stored))
 }
 
 /// A saved reasoning effort the selected model does not accept, as the four facts a notice about it
@@ -2443,6 +2459,24 @@ pub async fn chat_send(
             plan,
         },
     );
+    // The choice the dial held was made for a route that takes no effort field — the free gateway,
+    // a remote provider or the FreeCode service. Told here rather than by the bolt: the sentence
+    // names the model the answer actually came from, and only the host resolved that — the free
+    // pick's transport is chosen at run time.
+    if let Some(chosen) = unheard_effort(settings.sampling.effort, answer.effort().is_some()) {
+        let mut noted = lock(&state.effort_noted);
+        let key = (model_label.clone(), chosen.to_string());
+        if noted.as_ref() != Some(&key) {
+            *noted = Some(key);
+            emit(
+                &app,
+                AgentEvent::notice(
+                    NoticeCode::EffortNotSent,
+                    &[("model", model_label.as_str()), ("chosen", chosen)],
+                ),
+            );
+        }
+    }
     lock(&state.history).push(prompt(&text, image.clone()));
     // Filed before the request goes out rather than after the answer lands. A run that dies mid-stream
     // leaves the question on screen and nowhere else, and the one copy of what was asked that survives
@@ -2877,6 +2911,22 @@ mod tests {
         lock(&state.slot).streaming = true;
         assert!(request_stop(&state));
         assert!(state.stop_requested.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_saved_effort_is_reported_when_the_route_sends_no_field() {
+        // A route with no effort field cannot keep a choice, so the run says which word went
+        // nowhere rather than letting the dial look answered.
+        assert_eq!(
+            unheard_effort(ReasoningEffort::Medium, false),
+            Some("medium")
+        );
+        assert_eq!(unheard_effort(ReasoningEffort::None, false), Some("none"));
+        // Auto is the model's own choice, which is exactly what such a route does: nothing is lost.
+        assert_eq!(unheard_effort(ReasoningEffort::Auto, false), None);
+        // The local engine takes the field, so every choice is answered — including auto.
+        assert_eq!(unheard_effort(ReasoningEffort::Xhigh, true), None);
+        assert_eq!(unheard_effort(ReasoningEffort::Auto, true), None);
     }
 
     #[test]
