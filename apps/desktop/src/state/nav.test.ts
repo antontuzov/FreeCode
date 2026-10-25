@@ -88,11 +88,15 @@ describe("the column controls", () => {
 
   it("offers the change in the right column, aimed at the file that asked for it", () => {
     expect(useNav.getState().panel).toBe("inspector");
+    expect(useNav.getState().rightOpen).toBe(false);
     useNav.getState().toggleReview();
     expect(useNav.getState().panel).toBe("review");
+    expect(useNav.getState().rightOpen).toBe(true);
 
+    useNav.getState().toggleRight();
     useNav.getState().openReviewAt("apps/desktop/src/state/nav.ts");
     expect(useNav.getState().panel).toBe("review");
+    expect(useNav.getState().rightOpen).toBe(true);
     expect(useNav.getState().reviewFile).toBe("apps/desktop/src/state/nav.ts");
 
     useNav.getState().showInspector();
@@ -156,30 +160,38 @@ describe("deep links", () => {
     expect(previewPage(previewTab(state))).toBeNull();
   });
 
-  it("starts on the conversation with the inspector when the URL says nothing", async () => {
+  it("starts on the conversation with the right column folded", async () => {
     const state = await seeded("");
     expect(currentView(state)).toEqual({ kind: "chat" });
     expect(state.collapsed).toBe(false);
     expect(state.panel).toBe("inspector");
     expect(state.reviewFile).toBeNull();
-    expect(state.rightOpen).toBe(true);
+    expect(state.rightOpen).toBe(false);
     expect(state.statusOpen).toBe(true);
     expect(state.previewTabs).toHaveLength(0);
     expect(state.previewActive).toBe(-1);
   });
+
+  it("opens the column for a capture that needs it in the frame", async () => {
+    expect((await seeded("?right=1")).rightOpen).toBe(true);
+    expect((await seeded("?review=1")).rightOpen).toBe(true);
+    expect((await seeded("?file=apps/desktop/src/App.tsx")).rightOpen).toBe(true);
+    expect((await seeded("?browser=blank")).rightOpen).toBe(true);
+  });
 });
 
 describe("the panel toggles", () => {
-  it("fold and reopen each strip without touching the other", () => {
+  it("folds and reopens each strip without touching the other", () => {
     const nav = useNav.getState();
-    nav.toggleRight();
     expect(useNav.getState().rightOpen).toBe(false);
+    nav.toggleRight();
+    expect(useNav.getState().rightOpen).toBe(true);
     expect(useNav.getState().statusOpen).toBe(true);
     nav.toggleStatus();
     expect(useNav.getState().statusOpen).toBe(false);
     nav.toggleRight();
     nav.toggleStatus();
-    expect(useNav.getState().rightOpen).toBe(true);
+    expect(useNav.getState().rightOpen).toBe(false);
     expect(useNav.getState().statusOpen).toBe(true);
   });
 });

@@ -142,10 +142,16 @@ function seed(): {
     history,
     cursor: history.length - 1,
     collapsed: query("sidebar") === "collapsed",
-    // `?right=hidden` and `?status=hidden` fold the two strips the header's own toggles fold. The
-    // native window takes no injected clicks, so a state only a press can reach is a state a capture
-    // can never show — the same reason `?sidebar=collapsed` exists.
-    rightOpen: query("right") !== "hidden",
+    // The column starts folded: the conversation is the window, and the run's report is one press
+    // away on the header. A capture that needs the column in the frame asks for it — `?right=1`,
+    // `?review=1`, `?file=` or `?browser=blank` — because the native window takes no injected
+    // clicks; `?right=hidden` keeps naming the folded strip the header's own toggle folds.
+    rightOpen:
+      query("right") !== "hidden" &&
+      (query("right") === "1" ||
+        query("review") === "1" ||
+        query("file") !== null ||
+        query("browser") === "blank"),
     statusOpen: query("status") !== "hidden",
     // `?review=1` puts the change in the right column: the press that opens it is a click on the
     // pill, which the native window cannot be given, so the panel would otherwise never be seen.
@@ -161,8 +167,8 @@ type NavStore = {
   cursor: number;
   /** The sidebar's column folded away to its rail. */
   collapsed: boolean;
-  /** Whether the right column is showing. The header's right-panel toggle folds it, and the transcript
-   * takes the width it gives back. */
+  /** Whether the right column is showing. Folded at launch; the header's toggle opens it, and the
+   * transcript takes the width it gives back. */
   rightOpen: boolean;
   /** Whether the strip under the composer is showing. It repeats the engine state the run's own rows
    * carry, which is why it can be put away. */
@@ -241,9 +247,15 @@ export const useNav = create<NavStore>((set, get) => ({
   toggleSidebar: () => set((s) => ({ collapsed: !s.collapsed })),
   toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
   toggleStatus: () => set((s) => ({ statusOpen: !s.statusOpen })),
-  toggleReview: () => set((s) => ({ panel: s.panel === "review" ? "inspector" : "review" })),
+  toggleReview: () =>
+    set((s) => {
+      const panel: Panel = s.panel === "review" ? "inspector" : "review";
+      // The pill that offers the change must bring the column holding it into view: a panel written
+      // behind a folded column is a press that appears to do nothing.
+      return { panel, rightOpen: panel === "review" ? true : s.rightOpen };
+    }),
   showInspector: () => set({ panel: "inspector", reviewFile: null }),
-  openReviewAt: (path) => set({ panel: "review", reviewFile: path }),
+  openReviewAt: (path) => set({ panel: "review", reviewFile: path, rightOpen: true }),
   openPreview: (url, path) =>
     set((s) => {
       // The same page is already on the strip: the press asks to look at it, not to keep a second
@@ -261,11 +273,13 @@ export const useNav = create<NavStore>((set, get) => ({
             cursor: 0,
             reloads: 0,
           }),
+          rightOpen: true,
         };
       }
       return {
         previewTabs: [...s.previewTabs, { trail: [page], cursor: 0, reloads: 0 }],
         previewActive: s.previewTabs.length,
+        rightOpen: true,
       };
     }),
   newPreviewTab: () =>
