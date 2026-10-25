@@ -37,6 +37,72 @@ function keyOf(view: View): string {
  * store and a settings page's values on disk — so the stack can be capped without losing anything. */
 const MAX = 40;
 
+/** One page the in-app browser is showing: the address the host's `preview` scheme serves, and the
+ * project path it came from, which the controls that leave the app hand to the desktop. */
+export type PreviewPage = { url: string; path: string };
+
+/**
+ * One tab of the in-app browser.
+ *
+ * The trail is the tab's own, because Back in one tab must not move another: a history shared across
+ * tabs would be an arrow that lands somewhere the user was not standing.
+ */
+export type PreviewTab = {
+  /** Where this tab has been. Empty for a tab the plus opened, which has no page to show yet. */
+  trail: PreviewPage[];
+  /** Where along its own trail the tab stands; `-1` when the trail is empty. */
+  cursor: number;
+  /** Reload presses. The frame's key carries it, so a reload asks the host again rather than showing
+   * the document the webview already rendered. */
+  reloads: number;
+};
+
+/** The tab the column is showing, or null when the browser is closed. */
+export function previewTab(
+  state: Pick<NavStore, "previewTabs" | "previewActive">,
+): PreviewTab | null {
+  return state.previewTabs[state.previewActive] ?? null;
+}
+
+/** The page a tab stands on, or null for a tab that has not been given one. */
+export function previewPage(tab: PreviewTab | null): PreviewPage | null {
+  if (!tab || tab.cursor < 0) return null;
+  return tab.trail[tab.cursor] ?? null;
+}
+
+/**
+ * The project path an address means, or null when it names nothing this panel can show.
+ *
+ * The field takes the path the review names *and* the `preview://` address the same open control
+ * hands the frame, because they are one page said two ways. A web address is neither: the panel reads
+ * the project folder, and framing the wider web would be a claim the scheme cannot keep. An empty
+ * field is not a page either — Enter on it asks for nothing.
+ */
+export function previewPathOf(address: string): string | null {
+  const raw = address.trim();
+  if (!raw) return null;
+  const prefix = "preview://localhost/";
+  if (raw.startsWith(prefix)) {
+    const rest = raw.slice(prefix.length);
+    try {
+      return decodeURIComponent(rest);
+    } catch {
+      return rest;
+    }
+  }
+  if (/^(https?|file|ftp):/i.test(raw)) return null;
+  return raw;
+}
+
+/** A tab replaced in a copy of the list, so a store write never mutates the array it read. */
+function withTab(tabs: PreviewTab[], index: number, tab: PreviewTab): PreviewTab[] {
+  const next = tabs.slice();
+  next[index] = tab;
+  return next;
+}
+
+const blankTab = (): PreviewTab => ({ trail: [], cursor: -1, reloads: 0 });
+
 function query(name: string): string | null {
   return new URLSearchParams(window.location.search).get(name);
 }
@@ -94,11 +160,13 @@ type NavStore = {
   /** The file the review column was asked to show, and which it scrolls to when it does. Cleared by
    * either way out of the column, so a jump is not replayed on a panel the reader already looked at. */
   reviewFile: string | null;
-  /** The in-app browser, covering the window: the `preview://` address of the page being shown, and
-   * the project path it came from, which the header's "open in the default browser" hands to the
-   * desktop. Not on the navigation stack — it is opened from the review column and closed with one
+  /** The in-app browser's tabs, in the order their strip draws them. Empty means the column is not
+   * showing the browser at all: the tabs are the panel, and the last one closing is the panel
+   * closing. Not on the navigation stack — it is opened from the review column and left with one
    * press, the way the palette is. */
-  preview: { url: string; path: string } | null;
+  previewTabs: PreviewTab[];
+  /** Which tab the column is showing; `-1` when there is none. */
+  previewActive: number;
   /** Open a surface over the ones already on the stack. */
   push: (view: View) => void;
   /** Step back along the stack. Reports whether there was anything behind the current view, so the
@@ -115,13 +183,27 @@ type NavStore = {
   /** An edit row's file chip: the column switches to the change and opens on that file, because one
    * press that lands on the section is the answer to what was clicked. */
   openReviewAt: (path: string) => void;
+  /** Show a page the run built. A copy of it already on the strip is brought forward rather than
+   * duplicated; a blank tab takes it; any other tab keeps its page and the new one opens beside it. */
   openPreview: (url: string, path: string) => void;
+  /** A fresh tab with no page, which is what the plus means. */
+  newPreviewTab: () => void;
+  closePreviewTab: (index: number) => void;
+  selectPreviewTab: (index: number) => void;
+  /** Follow a page inside the active tab, forgetting whatever was ahead of it — the same contract the
+   * window's own stack keeps. */
+  navigatePreview: (url: string, path: string) => void;
+  previewBack: () => void;
+  previewForward: () => void;
+  reloadPreview: () => void;
+  /** The whole panel, back to the review that opened it. */
   closePreview: () => void;
 };
 
 export const useNav = create<NavStore>((set, get) => ({
   ...seed(),
-  preview: null,
+  previewTabs: [],
+  previewActive: -1,
   push: (view) => {
     const { history, cursor } = get();
     const current = history[cursor];
@@ -151,8 +233,91 @@ export const useNav = create<NavStore>((set, get) => ({
   toggleReview: () => set((s) => ({ panel: s.panel === "review" ? "inspector" : "review" })),
   showInspector: () => set({ panel: "inspector", reviewFile: null }),
   openReviewAt: (path) => set({ panel: "review", reviewFile: path }),
-  openPreview: (url, path) => set({ preview: { url, path } }),
-  closePreview: () => set({ preview: null }),
+  openPreview: (url, path) =>
+    set((s) => {
+      // The same page is already on the strip: the press asks to look at it, not to keep a second
+      // copy of one document in the column.
+      const already = s.previewTabs.findIndex((tab) => previewPage(tab)?.path === path);
+      if (already >= 0) return { previewActive: already };
+      const page = { url, path };
+      const active = previewTab(s);
+      // A tab the plus opened is empty on purpose, so it is where the page belongs. A tab already
+      // showing a page keeps it, and the new one opens beside it.
+      if (active && previewPage(active) === null) {
+        return {
+          previewTabs: withTab(s.previewTabs, s.previewActive, {
+            trail: [page],
+            cursor: 0,
+            reloads: 0,
+          }),
+        };
+      }
+      return {
+        previewTabs: [...s.previewTabs, { trail: [page], cursor: 0, reloads: 0 }],
+        previewActive: s.previewTabs.length,
+      };
+    }),
+  newPreviewTab: () =>
+    set((s) => ({
+      previewTabs: [...s.previewTabs, blankTab()],
+      previewActive: s.previewTabs.length,
+    })),
+  closePreviewTab: (index) =>
+    set((s) => {
+      if (index < 0 || index >= s.previewTabs.length) return {};
+      const tabs = s.previewTabs.filter((_, i) => i !== index);
+      // The last tab closing is the panel closing: there is nothing left for the column to hold.
+      if (tabs.length === 0) return { previewTabs: [], previewActive: -1 };
+      // The tab to the right slides into the closed one's place; closing the last tab falls back to
+      // the new last one.
+      const active =
+        s.previewActive > index
+          ? s.previewActive - 1
+          : s.previewActive === index
+            ? Math.min(index, tabs.length - 1)
+            : s.previewActive;
+      return { previewTabs: tabs, previewActive: active };
+    }),
+  selectPreviewTab: (index) =>
+    set((s) => (index < 0 || index >= s.previewTabs.length ? {} : { previewActive: index })),
+  navigatePreview: (url, path) =>
+    set((s) => {
+      const tab = previewTab(s);
+      if (!tab) return {};
+      const trail = [...tab.trail.slice(0, tab.cursor + 1), { url, path }];
+      return {
+        previewTabs: withTab(s.previewTabs, s.previewActive, {
+          ...tab,
+          trail,
+          cursor: trail.length - 1,
+        }),
+      };
+    }),
+  previewBack: () => {
+    const s = get();
+    const tab = previewTab(s);
+    if (!tab || tab.cursor <= 0) return;
+    set({
+      previewTabs: withTab(s.previewTabs, s.previewActive, { ...tab, cursor: tab.cursor - 1 }),
+    });
+  },
+  previewForward: () => {
+    const s = get();
+    const tab = previewTab(s);
+    if (!tab || tab.cursor >= tab.trail.length - 1) return;
+    set({
+      previewTabs: withTab(s.previewTabs, s.previewActive, { ...tab, cursor: tab.cursor + 1 }),
+    });
+  },
+  reloadPreview: () =>
+    set((s) => {
+      const tab = previewTab(s);
+      if (!tab || previewPage(tab) === null) return {};
+      return {
+        previewTabs: withTab(s.previewTabs, s.previewActive, { ...tab, reloads: tab.reloads + 1 }),
+      };
+    }),
+  closePreview: () => set({ previewTabs: [], previewActive: -1 }),
 }));
 
 export function currentView(s: NavStore): View {

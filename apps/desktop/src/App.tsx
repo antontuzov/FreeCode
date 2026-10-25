@@ -45,8 +45,8 @@ export default function App() {
   const showInspector = useNav((s) => s.showInspector);
   // The in-app browser, opened by the review column for a page the run built. Not on the navigation
   // stack — one press in, one press out, like the palette — so it closes into whatever surface asked
-  // for it.
-  const preview = useNav((s) => s.preview);
+  // for it. Its tabs are the panel: the last one closing is the browser closing.
+  const previewOpen = useNav((s) => s.previewTabs.length > 0);
   const openPreview = useNav((s) => s.openPreview);
   const closePreview = useNav((s) => s.closePreview);
   // The two strips the header's panel toggles fold. They live in the nav store rather than in local
@@ -183,7 +183,7 @@ export default function App() {
     // in-app browser is nearer still — it opened from that panel — so it closes first. While the
     // framed page has focus its own keys do not reach the window, which is what a game in it needs.
     escape: () => {
-      if (preview) {
+      if (previewOpen) {
         closePreview();
         return;
       }
@@ -248,19 +248,19 @@ export default function App() {
         {rightOpen && (
           <div
             className={`flex min-h-0 shrink-0 flex-col ${
-              preview || panel === "review"
+              previewOpen || panel === "review"
                 ? "w-[var(--review-width)]"
                 : "w-[var(--inspector-width)]"
             }`}
           >
-            {!preview && <ModelStatus locale={locale} />}
+            {!previewOpen && <ModelStatus locale={locale} />}
             {/* One column, three reports: the run's numbers, the change those numbers name, or the
                 page that change built. Shot 06 has the diff here rather than under the answer,
                 because a code line needs the width the transcript would have to give up to show it —
                 and the game the diff produced gets the same column rather than the whole window,
                 because it is the run's answer, not the app's. The model card steps aside for it: the
                 page being played is the point, and the route it came from is the chat's business. */}
-            {preview ? (
+            {previewOpen ? (
               <Preview locale={locale} />
             ) : panel === "review" ? (
               <Review locale={locale} />
