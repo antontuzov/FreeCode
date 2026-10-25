@@ -278,6 +278,96 @@ pub(crate) fn written(edits: &[Edit]) -> Option<Written> {
     })
 }
 
+/// After a run that changed files, measure the change with the project's own check — the tests when
+/// the manifest names them, otherwise the build, otherwise the lint — unless the model already ran
+/// one itself. The row opens and closes like any other call, so the wait and its result appear in the
+/// transcript the user is already reading instead of behind a claim that the change works.
+///
+/// The consent is Terminal access, the same switch the model's own runners answer to: a check is a
+/// command run with this user's permissions. With it off the run says its change is unverified rather
+/// than quietly skipping the measurement. The free-model route denies its model the shell, so this is
+/// the only place a run on that route can be checked at all.
+///
+/// Runs on the blocking pool: a test suite takes minutes, and the window cannot wait on it in the
+/// event loop.
+pub(crate) async fn verify_run(
+    app: &AppHandle,
+    settings: &Settings,
+    policy: &SandboxPolicy,
+    already_checked: bool,
+) {
+    if already_checked {
+        return;
+    }
+    // Read after the run's last row closed: a run that only read files has nothing to measure, and a
+    // check on a folder it never touched would be a command the user did not ask for.
+    if app
+        .state::<crate::chat::ChatState>()
+        .staged_diff()
+        .is_none()
+    {
+        return;
+    }
+    if !settings.approvals.shell_enabled {
+        emit(app, AgentEvent::notice(NoticeCode::ChecksNotRun, &[]));
+        return;
+    }
+    let Some(tool) = freecode_tools::declared_checks(&policy.workspace_root)
+        .into_iter()
+        .next()
+    else {
+        emit(app, AgentEvent::notice(NoticeCode::ChecksUnavailable, &[]));
+        return;
+    };
+    let (host, policy) = (app.clone(), policy.clone());
+    // A join error means the executor panicked, which no notice can word better than the absence it
+    // leaves: the run's rows, its diff and its answer still stand.
+    let _ = tauri::async_runtime::spawn_blocking(move || run_check(&host, tool, &policy)).await;
+}
+
+/// Run one host-initiated check and emit its row. Failing to run at all is the same shape as a call
+/// the loop could not make: a blocked row, with the executor's sentence as the reason.
+fn run_check(app: &AppHandle, tool: &str, policy: &SandboxPolicy) {
+    let arguments = json!({});
+    let mut row = started_row(tool, &arguments);
+    emit(app, AgentEvent::ToolStarted { step: row.clone() });
+    match execute(tool, &arguments, policy) {
+        Ok(done) => {
+            let failed = done.summary.failed();
+            let code = done.summary.params.get("code").and_then(Value::as_i64);
+            row.finish(if failed {
+                StepStatus::Blocked
+            } else {
+                StepStatus::Done
+            });
+            let mut outcome = ToolOutcome::ok(done.summary);
+            outcome.ok = !failed;
+            outcome.exit_code = code.map(|code| code as i32);
+            emit(app, AgentEvent::ToolFinished { step: row, outcome });
+            // The row says which command and how it ended; the notice says what that means for the
+            // change the answer just claimed. A timeout has no exit code to quote, and its own summary
+            // already carries the seconds it ran.
+            if let Some(code) = code.filter(|_| failed) {
+                let code = code.to_string();
+                emit(
+                    app,
+                    AgentEvent::notice(NoticeCode::ChecksFailed, &[("code", code.as_str())]),
+                );
+            }
+        }
+        Err(why) => {
+            row.finish(StepStatus::Blocked);
+            emit(
+                app,
+                AgentEvent::ToolFinished {
+                    step: row,
+                    outcome: ToolOutcome::blocked(&why.to_string()),
+                },
+            );
+        }
+    }
+}
+
 /// Approval, then the sandbox. `Ok(())` is the only answer that lets a read happen, and everything
 /// else comes back as the sentence the row and the model both get.
 ///

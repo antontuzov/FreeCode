@@ -485,6 +485,18 @@ impl Summary {
             text: text.into(),
         }
     }
+
+    /// Whether the command this line reports did not succeed. Only the three command endings can say
+    /// so: every other summary describes a read or a write that returned without failing.
+    pub fn failed(&self) -> bool {
+        match self.key {
+            Some(SummaryKey::TerminalTimedOut | SummaryKey::TerminalStopped) => true,
+            Some(SummaryKey::TerminalExit) => {
+                self.params.get("code").and_then(Value::as_i64) != Some(0)
+            }
+            _ => false,
+        }
+    }
 }
 
 /// What one call produced: a clause for the transcript row and the text the model is handed.
@@ -1416,6 +1428,34 @@ fn run_project(
         content,
         edits: Vec::new(),
     })
+}
+
+/// The checks this workspace declares, in the order a run should try them: the tests when the
+/// manifest names them, then the build, then the linter. A run that changed files is measured by the
+/// first of these, because it is the one that says whether the change works rather than whether it
+/// parses; the other two stay available to the model through their own calls.
+pub fn declared_checks(root: &Path) -> Vec<&'static str> {
+    [
+        ("run_tests", ProjectKind::Tests),
+        ("run_build", ProjectKind::Build),
+        ("run_linter", ProjectKind::Lint),
+    ]
+    .into_iter()
+    .filter(|(_, kind)| {
+        detect(
+            root,
+            &Wanted {
+                kind: *kind,
+                target: None,
+                filter: None,
+                release: false,
+                paths: &[],
+            },
+        )
+        .is_ok()
+    })
+    .map(|(tool, _)| tool)
+    .collect()
 }
 
 /// Choose the runner the workspace's own manifest names. Root manifests only: a workspace can hold a
@@ -5068,6 +5108,44 @@ mod tests {
         // The repository reads are not commands: they run a fixed argv and stay available.
         let status = ran("git_status", &json!({}), &p).expect("a git read needs no switch");
         assert_eq!(status.summary.key, Some(SummaryKey::GitNotRepo));
+    }
+
+    #[test]
+    fn the_checks_a_workspace_declares_are_listed_in_the_order_a_run_tries_them() {
+        let cargo = tempfile::tempdir().unwrap();
+        std::fs::write(cargo.path().join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        assert_eq!(
+            declared_checks(cargo.path()),
+            ["run_tests", "run_build", "run_linter"]
+        );
+
+        // A manifest that declares only a build has no test to run, so the build is the first check
+        // rather than a test call the host would have to fail its way through.
+        let node = tempfile::tempdir().unwrap();
+        std::fs::write(
+            node.path().join("package.json"),
+            r#"{"scripts":{"build":"vite build"}}"#,
+        )
+        .unwrap();
+        std::fs::write(node.path().join("pnpm-lock.yaml"), "").unwrap();
+        assert_eq!(declared_checks(node.path()), ["run_build"]);
+
+        let empty = tempfile::tempdir().unwrap();
+        assert!(declared_checks(empty.path()).is_empty());
+    }
+
+    #[test]
+    fn only_a_command_that_did_not_succeed_reports_a_failure() {
+        assert!(!Summary::said(SummaryKey::TerminalExit, json!({ "code": 0 }), "exit 0").failed());
+        assert!(Summary::said(SummaryKey::TerminalExit, json!({ "code": 1 }), "exit 1").failed());
+        assert!(Summary::said(
+            SummaryKey::TerminalTimedOut,
+            json!({ "seconds": 5 }),
+            "stopped after 5s"
+        )
+        .failed());
+        // Every other line describes a read or a write that returned, so it cannot say a check failed.
+        assert!(!Summary::verbatim("src/main.ts").failed());
     }
 
     #[test]

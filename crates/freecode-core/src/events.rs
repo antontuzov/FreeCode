@@ -175,13 +175,20 @@ pub enum NoticeCode {
     /// window's rows, diff and Review panel — and nothing emits this notice. The variant stays because
     /// a conversation filed while it did fire has to read back the way it was seen.
     RouteHasNoTools,
+    /// A run changed files and the host would have run the project's check, but Terminal access is
+    /// off, so the change went out unverified.
+    ChecksNotRun,
+    /// A run changed files and the workspace declares no test, build or lint command to run.
+    ChecksUnavailable,
+    /// The check the host ran after a run's edits ended with a failing status.
+    ChecksFailed,
 }
 
 impl NoticeCode {
     /// Every code the host can emit. `verify-transcript-i18n` walks this to require one catalog entry
     /// per code, so a notice added here without its sentence in both locales fails the build instead
     /// of rendering its own key in the middle of a transcript.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 17] = [
         Self::EffortNotSupported,
         Self::EngineRestarted,
         Self::ToolCallWithoutTools,
@@ -196,6 +203,9 @@ impl NoticeCode {
         Self::ModelTakesNoImages,
         Self::FreeModelFallback,
         Self::RouteHasNoTools,
+        Self::ChecksNotRun,
+        Self::ChecksUnavailable,
+        Self::ChecksFailed,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -214,6 +224,9 @@ impl NoticeCode {
             Self::ModelTakesNoImages => "notice.model-takes-no-images",
             Self::FreeModelFallback => "notice.free-model-fallback",
             Self::RouteHasNoTools => "notice.route-has-no-tools",
+            Self::ChecksNotRun => "notice.checks-not-run",
+            Self::ChecksUnavailable => "notice.checks-unavailable",
+            Self::ChecksFailed => "notice.checks-failed",
         }
     }
 
@@ -237,6 +250,9 @@ impl NoticeCode {
             Self::ModelTakesNoImages => &["model"],
             Self::FreeModelFallback => &["from", "to"],
             Self::RouteHasNoTools => &["model"],
+            Self::ChecksNotRun => &[],
+            Self::ChecksUnavailable => &[],
+            Self::ChecksFailed => &["code"],
         }
     }
 }

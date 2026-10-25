@@ -2076,6 +2076,14 @@ async fn run_rounds(
     // second round here would only re-ask the same question. The sandbox below belongs to this app's
     // own calls, which is why it is resolved after this exit rather than before it.
     if !tools || matches!(answer, Answer::OpenCode(_)) {
+        // The service denies its model the shell, and this app's runners are not its tools, so a
+        // change it made would otherwise go out unmeasured. Verification here reads the same ledger
+        // the route's writes were staged in, which is why it does not need the loop below.
+        if tools && !stops.stopped.load(Ordering::Relaxed) {
+            if let Ok(policy) = agent::policy_for(app, settings) {
+                agent::verify_run(app, settings, &policy, false).await;
+            }
+        }
         return Ok(reply);
     }
     // Built here rather than by the caller: a chat with the control off does not need a workspace at
@@ -2086,6 +2094,9 @@ async fn run_rounds(
     // One delegation per run. The switch is the consent to pay for a second model run; the budget is
     // what keeps a model that likes delegating from spending the whole window on its subagents.
     let mut delegations = 0usize;
+    // Whether this run already measured itself. A model that ran its own tests has that result in
+    // the transcript, and the host must not make the user wait through the same suite twice.
+    let mut checked = false;
     while wants_tools(&reply) && !stops.stopped.load(Ordering::Relaxed) {
         if rounds == MAX_TOOL_ROUNDS {
             let cap = MAX_TOOL_ROUNDS.to_string();
@@ -2123,6 +2134,18 @@ async fn run_rounds(
             ran.push(one);
         }
         agent::close_batch(app, &calls);
+        // A batch that wrote starts the measurement over: a check from an earlier round said nothing
+        // about a file this round changed after it.
+        checked = if calls.iter().any(|call| {
+            matches!(
+                call.name.as_str(),
+                "edit_file" | "write_file" | "apply_patch"
+            )
+        }) {
+            ran_a_check(&calls)
+        } else {
+            checked || ran_a_check(&calls)
+        };
 
         // The replay the fork's template needs: the assistant's own call list, then one result per
         // `call_id`. Both go in even for a call that was refused, because a call with no answer at all
@@ -2173,7 +2196,20 @@ async fn run_rounds(
         }
         reply = stream_turn(app, answer, &request, tools, stops).await?;
     }
+    // The same measurement for this route: the model's own check is the better one when it ran, and
+    // a Stop press means the work the checks would judge is the work the user just cut off.
+    if !stops.stopped.load(Ordering::Relaxed) {
+        agent::verify_run(app, settings, &policy, checked).await;
+    }
     Ok(reply)
+}
+
+/// Whether a round ran one of the project's own checks. Only the three runners count: a `terminal`
+/// call may be a read, and treating `ls` as a measurement would skip the check the edit still needs.
+fn ran_a_check(calls: &[freecode_llama::ToolCall]) -> bool {
+    calls
+        .iter()
+        .any(|call| matches!(call.name.as_str(), "run_tests" | "run_build" | "run_linter"))
 }
 
 /// Start the engine on request. Explicit, so it re-arms the restart budget — a press is the user
@@ -2841,6 +2877,24 @@ mod tests {
         lock(&state.slot).streaming = true;
         assert!(request_stop(&state));
         assert!(state.stop_requested.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_round_that_ran_a_command_has_already_measured_itself() {
+        let call = |name: &str| freecode_llama::ToolCall {
+            id: name.into(),
+            name: name.into(),
+            arguments: "{}".into(),
+        };
+        // The three runners are the acts the host would otherwise repeat.
+        for name in ["run_tests", "run_build", "run_linter"] {
+            assert!(ran_a_check(&[call(name)]), "{name}");
+        }
+        // A terminal may have been a read, and reading and editing measure nothing themselves, so
+        // none of them may stand in for the check the edit still needs.
+        assert!(!ran_a_check(&[call("terminal")]));
+        assert!(!ran_a_check(&[call("read_file"), call("edit_file")]));
+        assert!(!ran_a_check(&[]));
     }
 
     #[test]
