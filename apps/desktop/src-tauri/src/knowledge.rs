@@ -50,8 +50,7 @@ impl Center {
             engine_tag: lock.pinned_tag.clone(),
             engine_installed: engine.as_ref().is_some_and(|e| e.installed),
             models: catalog
-                .models
-                .iter()
+                .offered()
                 .map(|model| ModelCard::of(model, &weights))
                 .collect(),
         })
@@ -247,14 +246,15 @@ mod tests {
     }
 
     #[test]
-    fn every_model_and_every_pack_in_the_catalog_is_on_the_page() {
+    fn every_offered_model_and_every_pack_in_the_catalog_is_on_the_page() {
         let root = repo_root();
         let center = Center::build(&root, &Settings::default()).unwrap();
         let catalog = Catalog::load_default(&root).unwrap();
+        let offered: Vec<_> = catalog.offered().collect();
 
         assert_eq!(center.catalog_updated, catalog.updated);
-        assert_eq!(center.models.len(), catalog.models.len());
-        for (card, entry) in center.models.iter().zip(&catalog.models) {
+        assert_eq!(center.models.len(), offered.len());
+        for (card, entry) in center.models.iter().zip(offered) {
             assert_eq!(card.id, entry.id);
             assert_eq!(card.packs.len(), entry.packs.len());
             // A model's projector files are as much the catalog's as its quantisations: a page that
@@ -269,6 +269,15 @@ mod tests {
                 format!("https://huggingface.co/{}", entry.repo_id)
             );
             assert_eq!(card.context_length, entry.context_length);
+        }
+
+        // The two Bonsai 2 sizes the picker marks off are absent from every model surface even
+        // though their entries stay in the file.
+        for id in ["ternary-bonsai-2-27b", "ternary-bonsai-2-4b"] {
+            assert!(
+                center.models.iter().all(|m| m.id != id),
+                "{id} is marked not offered and must not be listed"
+            );
         }
     }
 
@@ -293,19 +302,17 @@ mod tests {
         assert!(center.models.iter().all(|m| m.held_bytes == 0));
     }
 
-    /// The 4B is the model the app points at for images, so its page is the one a reader arrives on
-    /// asking "which file adds vision, and which of those should I fetch". A projector the card marks
-    /// as not its own pick has to say so on the row: the two differ in whether a concurrent image
-    /// run crashes the server, which is the whole reason the card publishes both.
+    /// The 4B is not offered, so its card is built straight from the catalog entry: the projector
+    /// facts are still the file's, and the note above is the one a reader would get if this size were
+    /// listed again.
     #[test]
     fn the_vision_models_page_names_its_projectors_and_the_picks() {
         let (root, settings) = nothing_fetched();
-        let center = Center::build(root.path(), &settings).unwrap();
-        let card = center
-            .models
-            .iter()
-            .find(|m| m.id == "ternary-bonsai-2-4b")
-            .expect("the catalog ships the 4B");
+        let catalog = Catalog::load_default(root.path()).unwrap();
+        let entry = catalog
+            .model("ternary-bonsai-2-4b")
+            .expect("the catalog keeps the 4B entry");
+        let card = ModelCard::of(entry, &weights_dir(root.path(), &settings));
 
         assert_eq!(card.vision.len(), 2);
         assert!(card.vision.iter().any(|v| v.recommended));
@@ -322,11 +329,12 @@ mod tests {
         assert!(card.vision.iter().all(|v| !v.file.is_empty()));
 
         // A model that publishes no projector gets an empty list, not a fabricated row.
-        let plain = center
-            .models
-            .iter()
-            .find(|m| m.id == "ternary-bonsai-1-7b")
-            .expect("the catalog ships the 1.7B");
+        let plain = ModelCard::of(
+            catalog
+                .model("ternary-bonsai-1-7b")
+                .expect("the catalog ships the 1.7B"),
+            &weights_dir(root.path(), &settings),
+        );
         assert!(
             plain.vision.is_empty(),
             "the 1.7B card publishes no projector"
@@ -337,13 +345,12 @@ mod tests {
     fn a_pack_sitting_in_the_weights_directory_is_counted() {
         let (root, mut settings) = nothing_fetched();
         let catalog = Catalog::load_default(root.path()).unwrap();
-        // The smallest pack in the file, with the entry that owns it: pack keys repeat across models
-        // (both publish an F16 reference), so a pack has to be traced back to its own model rather
-        // than looked up by key. The check is on size, so a sparse file of exactly that many bytes
-        // proves the read without spending the gigabytes on disk.
+        // The smallest pack among the models this build offers, with the entry that owns it: pack
+        // keys repeat across models (both publish an F16 reference), so a pack has to be traced back
+        // to its own model rather than looked up by key. The check is on size, so a sparse file of
+        // exactly that many bytes proves the read without spending the gigabytes on disk.
         let (entry, pack) = catalog
-            .models
-            .iter()
+            .offered()
             .flat_map(|m| m.packs.iter().map(move |p| (m, p)))
             .min_by_key(|(_, p)| p.size_bytes)
             .unwrap();
@@ -364,9 +371,11 @@ mod tests {
         assert!(row.on_disk, "{} should read as present", pack.file);
         assert_eq!(card.held_bytes, pack.size_bytes);
 
-        // The other model is untouched by a file that is not its own.
-        let other = center.models.iter().find(|m| m.id != card.id).unwrap();
-        assert_eq!(other.held_bytes, 0);
+        // The other offered models are untouched by a file that is not theirs. (Only offered models
+        // are on the page, so the 27B and 4B that share the catalog do not have cards to check.)
+        for other in center.models.iter().filter(|m| m.id != card.id) {
+            assert_eq!(other.held_bytes, 0);
+        }
     }
 
     #[test]

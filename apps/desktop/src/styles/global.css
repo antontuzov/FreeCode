@@ -73,10 +73,10 @@ body {
 
 /* Press feedback. A click that starts a two-second model load otherwise feels like nothing
  * happened, because its only acknowledgement lands somewhere else on the screen. */
-:where(button, .style-card) {
+:where(button) {
   transition: transform var(--dur-quick) var(--ease-standard);
 }
-:where(button, .style-card):active:not([disabled], [aria-disabled="true"]) {
+:where(button):active:not([disabled], [aria-disabled="true"]) {
   transform: translateY(1px);
 }
 
@@ -210,11 +210,48 @@ details[open] > summary .disclosure-icon {
   color: var(--text);
 }
 
+/* The Theme/UI tabs under the page title, as the reference draws them: a word, and an underline on
+ * the one in front. The rule runs the full width so both tabs sit on the page's own card edge. */
+.settings-tabs {
+  display: flex;
+  gap: var(--space-6);
+  margin-top: var(--space-6);
+  margin-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.settings-tab {
+  position: relative;
+  padding: var(--space-1) 2px var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--size-quiet);
+  transition: color var(--dur-quick) var(--ease-standard);
+}
+.settings-tab:hover {
+  color: var(--text);
+}
+.settings-tab[data-active="true"] {
+  color: var(--text-strong);
+}
+.settings-tab[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+
 /* "Personal", "Integrations", "Coding" — the group label above a run of nav items. */
 .section-label {
   padding: var(--space-4) var(--space-3) var(--space-1);
   color: var(--text-faint);
   font-size: var(--size-fine);
+}
+/* The settings nav's first group has no caption, so it supplies the air the caption would have. */
+.nav-group-headless {
+  padding-top: var(--space-3);
 }
 
 /* The inspector's rows each carry their kind inside a small chip, which is what makes the column
@@ -268,6 +305,17 @@ details[open] > summary .disclosure-icon {
 .card-row[data-compact="true"] {
   padding-top: var(--space-4);
   padding-bottom: var(--space-4);
+}
+/* The onboarding's model rows are buttons, and the chosen one has to look chosen: the same tint the
+ * reference's selected rows carry, with the hover held below it so it never outweighs the pick. */
+button.card-row:hover:not([data-selected="true"]):not(:disabled) {
+  background: color-mix(in oklab, var(--text) 5%, var(--bg));
+}
+button.card-row[data-selected="true"] {
+  background: var(--accent-soft);
+}
+button.card-row:disabled {
+  cursor: default;
 }
 
 .pill {
@@ -460,8 +508,13 @@ details[open] > summary .disclosure-icon {
 .field:focus-within {
   border-color: var(--accent-line);
 }
-.field:disabled {
+.field:disabled,
+.field[data-disabled] {
   opacity: 0.45;
+  cursor: default;
+}
+.field[data-disabled] select,
+.field[data-disabled] input {
   cursor: default;
 }
 .field-input {
@@ -841,118 +894,238 @@ select.field-input {
   background: var(--border);
 }
 
-/* The four interface-style cards. Each paints the style it advertises through `--preview`, so the
- * row stays readable whichever accent is live. */
-/* Shot 02: the tinted preview box carries the selection outline, and the style name sits below it
-   on the page rather than inside the swatch. */
-.style-card {
+/* The eight theme tiles. Each paints the three colours it is made of through the `swatch-*` family
+ * below: the action colour, the wash the chrome is mixed from, and the neutral ground. Selection is
+ * the tinted card plus the accent outline, so it never rests on colour alone. */
+.theme-tile {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  color: var(--text-muted);
-  font-size: var(--size-quiet);
-  text-align: center;
-  cursor: pointer;
-}
-.style-preview {
-  /* The card shows a window, and a window's ground is the style's wash over the page. The percentage
-   * is a whisper on purpose: the captures' tiles sit within a few units of the page they stand on,
-   * and it is the bar and the dot that say which style the tile is. */
-  --preview-fill: color-mix(in oklab, var(--preview-chrome) 10%, var(--bg));
-  padding: var(--space-3);
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  /* The bar and the dot stay the action colour, because those are the accent. */
-  background: var(--preview-fill);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: var(--size-quiet);
+  text-align: left;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    border-color var(--dur-quick) var(--ease-standard);
 }
-.style-card[data-selected="true"] .style-preview {
-  border-color: var(--accent);
+.theme-tile:hover:not([data-selected="true"]) {
+  background: color-mix(in oklab, var(--text) 5%, var(--bg-elevated));
 }
-.style-card[data-selected="true"] .style-name {
+.theme-tile[data-selected="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
   color: var(--text-strong);
   font-weight: 500;
 }
-.style-window {
-  position: relative;
+.theme-tile:disabled {
+  cursor: not-allowed;
+  color: var(--text-muted);
+}
+.theme-dots {
   display: flex;
-  height: 76px;
-  flex-direction: column;
+  flex-shrink: 0;
   gap: 5px;
-  padding: var(--space-3);
 }
-.style-bar {
-  height: 7px;
-  width: 62%;
-  border-radius: var(--radius-pill);
-  background: var(--preview);
-}
-.style-dot {
-  position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  border: 1.5px solid var(--preview);
+.theme-dot {
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-}
-/* Selected is a filled dot in the captures, not a ring with a hole: the tile's own wash is already
- * the shape under it, and a second ring inside a small circle reads as two marks. */
-.style-card[data-selected="true"] .style-dot {
   background: var(--preview);
 }
-.style-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin-top: auto;
-  padding: var(--space-2);
-  border: 1px solid color-mix(in oklab, var(--preview-chrome) 25%, transparent);
-  border-radius: var(--radius-sm);
-  background: color-mix(in oklab, var(--preview-chrome) 6%, var(--bg));
+.theme-dot:nth-child(2) {
+  background: var(--preview-chrome);
 }
-.style-line {
-  height: 5px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--ink-quiet) 45%, transparent);
+.theme-dot-neutral {
+  background: color-mix(in oklab, var(--fg) 12%, var(--bg));
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.theme-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Each card paints its own style: `--preview` is the action colour the bar and the dot wear, and
- * `--preview-chrome` is the wash that window's grounds are mixed from. They are different tokens
- * because the style's hue is normalized in lightness for the grounds and is not for the square — for
- * Rain they are two different hues entirely, which is the whole point of that one. */
+/* An accent swatch is the family colour with its own contrast ink, so the tick is readable on the
+ * deepest and the palest of the eight. The selected ring is drawn outside the circle: a gap in the
+ * page colour, then the swatch again. */
+.accent-swatch {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--swatch);
+  color: var(--swatch-ink);
+}
+.accent-swatch[data-selected="true"] {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--swatch);
+}
+.accent-custom {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.accent-swatch:disabled {
+  cursor: not-allowed;
+}
+
+/* Two or three exclusive answers in one field. The container is the track; the active segment
+ * lifts out of it rather than filling with the accent, because the accent already means "do this"
+ * elsewhere on the page. */
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.segment {
+  padding: 3px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--size-quiet);
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+.segment:hover:not(:disabled) {
+  color: var(--text);
+}
+.segment[data-active="true"] {
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--text-strong);
+}
+.segment:disabled {
+  cursor: not-allowed;
+}
+.segmented[data-disabled] {
+  opacity: 0.5;
+}
+
+/* One step on the text-size scale: the tier's name over the size it stores. */
+.preset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  text-align: left;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    border-color var(--dur-quick) var(--ease-standard);
+}
+.preset-card:hover:not([data-selected="true"]) {
+  background: color-mix(in oklab, var(--text) 5%, var(--bg-elevated));
+}
+.preset-card[data-selected="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.preset-name {
+  font-size: var(--size-ui);
+  color: var(--text);
+}
+.preset-card[data-selected="true"] .preset-name {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+.preset-figure {
+  font-size: var(--size-fine);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The typography sample. It is painted from the same two families the window reads and the same
+ * step tokens, so choosing a face or a text size shows the answer before it is stored. */
+.type-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  font-family: var(--font-family-ui);
+}
+.type-preview-title {
+  font-size: var(--size-ui);
+  font-weight: 500;
+  color: var(--text-strong);
+}
+.type-preview-body {
+  font-size: var(--size-quiet);
+  line-height: 1.65;
+  color: var(--text);
+}
+.type-preview-code {
+  font-family: var(--font-family-code);
+  font-size: var(--size-code);
+  color: var(--text-muted);
+}
+
+/* Each tile and swatch paints its own style: `--preview` is the action colour the dots wear,
+ * `--preview-chrome` is the wash the grounds are mixed from, `--swatch` is the round accent and
+ * `--swatch-ink` the label colour measured against it. */
 .swatch-forest {
   --preview: var(--style-forest);
   --preview-chrome: var(--style-forest-tint);
+  --swatch: var(--style-forest);
+  --swatch-ink: var(--style-forest-contrast);
 }
 .swatch-mint {
   --preview: var(--style-mint);
   --preview-chrome: var(--style-mint-tint);
+  --swatch: var(--style-mint);
+  --swatch-ink: var(--style-mint-contrast);
 }
 .swatch-bee {
   --preview: var(--style-bee);
   --preview-chrome: var(--style-bee-tint);
+  --swatch: var(--style-bee);
+  --swatch-ink: var(--style-bee-contrast);
 }
 .swatch-parchment {
   --preview: var(--style-parchment);
   --preview-chrome: var(--style-parchment-tint);
+  --swatch: var(--style-parchment);
+  --swatch-ink: var(--style-parchment-contrast);
 }
 .swatch-rain {
   --preview: var(--style-rain);
   --preview-chrome: var(--style-rain-tint);
+  --swatch: var(--style-rain);
+  --swatch-ink: var(--style-rain-contrast);
 }
 .swatch-ink {
   --preview: var(--style-ink);
   --preview-chrome: var(--style-ink-tint);
+  --swatch: var(--style-ink);
+  --swatch-ink: var(--style-ink-contrast);
 }
 .swatch-rose {
   --preview: var(--style-rose);
   --preview-chrome: var(--style-rose-tint);
+  --swatch: var(--style-rose);
+  --swatch-ink: var(--style-rose-contrast);
 }
 .swatch-slate {
   --preview: var(--style-slate);
   --preview-chrome: var(--style-slate-tint);
+  --swatch: var(--style-slate);
+  --swatch-ink: var(--style-slate-contrast);
 }
 
 /* The mascot tiles the app can wear: the twelve drawn ducks and the brand mark on a white and a

@@ -4,15 +4,18 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  AccentSwatch,
   IconCard,
   NumberField,
   Row,
   Section,
   SecretField,
+  Segmented,
   Select,
   ShortcutChips,
-  StyleCard,
+  SizeCard,
   TextField,
+  ThemeTile,
   Toggle,
 } from "./controls";
 import { Icon, type IconName } from "./icons";
@@ -45,9 +48,12 @@ const PAGE_IDS = [
 ] as const;
 type Page = (typeof PAGE_IDS)[number];
 
-const GROUPS: { key: string; items: { id: Page; icon: IconName }[] }[] = [
+const GROUPS: { key: string; label?: boolean; items: { id: Page; icon: IconName }[] }[] = [
   {
     key: "basics",
+    // The reference opens its nav with its everyday pages and only captions the groups below them;
+    // a heading over the first list would push four items down to say what they already are.
+    label: false,
     items: [
       { id: "appearance", icon: "wand" },
       { id: "voice", icon: "voice" },
@@ -86,23 +92,39 @@ const GROUPS: { key: string; items: { id: Page; icon: IconName }[] }[] = [
  */
 const CONTROLS: Record<Page, string[]> = {
   appearance: [
-    "setup",
+    // Theme tab.
     "themeMode",
-    "appIcon",
-    "appIconRoll",
-    "terminalTheme",
-    "builtInBrowser",
+    "theme",
     "language",
     "fontStyle",
+    "chatProse",
+    "uiFontSize",
+    "appIcon",
+    "appIconRoll",
     "contentWidth",
-    "fileIcons",
+    "chatProgress",
+    "chatCollapseProgress",
     "glass",
     "lightCodeTheme",
     "darkCodeTheme",
     "showLineNumbers",
     "wrapLongLines",
-    "uiFontSize",
     "codeFontSize",
+    // UI tab.
+    "setup",
+    "sendShortcut",
+    "followUpMode",
+    "persistCommentary",
+    "showThinking",
+    "showToolCalls",
+    "terminalTheme",
+    "builtInBrowser",
+    "fileIcons",
+    "sidebarLive",
+    "sidebarConfirm",
+    "observer",
+    "observerResolved",
+    "observerModel",
   ],
   voice: [
     "inputDevice",
@@ -172,6 +194,29 @@ const CONTROLS: Record<Page, string[]> = {
 // The list is the ipc module's, because the footer's Theme submenu sells exactly these eight.
 const STYLES = INTERFACE_STYLES;
 
+// Appearance is two pages in the reference: the theme itself, and the preferences that ride in front
+// of the window. They share one nav item because they share one right-hand page and one heading, and
+// the tab is state rather than a stored setting — `?tab=ui` seeds it for a capture.
+const TABS = ["theme", "ui"] as const;
+type TabId = (typeof TABS)[number];
+
+// Rows the UI tab holds, so a search hit opens the tab that actually renders it instead of landing on
+// the Theme tab and scrolling to nothing.
+const UI_ROWS = new Set([
+  "setup",
+  "sendShortcut",
+  "followUpMode",
+  "persistCommentary",
+  "showThinking",
+  "showToolCalls",
+  "theme",
+  "terminalTheme",
+  "builtInBrowser",
+  "fileIcons",
+]);
+
+const tabOf = (stem: string): TabId => (UI_ROWS.has(stem) ? "ui" : "theme");
+
 export function Settings({
   locale,
   page,
@@ -192,13 +237,30 @@ export function Settings({
   const update = useSettings((s) => s.update);
   // An unknown deep-link page falls back to Appearance rather than rendering nothing.
   const active: Page = PAGE_IDS.includes(page as Page) ? (page as Page) : "appearance";
+  // `?row=<stem>` is the deep link to a control the way `?q=` is the deep link to a result list: a
+  // capture of the Typography or Text size section has to open with that section on screen, and this
+  // window cannot be scrolled or clicked by the harness. Dev-only, like the appearance levers.
+  const devRow = import.meta.env.DEV
+    ? new URLSearchParams(window.location.search).get("row")
+    : null;
+  const devRowTab =
+    devRow && (CONTROLS.appearance as string[]).includes(devRow) ? tabOf(devRow) : null;
+  const [tab, setTab] = useState<TabId>(
+    () =>
+      devRowTab ??
+      (new URLSearchParams(window.location.search).get("tab") === "ui" ? "ui" : "theme"),
+  );
   // `?q=` seeds the field the way `?help=open` seeds the card below it: a result list is a state no
   // capture can reach by typing, and it is the state that has to look right on the real surface.
   const [query, setQuery] = useState(new URLSearchParams(window.location.search).get("q") ?? "");
   // The row a search hit names, once its page has opened. The nav can say "Context window", but the
   // answer to the query is the control itself, and a page that opens at its top sends the user back to
   // reading five sections to find it.
-  const [jump, setJump] = useState<{ page: Page; title: string } | null>(null);
+  const [jump, setJump] = useState<{ page: Page; title: string } | null>(() =>
+    devRow && devRowTab
+      ? { page: "appearance", title: translate(locale, `settings.row.${devRow}`) }
+      : null,
+  );
   const body = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -286,8 +348,13 @@ export function Settings({
             <p className="px-3 py-2 text-quiet text-faint">{t("noResults", { query })}</p>
           ) : (
             groups.map((group) => (
-              <div key={group.key}>
-                <p className="section-label">{t(`group.${group.key}`)}</p>
+              <div
+                key={group.key}
+                className={group.label === false ? "nav-group-headless" : undefined}
+              >
+                {group.label !== false && (
+                  <p className="section-label">{t(`group.${group.key}`)}</p>
+                )}
                 {group.items.map((item) => (
                   <div key={item.id}>
                     <button
@@ -308,6 +375,9 @@ export function Settings({
                           className="nav-sub-item"
                           onClick={() => {
                             onOpen(item.id);
+                            // The hit is a row, and the tab decides whether that row is on screen
+                            // at all; switching here is what makes the jump below find it.
+                            if (item.id === "appearance") setTab(tabOf(k));
                             setJump({ page: item.id, title: label });
                           }}
                         >
@@ -341,7 +411,15 @@ export function Settings({
             {!doc ? (
               <p className="text-muted">{t("loading")}</p>
             ) : (
-              <Page doc={doc} page={active} set={set} t={t} locale={locale} />
+              <Page
+                doc={doc}
+                page={active}
+                set={set}
+                t={t}
+                locale={locale}
+                tab={tab}
+                onTab={setTab}
+              />
             )}
           </div>
         </div>
@@ -361,16 +439,20 @@ function Page({
   set,
   t,
   locale,
+  tab,
+  onTab,
 }: {
   doc: SettingsDoc;
   page: Page;
   set: SetFn;
   t: T;
   locale: Locale;
+  tab: TabId;
+  onTab: (next: TabId) => void;
 }) {
   switch (page) {
     case "appearance":
-      return <Appearance doc={doc} set={set} t={t} locale={locale} />;
+      return <Appearance doc={doc} set={set} t={t} locale={locale} tab={tab} onTab={onTab} />;
     case "voice":
       return <Voice doc={doc} set={set} t={t} locale={locale} />;
     case "agent":
@@ -443,51 +525,77 @@ function Appearance({
   set,
   t,
   locale,
+  tab,
+  onTab,
 }: {
   doc: SettingsDoc;
   set: SetFn;
   t: T;
   locale: Locale;
+  tab: TabId;
+  onTab: (next: TabId) => void;
 }) {
-  const a = doc.appearance;
-  const opt = (v: string) => t(`opt.${v}`);
-  // Five of these rows write a field the window never reads: there is no terminal surface to theme,
-  // no built-in browser to route a link through, no file list to icon, and the answer's code is
-  // painted from the app's own colour tokens rather than from a bundled highlight stylesheet. They
-  // stay because the reference shows them and the document they save is the one a later build
-  // renders — but a row that changes nothing on screen says so, in the words the sidebar already
-  // uses for the same case.
-  const inert = translate(locale, "common.notInBuild");
   return (
     <>
-      <Section label={t("section.setup")} description={t("section.setup.desc")}>
-        <Row title={t("row.setup")} description={t("row.setup.desc")}>
+      <div role="tablist" aria-label={t("title")} className="settings-tabs">
+        {TABS.map((id) => (
           <button
+            key={id}
             type="button"
-            className="rounded-[var(--radius-md)] border border-line bg-elevated px-3 py-1.5 text-quiet hover:bg-hover"
-            onClick={() => useOnboarding.getState().openSetup(0)}
+            role="tab"
+            aria-selected={tab === id}
+            data-active={tab === id || undefined}
+            className="settings-tab"
+            onClick={() => onTab(id)}
           >
-            {t("row.setup.action")}
+            {t(`tab.${id}`)}
           </button>
+        ))}
+      </div>
+      {tab === "ui" ? (
+        <UiTab doc={doc} set={set} t={t} locale={locale} />
+      ) : (
+        <ThemeTab doc={doc} set={set} t={t} locale={locale} />
+      )}
+    </>
+  );
+}
+
+/** The palette, the type and the surfaces around the transcript: everything a picture of the window
+ * is made of. Two rows here write a field nothing reads yet (chat prose, code themes) and say so in
+ * the words the rest of the app uses; the rest either repaint the live window or do not appear. */
+function ThemeTab({ doc, set, t, locale }: { doc: SettingsDoc; set: SetFn; t: T; locale: Locale }) {
+  const a = doc.appearance;
+  const opt = (v: string) => t(`opt.${v}`);
+  const inert = translate(locale, "common.notInBuild");
+  // The five tiers the reference offers, in the unit this build stores: whole pixels on the 14 px
+  // default. The figure under each name is what the window will paint, not a ratio it cannot hold.
+  const sizes = (
+    [
+      [13, "sizeSmall"],
+      [14, "sizeDefault"],
+      [15, "sizeLarge"],
+      [18, "sizeXL"],
+      [20, "sizeXXL"],
+    ] as const
+  ).map(([value, key]) => ({ value, name: opt(key) }));
+  return (
+    <>
+      <Section label={t("section.language")}>
+        <Row title={t("row.language")} description={t("row.language.desc")}>
+          <Select
+            label={t("row.language")}
+            value={a.language}
+            options={(["en", "ru"] as const).map((v) => ({ value: v, label: opt(v) }))}
+            onChange={(v) => set((d) => void (d.appearance.language = v))}
+          />
         </Row>
       </Section>
 
-      <Section label={t("section.interfaceStyle")}>
-        <Row title={t("row.themeMode")} description={t("row.themeMode.desc")}>
-          <Select
-            label={t("row.themeMode")}
-            icon={a.themeMode === "light" ? "sun" : a.themeMode === "dark" ? "moon" : "monitor"}
-            value={a.themeMode}
-            options={(["light", "dark", "system"] as const).map((v) => ({
-              value: v,
-              label: opt(v),
-            }))}
-            onChange={(v) => set((d) => void (d.appearance.themeMode = v))}
-          />
-        </Row>
+      <Section label={t("section.theme")} description={t("section.theme.desc")}>
         <div className="grid grid-cols-2 gap-[var(--space-3)] p-[var(--space-4)] md:grid-cols-4">
           {STYLES.map((s) => (
-            <StyleCard
+            <ThemeTile
               key={s.id}
               style={s.id}
               name={s.label}
@@ -495,13 +603,133 @@ function Appearance({
               onSelect={() => set((d) => void (d.appearance.interfaceStyle = s.id))}
             />
           ))}
+          {/* The reference puts an Import tile at the end of the grid. A theme here is one of the
+              eight the build ships, so the tile is present and disabled rather than quietly omitted. */}
+          <button
+            type="button"
+            aria-disabled
+            aria-label={t("theme.import")}
+            title={inert}
+            disabled
+            className="theme-tile text-muted"
+          >
+            <Icon name="download" size={16} />
+            <span className="theme-name">{t("theme.import")}</span>
+          </button>
         </div>
-        {/* The tiles already ship and the app already wears one of them; this adds only the
-            choice, in the same group the reference puts its own icon control in. Pinning is host-side
-            on purpose — the Dock tile is drawn by the host, which cannot see what the page decides —
-            so the number travels through the settings document and the host repaints the tile the
-            moment it lands. */}
-        <div className="px-[var(--space-4)] pb-[var(--space-4)]">
+        <p className="-mt-[var(--space-2)] px-[var(--space-4)] pb-[var(--space-4)] text-fine text-muted">
+          {t("theme.importNote")}
+        </p>
+        <Row title={t("row.themeMode")} description={t("row.themeMode.desc")}>
+          <Segmented
+            label={t("row.themeMode")}
+            value={a.themeMode}
+            options={(["system", "light", "dark"] as const).map((v) => ({
+              value: v,
+              label: opt(v),
+            }))}
+            onChange={(v) => set((d) => void (d.appearance.themeMode = v))}
+          />
+        </Row>
+        <Row title={t("row.glass")} description={t("row.glass.desc")}>
+          <Toggle
+            on={a.glassEffects}
+            label={t("row.glass")}
+            onChange={(v) => set((d) => void (d.appearance.glassEffects = v))}
+          />
+        </Row>
+      </Section>
+
+      <Section label={t("section.accent")} description={t("section.accent.desc")}>
+        <div
+          role="group"
+          aria-label={t("section.accent")}
+          className="flex flex-wrap items-center gap-[var(--space-3)] px-[var(--space-4)] py-[var(--space-5)]"
+        >
+          {STYLES.map((s) => (
+            <AccentSwatch
+              key={s.id}
+              style={s.id}
+              name={s.label}
+              selected={a.interfaceStyle === s.id}
+              onSelect={() => set((d) => void (d.appearance.interfaceStyle = s.id))}
+            />
+          ))}
+          <button
+            type="button"
+            aria-disabled
+            aria-label={t("accent.custom")}
+            title={inert}
+            disabled
+            className="accent-swatch accent-custom"
+          >
+            <Icon name="editFile" size={15} />
+          </button>
+        </div>
+        <p className="px-[var(--space-4)] pb-[var(--space-4)] text-fine text-muted">
+          {t("accent.note")}
+        </p>
+      </Section>
+
+      <Section label={t("section.typography")} description={t("section.typography.desc")}>
+        <Row title={t("row.fontStyle")} description={t("row.fontStyle.desc")}>
+          <Select
+            label={t("row.fontStyle")}
+            value={a.fontStyle}
+            options={(["sans", "serif", "mono"] as const).map((v) => ({ value: v, label: opt(v) }))}
+            onChange={(v) => set((d) => void (d.appearance.fontStyle = v))}
+          />
+        </Row>
+        <Row title={t("row.chatProse")} description={t("row.chatProse.desc")} inert={inert}>
+          <Select
+            label={t("row.chatProse")}
+            value="theme"
+            options={[{ value: "theme", label: opt("themeDefault") }]}
+            disabled
+            onChange={() => {}}
+          />
+        </Row>
+        {/* The sample is painted by the same tokens the transcript reads, so the face and the size
+            chosen above are visible before either is confirmed by reading an answer. */}
+        <div className="p-[var(--space-4)]">
+          <div className="type-preview">
+            <span className="type-preview-title">{t("typePreview.title")}</span>
+            <p className="type-preview-body">{t("typePreview.body")}</p>
+            <code className="type-preview-code">{t("typePreview.code")}</code>
+          </div>
+        </div>
+      </Section>
+
+      <Section label={t("section.textSize")} description={t("section.textSize.desc")}>
+        <div className="grid grid-cols-2 gap-[var(--space-3)] p-[var(--space-4)] sm:grid-cols-5">
+          {sizes.map((s) => (
+            <SizeCard
+              key={s.value}
+              name={s.name}
+              figure={t("textSize.px", { size: s.value })}
+              selected={a.uiFontSizePx === s.value}
+              onSelect={() => set((d) => void (d.appearance.uiFontSizePx = s.value))}
+            />
+          ))}
+        </div>
+        <Row title={t("row.uiFontSize")} description={t("row.uiFontSize.desc")}>
+          <NumberField
+            label={t("row.uiFontSize")}
+            value={a.uiFontSizePx}
+            suffix="px"
+            min={12}
+            max={20}
+            onChange={(v) => set((d) => void (d.appearance.uiFontSizePx = v))}
+          />
+        </Row>
+      </Section>
+
+      {/* The tiles already ship and the app already wears one of them; this adds only the choice, in
+          the same group the reference puts its own icon control in. Pinning is host-side on purpose —
+          the Dock tile is drawn by the host, which cannot see what the page decides — so the number
+          travels through the settings document and the host repaints the tile the moment it lands. */}
+      <Section label={t("section.appIcon")}>
+        <div className="px-[var(--space-4)] pt-[var(--space-4)]">
           <p className="mb-[var(--space-2)] text-quiet text-muted">{t("row.appIcon")}</p>
           <div className="grid grid-cols-4 gap-[var(--space-3)] sm:grid-cols-6">
             {MASCOT_TILES.map((source, i) => (
@@ -524,44 +752,9 @@ function Appearance({
             onChange={(v) => set((d) => void (d.appearance.appIcon = v ? null : launchTile))}
           />
         </Row>
-        <Row title={t("row.terminalTheme")} description={t("row.terminalTheme.desc")} inert={inert}>
-          <Select
-            label={t("row.terminalTheme")}
-            value={a.terminalTheme}
-            options={(["follow_theme", "light", "dark", "custom"] as const).map((v) => ({
-              value: v,
-              label: opt(v),
-            }))}
-            onChange={(v) => set((d) => void (d.appearance.terminalTheme = v))}
-          />
-        </Row>
-        <Row
-          title={t("row.builtInBrowser")}
-          description={t("row.builtInBrowser.desc")}
-          inert={inert}
-        >
-          <Toggle
-            on={a.useBuiltInBrowserForTerminalLinks}
-            label={t("row.builtInBrowser")}
-            onChange={(v) => set((d) => void (d.appearance.useBuiltInBrowserForTerminalLinks = v))}
-          />
-        </Row>
-        <Row title={t("row.language")} description={t("row.language.desc")}>
-          <Select
-            label={t("row.language")}
-            value={a.language}
-            options={(["en", "ru"] as const).map((v) => ({ value: v, label: opt(v) }))}
-            onChange={(v) => set((d) => void (d.appearance.language = v))}
-          />
-        </Row>
-        <Row title={t("row.fontStyle")} description={t("row.fontStyle.desc")}>
-          <Select
-            label={t("row.fontStyle")}
-            value={a.fontStyle}
-            options={(["sans", "serif", "mono"] as const).map((v) => ({ value: v, label: opt(v) }))}
-            onChange={(v) => set((d) => void (d.appearance.fontStyle = v))}
-          />
-        </Row>
+      </Section>
+
+      <Section label={t("section.chat")} description={t("section.chat.desc")}>
         <Row title={t("row.contentWidth")} description={t("row.contentWidth.desc")}>
           <Select
             label={t("row.contentWidth")}
@@ -573,23 +766,15 @@ function Appearance({
             onChange={(v) => set((d) => void (d.appearance.contentWidth = v))}
           />
         </Row>
-        <Row title={t("row.fileIcons")} description={t("row.fileIcons.desc")} inert={inert}>
-          <Select
-            label={t("row.fileIcons")}
-            value={a.fileIcons}
-            options={(["qoder", "seti", "vscode", "none"] as const).map((v) => ({
-              value: v,
-              label: opt(v),
-            }))}
-            onChange={(v) => set((d) => void (d.appearance.fileIcons = v))}
-          />
+        <Row title={t("row.chatProgress")} description={t("row.chatProgress.desc")} inert={inert}>
+          <Toggle on={false} label={t("row.chatProgress")} disabled onChange={() => {}} />
         </Row>
-        <Row title={t("row.glass")} description={t("row.glass.desc")}>
-          <Toggle
-            on={a.glassEffects}
-            label={t("row.glass")}
-            onChange={(v) => set((d) => void (d.appearance.glassEffects = v))}
-          />
+        <Row
+          title={t("row.chatCollapseProgress")}
+          description={t("row.chatCollapseProgress.desc")}
+          inert={inert}
+        >
+          <Toggle on={false} label={t("row.chatCollapseProgress")} disabled onChange={() => {}} />
         </Row>
       </Section>
 
@@ -626,16 +811,6 @@ function Appearance({
             onChange={(v) => set((d) => void (d.appearance.wrapLongLines = v))}
           />
         </Row>
-        <Row title={t("row.uiFontSize")} description={t("row.uiFontSize.desc")}>
-          <NumberField
-            label={t("row.uiFontSize")}
-            value={a.uiFontSizePx}
-            suffix="px"
-            min={12}
-            max={20}
-            onChange={(v) => set((d) => void (d.appearance.uiFontSizePx = v))}
-          />
-        </Row>
         <Row title={t("row.codeFontSize")} description={t("row.codeFontSize.desc")}>
           <NumberField
             label={t("row.codeFontSize")}
@@ -644,6 +819,151 @@ function Appearance({
             min={10}
             max={18}
             onChange={(v) => set((d) => void (d.appearance.codeFontSizePx = v))}
+          />
+        </Row>
+      </Section>
+    </>
+  );
+}
+
+/** The preferences that are not the palette. Nothing on this tab has storage in this build except
+ * the two that also exist on the Theme tab — the language catalog and the theme — so the rest are
+ * drawn in the state the reference shows them, disabled, and each row says why. */
+function UiTab({ doc, set, t, locale }: { doc: SettingsDoc; set: SetFn; t: T; locale: Locale }) {
+  const a = doc.appearance;
+  const opt = (v: string) => t(`opt.${v}`);
+  const inert = translate(locale, "common.notInBuild");
+  return (
+    <>
+      <Section label={t("section.setup")} description={t("section.setup.desc")}>
+        <Row title={t("row.setup")} description={t("row.setup.desc")}>
+          <button
+            type="button"
+            className="rounded-[var(--radius-md)] border border-line bg-elevated px-3 py-1.5 text-quiet hover:bg-hover"
+            onClick={() => useOnboarding.getState().openSetup(0)}
+          >
+            {t("row.setup.action")}
+          </button>
+        </Row>
+      </Section>
+
+      <Section label={t("section.prefs")}>
+        <Row title={t("row.sendShortcut")} description={t("row.sendShortcut.desc")} inert={inert}>
+          <Segmented
+            label={t("row.sendShortcut")}
+            value="enter"
+            options={[
+              { value: "enter", label: opt("enter") },
+              { value: "modifierEnter", label: opt("modifierEnter") },
+            ]}
+            disabled
+            onChange={() => {}}
+          />
+        </Row>
+        <Row title={t("row.followUpMode")} description={t("row.followUpMode.desc")} inert={inert}>
+          <Segmented
+            label={t("row.followUpMode")}
+            value="steer"
+            options={[
+              { value: "steer", label: opt("steer") },
+              { value: "queue", label: opt("queue") },
+            ]}
+            disabled
+            onChange={() => {}}
+          />
+        </Row>
+        <Row
+          title={t("row.persistCommentary")}
+          description={t("row.persistCommentary.desc")}
+          inert={inert}
+        >
+          <Toggle on={false} label={t("row.persistCommentary")} disabled onChange={() => {}} />
+        </Row>
+        <Row title={t("row.showThinking")} description={t("row.showThinking.desc")} inert={inert}>
+          <Toggle on={false} label={t("row.showThinking")} disabled onChange={() => {}} />
+        </Row>
+        <Row title={t("row.showToolCalls")} description={t("row.showToolCalls.desc")} inert={inert}>
+          <Toggle on={false} label={t("row.showToolCalls")} disabled onChange={() => {}} />
+        </Row>
+        <Row title={t("row.language")} description={t("row.language.desc")}>
+          <Select
+            label={t("row.language")}
+            value={a.language}
+            options={(["en", "ru"] as const).map((v) => ({ value: v, label: opt(v) }))}
+            onChange={(v) => set((d) => void (d.appearance.language = v))}
+          />
+        </Row>
+        <Row title={t("row.theme")} description={t("row.theme.desc")}>
+          <Select
+            label={t("row.theme")}
+            value={a.interfaceStyle}
+            options={STYLES.map((s) => ({ value: s.id, label: s.label }))}
+            onChange={(v) => set((d) => void (d.appearance.interfaceStyle = v))}
+          />
+        </Row>
+      </Section>
+
+      <Section label={t("section.sidebar")} description={t("section.sidebar.desc")}>
+        <Row title={t("row.sidebarLive")} description={t("row.sidebarLive.desc")} inert={inert}>
+          <Toggle on={false} label={t("row.sidebarLive")} disabled onChange={() => {}} />
+        </Row>
+        <Row
+          title={t("row.sidebarConfirm")}
+          description={t("row.sidebarConfirm.desc")}
+          inert={inert}
+        >
+          <Toggle on={false} label={t("row.sidebarConfirm")} disabled onChange={() => {}} />
+        </Row>
+      </Section>
+
+      <Section label={t("section.observer")} description={t("section.observer.desc")}>
+        <Row title={t("row.observer")} description={t("row.observer.desc")} inert={inert}>
+          <Toggle on={false} label={t("row.observer")} disabled onChange={() => {}} />
+        </Row>
+        <Row title={t("row.observerResolved")} description={t("row.observerResolved.desc")} />
+        <Row title={t("row.observerModel")} description={t("row.observerModel.desc")} inert={inert}>
+          <Select
+            label={t("row.observerModel")}
+            value="auto"
+            options={[{ value: "auto", label: opt("auto") }]}
+            disabled
+            onChange={() => {}}
+          />
+        </Row>
+      </Section>
+
+      <Section label={t("section.surfaces")} description={t("section.surfaces.desc")}>
+        <Row title={t("row.terminalTheme")} description={t("row.terminalTheme.desc")} inert={inert}>
+          <Select
+            label={t("row.terminalTheme")}
+            value={a.terminalTheme}
+            options={(["follow_theme", "light", "dark", "custom"] as const).map((v) => ({
+              value: v,
+              label: opt(v),
+            }))}
+            onChange={(v) => set((d) => void (d.appearance.terminalTheme = v))}
+          />
+        </Row>
+        <Row
+          title={t("row.builtInBrowser")}
+          description={t("row.builtInBrowser.desc")}
+          inert={inert}
+        >
+          <Toggle
+            on={a.useBuiltInBrowserForTerminalLinks}
+            label={t("row.builtInBrowser")}
+            onChange={(v) => set((d) => void (d.appearance.useBuiltInBrowserForTerminalLinks = v))}
+          />
+        </Row>
+        <Row title={t("row.fileIcons")} description={t("row.fileIcons.desc")} inert={inert}>
+          <Select
+            label={t("row.fileIcons")}
+            value={a.fileIcons}
+            options={(["qoder", "seti", "vscode", "none"] as const).map((v) => ({
+              value: v,
+              label: opt(v),
+            }))}
+            onChange={(v) => set((d) => void (d.appearance.fileIcons = v))}
           />
         </Row>
       </Section>

@@ -58,8 +58,6 @@ export type ModelStatus = {
     provider: string;
     /** False for the promotion rows, which the gateway route refuses rather than routing. */
     routable: boolean;
-    /** The Privacy consent switch. Off means a free turn is refused, not rerouted. */
-    allowed: boolean;
   } | null;
   /**
    * The OpenCode app's local service, which answers every free row without a gateway key. `available`

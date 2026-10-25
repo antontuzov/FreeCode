@@ -1,16 +1,19 @@
 // The first-run setup flow: the reference's three steps, bound to this app's truth.
 //
 // There is no gateway to detect and no account to connect, so the flow asks the two questions this
-// build can answer — where a run works, and which of the three routes answers it — and hands the
-// rest to the Settings page that already owns those controls. Finishing writes one small section
-// of the settings document; pressing "Set up later" writes the same section with `later`, so the
-// flow does not reopen on every launch because the user declined it once.
+// build can answer — where a run works, and which free model answers it — and hands the rest to the
+// Settings page that already owns those controls. The third step lists the free tier itself rather
+// than a menu of routes: the local engine is not what this app is for, and a user who finishes setup
+// should have a working free model, not a choice they still have to make. Finishing writes one small
+// section of the settings document; pressing "Set up later" writes the same section with `later`, so
+// the flow does not reopen on every launch because the user declined it once.
 import { useEffect, useRef, useState } from "react";
 
 import { MascotMark } from "./BrandMark";
 import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
-import { ipc, type OnboardingPlace } from "../lib/ipc";
+import { ipc, type FreeModelInfo, type OnboardingPlace } from "../lib/ipc";
+import { useModel } from "../state/model";
 import { ONBOARDING_STEPS, useOnboarding } from "../state/onboarding";
 import { useSettings } from "../state/settings";
 
@@ -27,12 +30,6 @@ const PLACES: { id: Place; icon: IconName; key: string }[] = [
   { id: "this_mac", icon: "monitor", key: "place.thisMac" },
   { id: "project_folder", icon: "workspace", key: "place.folder" },
   { id: "later", icon: "clock", key: "place.later" },
-];
-
-const ROUTES: { id: "free" | "local" | "remote"; icon: IconName; page: string; key: string }[] = [
-  { id: "free", icon: "cube", page: "model", key: "model.free" },
-  { id: "local", icon: "monitor", page: "model", key: "model.local" },
-  { id: "remote", icon: "globe", page: "model", key: "model.remote" },
 ];
 
 export function Onboarding({
@@ -53,6 +50,9 @@ export function Onboarding({
   const [path, setPath] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [pickFailed, setPickFailed] = useState(false);
+  const [freeList, setFreeList] = useState<FreeModelInfo[] | null>(null);
+  const [freeFailed, setFreeFailed] = useState(false);
+  const [picked, setPicked] = useState<string | null>(null);
 
   const t: T = (key, params) => translate(locale, `onboarding.${key}`, params);
 
@@ -63,6 +63,23 @@ export function Onboarding({
     if (doc.onboarding.place !== "undecided") setPlace(doc.onboarding.place);
     if (doc.project.root) setPath(doc.project.root);
   }, [doc]);
+
+  // The free tier is the host's registry, so it is read when the third step opens: a small fixed
+  // list, and the first visit is the one that has to offer the one live choice. The saved pick wins
+  // on a second visit; otherwise the first row with a live route is preselected, and a row with no
+  // route is shown but not pickable — the host would refuse the turn anyway.
+  useEffect(() => {
+    if (step !== 2 || freeList) return;
+    void ipc
+      .freeModelsList()
+      .then((rows) => {
+        setFreeList(rows);
+        const saved = doc?.freeModel ?? null;
+        const live = rows.find((r) => r.routable || r.local);
+        setPicked(rows.some((r) => r.id === saved) ? saved : ((live ?? rows[0])?.id ?? null));
+      })
+      .catch(() => setFreeFailed(true));
+  }, [step, freeList, doc]);
 
   useEffect(() => {
     // `preventScroll` because WebKit otherwise scrolls the step body to reveal the dialog it was
@@ -116,8 +133,18 @@ export function Onboarding({
       go(2);
       return;
     }
-    await persist(place, true);
+    await update((d) => {
+      d.onboarding.place = place;
+      d.onboarding.completed = true;
+      if (picked) {
+        d.freeModel = picked;
+        // The free pick answers before the provider row would; the Settings page shows one source at
+        // a time, so setup sets that row to local rather than leaving it claiming Remote.
+        d.remoteProvider.source = "local";
+      }
+    });
     close();
+    await useModel.getState().refresh();
   };
 
   const skip = async () => {
@@ -125,20 +152,21 @@ export function Onboarding({
     close();
   };
 
-  const openRoute = async (page: string) => {
-    await persist(place, true);
+  const openModelSettings = async () => {
+    await update((d) => {
+      d.onboarding.place = place;
+      d.onboarding.completed = true;
+      if (picked) {
+        d.freeModel = picked;
+        d.remoteProvider.source = "local";
+      }
+    });
     close();
-    onOpenPage(page);
+    await useModel.getState().refresh();
+    onOpenPage("model");
   };
 
   const couldNotPick = translate(locale, "common.notInBuild");
-  const route = doc?.freeModel
-    ? "free"
-    : doc?.remoteProvider.source === "remote"
-      ? "remote"
-      : doc
-        ? "local"
-        : null;
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-[var(--scrim)] p-[var(--space-6)]">
@@ -283,33 +311,64 @@ export function Onboarding({
             {step === 2 && (
               <>
                 <div className="card text-left">
-                  {ROUTES.map((option) => {
-                    const current = route === option.id;
+                  {freeList === null &&
+                    (freeFailed ? (
+                      <p role="alert" className="card-row text-quiet text-danger">
+                        {t("model.failed")}
+                      </p>
+                    ) : (
+                      <p className="card-row text-quiet text-muted">{t("model.loading")}</p>
+                    ))}
+                  {freeList?.map((option) => {
+                    const selected = picked === option.id;
+                    const live = option.routable || option.local;
                     return (
-                      <div key={option.id} className="card-row items-start" data-compact="true">
-                        <span className={`mt-0.5 ${current ? "text-accent-ink" : "text-muted"}`}>
-                          <Icon name={option.icon} size={18} />
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        aria-disabled={!live || undefined}
+                        data-selected={selected || undefined}
+                        className="card-row items-start text-left disabled:opacity-50"
+                        disabled={!live}
+                        onClick={() => setPicked(option.id)}
+                      >
+                        <span className={`mt-0.5 ${selected ? "text-accent-ink" : "text-muted"}`}>
+                          <Icon name={option.local ? "bolt" : "globe"} size={18} />
                         </span>
-                        <div className="row-copy">
-                          <span className="row-title">
-                            {t(`${option.key}.title`)}
-                            {current && (
-                              <span className="pill text-fine">{t("model.current")}</span>
-                            )}
+                        <span className="row-copy">
+                          <span className="row-title">{option.label}</span>
+                          <span className="row-desc">
+                            {option.local
+                              ? `${option.provider} · ${t("model.routeApp")}`
+                              : option.routable
+                                ? `${option.provider} · ${t("model.routeGateway")}`
+                                : `${option.provider} · ${t("model.routeNone")}`}
                           </span>
-                          <span className="row-desc">{t(`${option.key}.desc`)}</span>
-                        </div>
-                        <button
-                          type="button"
-                          className="shrink-0 rounded-[var(--radius-md)] border border-line bg-elevated px-3 py-1.5 text-quiet hover:bg-hover"
-                          onClick={() => void openRoute(option.page)}
+                        </span>
+                        <span
+                          aria-hidden
+                          className={`mt-1 grid size-[18px] shrink-0 place-items-center rounded-full border ${
+                            selected ? "border-accent" : "border-line-strong"
+                          }`}
                         >
-                          {t(`${option.key}.cta`)}
-                        </button>
-                      </div>
+                          {selected && <span className="size-[9px] rounded-full bg-accent" />}
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
+                {freeList !== null && !freeList.some((r) => r.routable || r.local) && (
+                  <p className="mt-[var(--space-3)] text-quiet text-muted">{t("model.noneLive")}</p>
+                )}
+                <button
+                  type="button"
+                  className="mx-auto mt-[var(--space-4)] block text-quiet text-muted underline decoration-line underline-offset-4 hover:text-fg"
+                  onClick={() => void openModelSettings()}
+                >
+                  {t("model.settings")}
+                </button>
               </>
             )}
           </div>

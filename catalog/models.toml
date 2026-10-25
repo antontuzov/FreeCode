@@ -50,6 +50,9 @@ server_flags_extra = []
 [[model]]
 id = "ternary-bonsai-2-27b"
 name = "Bonsai 2 27B (ternary)"
+# Not offered: this size is marked off in the app's model picker. The entry stays as upstream truth
+# for the resolver and the digest checks; no surface lists it or offers its packs for download.
+offered = false
 repo_id = "prism-ml/Ternary-Bonsai-2-27B-gguf"
 base_model = "Qwen/Qwen3.8-27B"
 architecture = "qwen35"                 # HF config arch tag; Bonsai GGUF reports qwen35
@@ -635,6 +638,9 @@ intelligence_density = { score_per_gb = 2.001 }
 [[model]]
 id = "ternary-bonsai-2-4b"
 name = "Bonsai 2 4B (ternary)"
+# Not offered, same mark as the 27B: kept here for the resolver and the digest checks, hidden from
+# the model picker and the Knowledge Center.
+offered = false
 repo_id = "prism-ml/Ternary-Bonsai-2-4B-gguf"
 base_model = "Qwen/Qwen3.5-4B"          # card frontmatter `base_model` and its Model Overview row
 architecture = "qwen35"                  # general.architecture = "qwen35" in the pack's own header

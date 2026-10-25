@@ -128,6 +128,13 @@ mod tests {
         );
         assert_eq!(catalog.models[0].packs.len(), 3);
 
+        // Two of the three entries stay in the file as upstream data but are not offered: the model
+        // picker and Knowledge Center must show only the 1.7B.
+        let offered_ids: Vec<&str> = catalog.offered().map(|m| m.id.as_str()).collect();
+        assert_eq!(offered_ids, ["ternary-bonsai-1-7b"]);
+        assert!(!catalog.model("ternary-bonsai-2-27b").unwrap().offered);
+        assert!(!catalog.model("ternary-bonsai-2-4b").unwrap().offered);
+
         // The 1.7B lists four files but offers two: the F16 reference is a baseline, and the
         // card-recommended legacy Q2_0 pack is the one the pinned engine refuses to load.
         let small = catalog.model("ternary-bonsai-1-7b").unwrap();

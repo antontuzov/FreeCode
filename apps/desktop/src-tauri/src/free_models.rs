@@ -1,12 +1,13 @@
 //! The free cloud models the picker offers, and the one gateway that serves them.
 //!
-//! The list is the free tier OpenCode publishes, read against their model page; a row is routable
-//! through the gateway only when the same model has a verified OpenRouter id, because the relay sends
-//! through that one gateway and a guessed id is a request to a model that is not there. The promo
-//! models OpenCode serves only inside their own product therefore carry no upstream id: the picker
-//! shows them as not routable through the key rather than pretending a route exists. They are still
-//! answerable through the OpenCode app on this Mac, which is the runtime those models are reserved
-//! for — see [`crate::opencode`].
+//! The list is exactly what `opencode models` in OpenCode 2.1.3 prints under the `opencode/`
+//! provider, verified 2026-10-25 against the service running on this Mac. A row is routable through
+//! the gateway only when the same model has a verified OpenRouter id, because the relay sends through
+//! that one gateway and a guessed id is a request to a model that is not there. The promo models
+//! OpenCode serves only inside their own product therefore carry no upstream id: the picker shows them
+//! as not routable through the key rather than pretending a route exists. They are still answerable
+//! through the OpenCode app on this Mac, which is the runtime those models are reserved for — see
+//! [`crate::opencode`].
 //!
 //! The gateway key follows the same rule as the remote provider's: it lives in the platform
 //! keychain, the UI only ever learns whether one is saved, and it is loaded at request time for the
@@ -92,60 +93,32 @@ pub fn models() -> &'static [FreeModel] {
             priority: 5,
         },
         FreeModel {
-            id: "longcat-2.5-preview-free",
-            label: "LongCat 2.5 Preview",
-            provider: "LongCat",
-            upstream: None,
-            priority: 6,
-        },
-        FreeModel {
-            id: "exo-free",
-            label: "Exo",
-            provider: "Exo",
-            upstream: None,
-            priority: 7,
-        },
-        FreeModel {
             id: "mimo-v2.6-flash-free",
             label: "MiMo-V2.6-Flash",
             provider: "MiMo",
             upstream: Some("xiaomi/mimo-v2.6-flash"),
-            priority: 8,
-        },
-        FreeModel {
-            id: "mimo-v2.5-free",
-            label: "MiMo V2.5",
-            provider: "MiMo",
-            upstream: None,
-            priority: 9,
+            priority: 6,
         },
         FreeModel {
             id: "nemotron-3-ultra-free",
             label: "Nemotron 3 Ultra",
             provider: "NVIDIA",
             upstream: Some("nvidia/nemotron-3-ultra-550b-a55b:free"),
-            priority: 10,
+            priority: 7,
         },
         FreeModel {
             id: "nemotron-3.5-lightning-free",
             label: "Nemotron 3.5 Lightning",
             provider: "NVIDIA",
             upstream: Some("nvidia/nemotron-3.5-lightning:free"),
-            priority: 11,
+            priority: 8,
         },
         FreeModel {
             id: "nemotron-3.5-super-vl-free",
             label: "Nemotron 3.5 Super VL",
             provider: "NVIDIA",
             upstream: Some("nvidia/nemotron-3.5-super-vl"),
-            priority: 12,
-        },
-        FreeModel {
-            id: "jev-1.13-free",
-            label: "JEV 1.13",
-            provider: "TypeSafe AI",
-            upstream: None,
-            priority: 13,
+            priority: 9,
         },
     ]
 }
@@ -280,6 +253,23 @@ mod tests {
                 "{label} twice"
             );
         }
+        // What `opencode models` prints under the opencode/ provider in 2.1.3, and nothing else:
+        // four rows the registry used to carry (LongCat, Exo, MiMo 2.5, JEV) are not offered by the
+        // service and would have been rows that can only fail.
+        assert_eq!(
+            ids,
+            [
+                "big-pickle",
+                "glm-5.3-flash-free",
+                "deepseek-v4.1-flash-free",
+                "beam-free",
+                "flint-40b-free",
+                "mimo-v2.6-flash-free",
+                "nemotron-3-ultra-free",
+                "nemotron-3.5-lightning-free",
+                "nemotron-3.5-super-vl-free",
+            ]
+        );
     }
 
     #[test]

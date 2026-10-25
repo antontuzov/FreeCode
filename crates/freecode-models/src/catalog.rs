@@ -34,6 +34,11 @@ pub struct CatalogDefaults {
 pub struct ModelEntry {
     pub id: String,
     pub name: String,
+    /// Whether this build offers the entry in its model surfaces. `false` keeps the entry in the file
+    /// as upstream truth for the resolver and the digest checks, but the model picker and the
+    /// Knowledge Center do not list it and no pack is offered for download.
+    #[serde(default = "default_true")]
+    pub offered: bool,
     /// Hugging Face repo id, e.g. `prism-ml/Ternary-Bonsai-2-27B-gguf`.
     pub repo_id: String,
     pub base_model: String,
@@ -309,6 +314,15 @@ impl Catalog {
     pub fn model(&self, id: &str) -> Option<&ModelEntry> {
         self.models.iter().find(|m| m.id == id)
     }
+
+    /// The entries this build offers, in file order. The rest stay in the file as upstream data.
+    pub fn offered(&self) -> impl Iterator<Item = &ModelEntry> {
+        self.models.iter().filter(|m| m.offered)
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl ModelEntry {

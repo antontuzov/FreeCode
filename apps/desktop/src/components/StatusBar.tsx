@@ -40,7 +40,8 @@ export function StatusBar({ locale }: { locale: Locale }) {
   // A selected provider makes the local engine's packing and backend beside the point, and a badge
   // reading "Remote" would hide the two refusals that can stop a prompt before it leaves: consent and
   // an unconfigured address. Those are named here, and the key is the card's to report. A free pick
-  // is the third source the badge names, with its own refusals behind it.
+  // is the third source the badge names; it sends without the consent switch, so only its route can
+  // refuse it.
   const remote = status?.remote ?? null;
   const free = status?.free ?? null;
 
@@ -51,11 +52,9 @@ export function StatusBar({ locale }: { locale: Locale }) {
         ? translate(locale, "model.badge.notSetUp")
         : translate(locale, "model.badge.remote")
     : free
-      ? !free.allowed
-        ? translate(locale, "model.badge.needsConsent")
-        : !free.routable && !status?.opencode.available
-          ? translate(locale, "model.badge.notRoutable")
-          : translate(locale, "model.badge.free")
+      ? !free.routable && !status?.opencode.available
+        ? translate(locale, "model.badge.notRoutable")
+        : translate(locale, "model.badge.free")
       : status?.blocked
         ? translate(locale, "model.badge.notRunning")
         : status?.local

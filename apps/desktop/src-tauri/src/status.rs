@@ -126,7 +126,6 @@ impl Assembly {
                 label: model.label.to_string(),
                 provider: model.provider.to_string(),
                 routable: model.upstream.is_some(),
-                allowed: settings.privacy.allow_remote_providers,
             });
 
         ModelStatusView {
@@ -364,8 +363,6 @@ pub struct FreeView {
     /// False for the promotion rows: listed for parity with the page that inspired the list, but
     /// not routable from this app, and a turn with one selected is refused rather than guessed.
     pub routable: bool,
-    /// Whether the user's consent switch is on. Off means a free turn is refused, not rerouted.
-    pub allowed: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

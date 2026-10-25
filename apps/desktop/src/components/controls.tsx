@@ -18,7 +18,7 @@ export function Section({
 }) {
   return (
     <section className="mb-[var(--space-6)]">
-      <h2 className="text-quiet text-muted">{label}</h2>
+      <h2 className="text-quiet uppercase tracking-[0.08em] text-muted">{label}</h2>
       {description && <p className="mt-1 text-quiet text-muted">{description}</p>}
       <div className="card mt-[var(--space-3)]">{children}</div>
     </section>
@@ -58,10 +58,14 @@ export function Row({
 export function Toggle({
   on,
   label,
+  disabled,
   onChange,
 }: {
   on: boolean;
   label: string;
+  /** A row with no field to save yet draws the switch in the state the reference shows and says
+   * "not in this build" beside its title; a live switch that writes nowhere would be a lie. */
+  disabled?: boolean;
   onChange: (next: boolean) => void;
 }) {
   return (
@@ -70,7 +74,9 @@ export function Toggle({
       role="switch"
       aria-checked={on}
       aria-label={label}
+      aria-disabled={disabled || undefined}
       data-on={on || undefined}
+      disabled={disabled}
       className="toggle"
       onClick={() => onChange(!on)}
     />
@@ -82,20 +88,23 @@ export function Select<T extends string>({
   options,
   label,
   icon,
+  disabled,
   onChange,
 }: {
   value: T;
   options: { value: T; label: string }[];
   label: string;
   icon?: IconName;
+  disabled?: boolean;
   onChange: (next: T) => void;
 }) {
   return (
-    <label className="field w-[176px]">
+    <label className="field w-[176px]" data-disabled={disabled || undefined}>
       {icon && <Icon name={icon} size={14} />}
       <select
         aria-label={label}
         className="field-input"
+        disabled={disabled}
         value={value}
         onChange={(e) => onChange(e.target.value as T)}
       >
@@ -233,11 +242,11 @@ export function ShortcutChips({
 }
 
 /**
- * One of the interface-style cards. It paints the style it advertises through `--preview`, so every
- * family stays distinguishable whatever accent is live; selection is the outline plus the filled dot,
- * never colour alone.
+ * One theme tile: the three colours the theme is made of, then its name. The dots read the palette
+ * the same way the reference's tiles do — action colour, wash, neutral ground — and selection is the
+ * tinted card plus the accent outline rather than the dots alone.
  */
-export function StyleCard({
+export function ThemeTile({
   style,
   name,
   selected,
@@ -253,20 +262,110 @@ export function StyleCard({
       type="button"
       aria-pressed={selected}
       data-selected={selected || undefined}
-      className={`style-card swatch-${style}`}
+      className={`theme-tile swatch-${style}`}
       onClick={onSelect}
     >
-      <span className="style-preview" aria-hidden>
-        <span className="style-window">
-          <span className="style-bar" />
-          <span className="style-dot" />
-          <span className="style-panel">
-            <span className="style-line w-[70%]" />
-            <span className="style-line w-[45%]" />
-          </span>
-        </span>
+      <span className="theme-dots" aria-hidden>
+        <span className="theme-dot" />
+        <span className="theme-dot" />
+        <span className="theme-dot theme-dot-neutral" />
       </span>
-      <span className="style-name">{name}</span>
+      <span className="theme-name">{name}</span>
+    </button>
+  );
+}
+
+/** One accent swatch. Selected is the ring the reference draws: a gap the page's own colour then a
+ * ring in the swatch itself, so the mark still reads on a pale swatch. */
+export function AccentSwatch({
+  style,
+  name,
+  selected,
+  onSelect,
+}: {
+  style: Accent;
+  name: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={name}
+      aria-pressed={selected}
+      data-selected={selected || undefined}
+      title={name}
+      className={`accent-swatch swatch-${style}`}
+      onClick={onSelect}
+    >
+      {selected && <Icon name="tick" size={16} />}
+    </button>
+  );
+}
+
+/** Two or three exclusive answers in one field. A group of buttons rather than a radio list, because
+ * every option is short enough to sit side by side and the choice is immediate. */
+export function Segmented<T extends string>({
+  value,
+  options,
+  label,
+  disabled,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  label: string;
+  disabled?: boolean;
+  onChange: (next: T) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      aria-disabled={disabled || undefined}
+      data-disabled={disabled || undefined}
+      className="segmented"
+    >
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={value === o.value}
+          data-active={value === o.value || undefined}
+          disabled={disabled}
+          className="segment"
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** One step on the text-size scale. The name is the tier; the figure is the size the window will
+ * actually paint, which is the number the setting stores. */
+export function SizeCard({
+  name,
+  figure,
+  selected,
+  onSelect,
+}: {
+  name: string;
+  figure: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      data-selected={selected || undefined}
+      className="preset-card"
+      onClick={onSelect}
+    >
+      <span className="preset-name">{name}</span>
+      <span className="preset-figure">{figure}</span>
     </button>
   );
 }

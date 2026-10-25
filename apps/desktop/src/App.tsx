@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Extensions } from "./components/Extensions";
 import { Inspector } from "./components/Inspector";
@@ -153,8 +153,13 @@ export default function App() {
   // sidebar's New task between them — the only way to check that the control forgot anything, since
   // the second prompt asks what the first planted and an answer that remembers is a history the host
   // never dropped.
+  //
+  // Sent once per window: StrictMode runs this effect twice on a dev mount, and a second send would
+  // ask the same question twice and file two runs of it.
+  const asked = useRef(false);
   useEffect(() => {
-    if (!ask) return;
+    if (!ask || asked.current) return;
+    asked.current = true;
     void (async () => {
       for (let i = 0; i < askRepeat; i += 1) await send(ask);
       if (!askAgain) return;
