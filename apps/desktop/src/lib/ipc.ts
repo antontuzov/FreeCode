@@ -15,7 +15,7 @@ import type { Row } from "../state/transcript";
  * reports the number, it does not vouch for a count it cannot see.
  */
 export const hostMascot: number | null = (() => {
-  const injected = (window as unknown as { smollmMascot?: unknown }).smollmMascot;
+  const injected = (window as unknown as { freecodeMascot?: unknown }).freecodeMascot;
   return typeof injected === "number" && Number.isInteger(injected) && injected >= 1
     ? injected
     : null;
@@ -85,7 +85,7 @@ export type ModelStatus = {
 
 /**
  * One free-model registry entry, as the picker draws it. Mirrors
- * `smollm_desktop_lib::free_models::FreeModelInfo`. `routable` is about the gateway key: a row whose
+ * `freecode_desktop_lib::free_models::FreeModelInfo`. `routable` is about the gateway key: a row whose
  * model OpenRouter does not list cannot be sent there. `local` is the other route — the OpenCode app
  * on this Mac, which answers the whole list — so a row can be unpickable for the key and pickable
  * for the app in the same breath.
@@ -107,7 +107,7 @@ export type OpenCodeStatus = {
 
 /**
  * The engine the host fetched and unpacked, and where the launcher must point.
- * Mirrors `smollm_desktop_lib::engine::InstallOutcome`.
+ * Mirrors `freecode_desktop_lib::engine::InstallOutcome`.
  */
 export type InstallOutcome = {
   tag: string;
@@ -117,14 +117,14 @@ export type InstallOutcome = {
   serverPath: string;
 };
 
-/** `smollm_llama::install::Phase`, emitted on the `engine-install` event while an install runs. */
+/** `freecode_llama::install::Phase`, emitted on the `engine-install` event while an install runs. */
 export type EngineInstallProgress =
   | { phase: "downloading"; transferredBytes: number; totalBytes: number }
   | { phase: "unpacking" }
   | { phase: "done"; installed: InstallOutcome & { dir: string } };
 
 /**
- * The pack that ended up on disk. Mirrors `smollm_desktop_lib::weights::Downloaded`.
+ * The pack that ended up on disk. Mirrors `freecode_desktop_lib::weights::Downloaded`.
  * `path` is where the load guard will read the weights from, so it is shown rather than assumed.
  */
 export type WeightsDownloaded = {
@@ -142,7 +142,7 @@ export type WeightsDownloaded = {
   projector?: string;
 };
 
-/** `smollm_desktop_lib::weights::Phase`, emitted on the `weights-download` event. */
+/** `freecode_desktop_lib::weights::Phase`, emitted on the `weights-download` event. */
 export type WeightsProgress =
   | { phase: "downloading"; transferredBytes: number; totalBytes: number }
   | { phase: "done"; downloaded: WeightsDownloaded };
@@ -220,7 +220,7 @@ export const WEIGHTS_DOWNLOAD_EVENT = "weights-download";
 /* ---- the live engine and its streamed replies ---- */
 
 /**
- * `smollm_desktop_lib::chat::EngineView`: the supervised `llama-server` as the host reports it.
+ * `freecode_desktop_lib::chat::EngineView`: the supervised `llama-server` as the host reports it.
  * `command` is the argument vector that actually went to the binary. No control shows it — the
  * reference layout has nowhere for a command line — so it is what a failure can quote rather than
  * what the window claims.
@@ -239,9 +239,9 @@ export type EngineView = {
 export type EngineStatus = { running: boolean; engine: EngineView | null };
 
 /**
- * A load-guard refusal plus the one action that clears it. Mirrors `smollm_core::BlockedInfo`.
+ * A load-guard refusal plus the one action that clears it. Mirrors `freecode_core::BlockedInfo`.
  *
- * `code` is `smollm_llama::load_guard::BlockerCode` in its kebab-case wire spelling, and it names two
+ * `code` is `freecode_llama::load_guard::BlockerCode` in its kebab-case wire spelling, and it names two
  * sentences in both locale catalogs — `blocker.<code>.title` and `blocker.<code>.detail` — with
  * `params` filling the fields they interpolate. `ctaCode` names the button's own key, `cta.<code>`.
  * The host carries no copy of any of the three, which is what lets the same refusal read in the
@@ -258,7 +258,7 @@ export type BlockedInfo = {
 };
 
 /**
- * What one finished run cost. Mirrors `smollm_core::events::RunReport`. The rates and counts are the
+ * What one finished run cost. Mirrors `freecode_core::events::RunReport`. The rates and counts are the
  * server's own — its clock over the tokens it counted — and they are null for a stream that never got
  * to send them, while `elapsedMs` is the host's wall clock and always stands: the wait shown is at
  * least as long as the model time, and it is the half of the report a stopped run still has.
@@ -273,7 +273,7 @@ export type RunReport = {
 };
 
 /**
- * `smollm_core::NoticeCode`: what a run worked around rather than refused. The wire spelling is the
+ * `freecode_core::NoticeCode`: what a run worked around rather than refused. The wire spelling is the
  * Rust enum's kebab-case and each code names a `notice.<code>` sentence in both locale catalogs, with
  * `params` filling the fields that sentence interpolates — the host measures, the catalog owns the
  * wording. `verify-transcript-i18n` fails the build when a code has no key or the two sides name the
@@ -282,7 +282,7 @@ export type RunReport = {
 export type NoticeParams = Record<string, string>;
 
 /**
- * `smollm_core::transcript::StepKind` in its camelCase wire spelling. The set is the UI's own row
+ * `freecode_core::transcript::StepKind` in its camelCase wire spelling. The set is the UI's own row
  * vocabulary, so a kind the host adds is a type error here until the transcript and both locale
  * catalogs have it — which is the point of declaring it twice.
  */
@@ -310,11 +310,11 @@ export type HostStepKind =
   | "source"
   | "blocked";
 
-/** `smollm_core::transcript::StepStatus`. */
+/** `freecode_core::transcript::StepStatus`. */
 export type HostStepStatus = "running" | "done" | "blocked" | "failed";
 
 /**
- * `smollm_core::transcript::DiffStat`: what a write cost, counted by the host. On a row it is that
+ * `freecode_core::transcript::DiffStat`: what a write cost, counted by the host. On a row it is that
  * call's own file, so `filesChanged` is 1; on `diffStaged` and `runFinished` it is the run's ledger,
  * where `filesChanged` counts *distinct* paths — a run that edits one file four times says one file,
  * not four.
@@ -326,27 +326,27 @@ export type HostDiff = {
 };
 
 /**
- * `smollm_core::transcript::Hunk`: one block of a change, as the tool that made it saw it. `at` is the
+ * `freecode_core::transcript::Hunk`: one block of a change, as the tool that made it saw it. `at` is the
  * line in the file before the write that `lines` opens on, 1-based, which is what lets the review
  * panel number a diff gutter without re-deriving the position from the file it no longer matches.
  */
 export type HostHunk = { at: number; lines: string };
 
 /**
- * `smollm_core::transcript::EditedFile`: one file a call changed, with the lines the call cost it
+ * `freecode_core::transcript::EditedFile`: one file a call changed, with the lines the call cost it
  * and each block it wrote there. A row sends a list of these when one hunk cannot describe the call
  * — several files, or one file changed in several places.
  */
 export type HostEditedFile = { path: string; added: number; removed: number; hunks: HostHunk[] };
 
 /**
- * `smollm_tools::PlanItem`: one step of the list a run keeps, with the state the model last gave it.
+ * `freecode_tools::PlanItem`: one step of the list a run keeps, with the state the model last gave it.
  * `active` is the step being worked on; the tool refuses a plan with more than one.
  */
 export type HostPlanItem = { text: string; status: "pending" | "active" | "done" };
 
 /**
- * `smollm_core::transcript::TranscriptStep`: one row as the host declares it.
+ * `freecode_core::transcript::TranscriptStep`: one row as the host declares it.
  *
  * The host owns which row exists and what it measured; the catalog owns the words around it. `params`
  * carries the numbers a label interpolates, and `detail` the path or pattern the call acted on, which
@@ -363,19 +363,19 @@ export type HostStep = {
   /** The lines this call cost, or null for a row that changed nothing. */
   diff: HostDiff | null;
   /**
-   * `smollm_core::transcript::TranscriptStep::hunk`: the change as diff lines, on an `edit_file` row
+   * `freecode_core::transcript::TranscriptStep::hunk`: the change as diff lines, on an `edit_file` row
    * and on no other. It is the text the model was handed, not a second rendering of it, so the review
    * a window draws cannot describe a different change than the answer that asked for it.
    */
   hunk: HostHunk | null;
   /**
-   * `smollm_core::transcript::TranscriptStep::files`: every file the call changed, when there is
+   * `freecode_core::transcript::TranscriptStep::files`: every file the call changed, when there is
    * more than one block to report. `diff` is their total and `detail` is empty when no single path
    * can stand in the chip. Absent on a single-hunk row, which keeps the `hunk` shape.
    */
   files?: HostEditedFile[];
   /**
-   * `smollm_tools::PlanItem`: the steps a `todo_write` row recorded, in the order the model wrote
+   * `freecode_tools::PlanItem`: the steps a `todo_write` row recorded, in the order the model wrote
    * them. Present only on that row, so the plan panel reads the latest non-empty list rather than
    * keeping a second copy of state that could drift from the transcript.
    */
@@ -386,7 +386,7 @@ export type HostStep = {
 };
 
 /**
- * `smollm_core::events::ToolOutcome`. The fields a call that reads or edits can answer with are here;
+ * `freecode_core::events::ToolOutcome`. The fields a call that reads or edits can answer with are here;
  * the rest of the Rust struct — an exit code, artifacts — belongs to a build that runs shells and
  * produces files, and this one does neither.
  *
@@ -404,7 +404,7 @@ export type HostToolOutcome = {
 };
 
 /**
- * `smollm_core::AgentEvent` on the `agent-event` channel. Only the variants this host can emit are
+ * `freecode_core::AgentEvent` on the `agent-event` channel. Only the variants this host can emit are
  * listed. A tool step arrives as the Rust `TranscriptStep` the host built for it rather than as the
  * UI's own row shape, because which row exists and what it measured is the host's answer; how it reads
  * is the catalog's, which is why the transcript maps one onto the other instead of trusting the wire.
@@ -457,7 +457,7 @@ export type AgentEvent =
 export const AGENT_EVENT = "agent-event";
 
 /* ---- the whole settings document, as the Settings surface edits it ----
- * Field-for-field the Rust schema in `crates/smollm-config`. The surface mutates the loaded object
+ * Field-for-field the Rust schema in `crates/freecode-config`. The surface mutates the loaded object
  * in place and hands it straight back, so a field no control renders still round-trips untouched. */
 
 export type AppearanceDoc = {
@@ -723,13 +723,13 @@ export type KnowledgeCenter = {
 /* ---- the Extensions page: the tool registry as the agent is handed it ---- */
 
 /**
- * `smollm_config::PermissionClass` in its snake_case wire spelling: what a call can do to the machine.
+ * `freecode_config::PermissionClass` in its snake_case wire spelling: what a call can do to the machine.
  */
 export type PermissionClass = "read_only" | "workspace_write" | "side_effect" | "network";
 
 /**
  * What the run would do with a call right now. `auto` runs without interrupting, `ask` pauses for the
- * user, `blocked` refuses — and all three are answered by `smollm_core::approvals::evaluate` against
+ * user, `blocked` refuses — and all three are answered by `freecode_core::approvals::evaluate` against
  * the settings in force, which is what keeps this page from describing a policy the loop ignores.
  */
 export type ToolDecision = "auto" | "ask" | "blocked";

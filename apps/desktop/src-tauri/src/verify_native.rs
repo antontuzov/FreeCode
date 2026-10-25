@@ -3,20 +3,20 @@
 //!
 //! This is the same `status::Assembly` the React shell reads over IPC — that identity is the whole
 //! point. A pass means: the contract files parse, the pin satisfies the catalog, the guard raises
-//! nothing beyond a pending install, and settings round-trip. `SMOLLM_REQUIRE_ENGINE=1` additionally
+//! nothing beyond a pending install, and settings round-trip. `FREECODE_REQUIRE_ENGINE=1` additionally
 //! fails while the fork binary is still missing, which is how Phase 2 turns this from "the wiring is
 //! sound" into "the model actually runs".
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use smollm_config::Settings;
-use smollm_models::{Catalog, EngineLock};
+use freecode_config::Settings;
+use freecode_models::{Catalog, EngineLock};
 
 use crate::paths;
 use crate::status::{self, Assembly};
 
-pub const REQUIRE_ENGINE_ENV: &str = "SMOLLM_REQUIRE_ENGINE";
+pub const REQUIRE_ENGINE_ENV: &str = "FREECODE_REQUIRE_ENGINE";
 
 #[derive(Debug, Default)]
 pub struct Probe {
@@ -101,7 +101,7 @@ fn describe(probe: &mut Probe, assembly: &Assembly, root: &Path, require_engine:
     }
 
     if !assembly.engine_installed() {
-        let where_it_belongs = smollm_llama::engines_root(root).join(&assembly.lock.pinned_tag);
+        let where_it_belongs = freecode_llama::engines_root(root).join(&assembly.lock.pinned_tag);
         let message = format!(
             "fork engine {} is not unpacked under {}",
             assembly.lock.pinned_tag,
@@ -137,7 +137,7 @@ fn describe(probe: &mut Probe, assembly: &Assembly, root: &Path, require_engine:
 fn probe_settings(probe: &mut Probe) {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let dir = std::env::temp_dir().join(format!(
-        "smollm-studio-verify-{}-{}",
+        "freecode-verify-{}-{}",
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
@@ -204,7 +204,7 @@ mod tests {
 
     /// Replace `pinned_tag` in the scratch lock file with a build below the catalog's floor.
     fn demote_pin(root: &Path) {
-        let path = root.join(smollm_models::ENGINE_LOCK_REL);
+        let path = root.join(freecode_models::ENGINE_LOCK_REL);
         let raw = std::fs::read_to_string(&path).unwrap();
         let patched = raw
             .lines()
@@ -225,7 +225,10 @@ mod tests {
     fn scratch_root() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        for rel in [smollm_models::CATALOG_REL, smollm_models::ENGINE_LOCK_REL] {
+        for rel in [
+            freecode_models::CATALOG_REL,
+            freecode_models::ENGINE_LOCK_REL,
+        ] {
             let dest = dir.path().join(rel);
             std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
             std::fs::copy(source.join(rel), &dest).unwrap();

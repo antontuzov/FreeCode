@@ -14,9 +14,9 @@
 
 use std::path::Path;
 
+use freecode_config::Settings;
+use freecode_models::EngineLock;
 use serde::Serialize;
-use smollm_config::Settings;
-use smollm_models::EngineLock;
 
 /// How far below a reported directory the walk goes. The app's own trees are two levels deep —
 /// `engines/<tag>/<backend>/llama-server` is the deepest — so a directory nested past this was not
@@ -80,7 +80,7 @@ impl Report {
         let lock = EngineLock::load_default(root).map_err(|e| e.to_string())?;
         let wdir = crate::status::weights_dir(root, settings);
         let weights = Area::measure(&wdir);
-        let engine = Area::measure(&smollm_llama::tag_dir(root, &lock));
+        let engine = Area::measure(&freecode_llama::tag_dir(root, &lock));
         // Sessions live beside `settings.json`, not under the root: a packaged app writes its data
         // where the bundle's signature does not reach. A platform that gives the app no such
         // directory has no filed conversations to count either, so the row reads absent.
@@ -114,7 +114,7 @@ impl Report {
 /// volume is tried before the page gives up.
 fn available_disk(weights: &Path, root: &Path) -> Result<u64, String> {
     let probe = |dir: &Path| {
-        smollm_models::HostHardware::detect(&dir.display().to_string()).available_disk_bytes
+        freecode_models::HostHardware::detect(&dir.display().to_string()).available_disk_bytes
     };
     let bytes = probe(weights);
     if bytes > 0 {
@@ -196,9 +196,9 @@ mod tests {
     /// installer wrote to.
     fn real_lock(tree: &Path) -> EngineLock {
         let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let to = tree.join(smollm_models::ENGINE_LOCK_REL);
+        let to = tree.join(freecode_models::ENGINE_LOCK_REL);
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
-        std::fs::copy(from.join(smollm_models::ENGINE_LOCK_REL), &to).unwrap();
+        std::fs::copy(from.join(freecode_models::ENGINE_LOCK_REL), &to).unwrap();
         EngineLock::load(&to).unwrap()
     }
 
@@ -284,10 +284,10 @@ mod tests {
     fn the_engine_row_measures_the_pinned_tag_and_not_its_siblings() {
         let tree = tempfile::tempdir().unwrap();
         let lock = real_lock(tree.path());
-        let dir = smollm_llama::tag_dir(tree.path(), &lock);
+        let dir = freecode_llama::tag_dir(tree.path(), &lock);
         file(&dir, "macos-arm64/llama-server", 900);
         file(
-            &smollm_llama::engines_root(tree.path()).join("an-older-tag"),
+            &freecode_llama::engines_root(tree.path()).join("an-older-tag"),
             "left.gguf",
             4_000,
         );
@@ -315,7 +315,7 @@ mod tests {
     #[test]
     fn a_lock_that_will_not_parse_is_a_failure_the_page_reports() {
         let tree = tempfile::tempdir().unwrap();
-        file(tree.path(), smollm_models::ENGINE_LOCK_REL, 20);
+        file(tree.path(), freecode_models::ENGINE_LOCK_REL, 20);
         let err = Report::build(tree.path(), &Settings::default()).unwrap_err();
         assert!(err.contains("lock"), "{err}");
     }

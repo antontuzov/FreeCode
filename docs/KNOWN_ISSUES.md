@@ -45,7 +45,7 @@ is not: it was closed by #271 in `prism-b10743`, before this pin.
 notes it is often filed as "poor output in non-English languages".
 _Enforced_: `GenerationBudget::default` is 16 384 tokens with a 32 768 window, and
 `GenerationBudget::clamped` refuses to go under `MIN_MAX_TOKENS` (4 096) while keeping the window at
-least 1 024 tokens above the reply budget — `crates/smollm-config/src/sampling.rs`.
+least 1 024 tokens above the reply budget — `crates/freecode-config/src/sampling.rs`.
 _Not the card's exact numbers_: upstream pairs `-n 16384` with `-c 65536`; this app's default window
 is 32 768, because the window is sized from the machine below.
 _Enforced at the launch as well_: `73bfe6cc` added `--reasoning-max-tokens-floor N`, which raises a
@@ -61,7 +61,7 @@ naturally, so the floor does not turn a nearly-full window into an error.
 
 **`reasoning_effort: "high"` is an HTTP 500.** The template knows `low`, `medium`, `xhigh`, `none`.
 _Enforced_: the catalog declares `never_send = ["high"]` and `wire_effort` rejects it before a
-request is built — `crates/smollm-llama/src/client.rs`. Test: `high_is_never_sent_and_low_goes_out_as_xhigh`.
+request is built — `crates/freecode-llama/src/client.rs`. Test: `high_is_never_sent_and_low_goes_out_as_xhigh`.
 _Enforced at the launch as well_: the same release added `--reasoning-effort-allow` and
 `--reasoning-effort-fallback`, so a server can substitute a safe level for a rejected one instead of
 raising. `LaunchPlan` hands the 27B its catalog `supported_efforts` as the allow list and its
@@ -81,7 +81,7 @@ fallback this plan emits, and answers a request carrying `high` both as a top-le
 **`low` does not shorten reasoning.** Upstream measured it at about the same cost as `xhigh`, so
 offering it as "brief" would promise something untrue.
 _Enforced_: `low` goes out as the catalog's `low_behaves_like` (`xhigh`) and the control is labelled
-for what it sends — `ReasoningEffort::wire_value` in `crates/smollm-config/src/sampling.rs`. A
+for what it sends — `ReasoningEffort::wire_value` in `crates/freecode-config/src/sampling.rs`. A
 template with no thinking branch declares `low_behaves_like` empty, and no synonym is invented for
 it.
 
@@ -91,7 +91,7 @@ a server left at `--reasoning auto`.
 
 **`--reasoning on` overrides a client's `reasoning_effort: "none"`.**
 _Enforced_: the launcher emits neither `on` nor `off`, so `auto` (llama.cpp's own default) stays in
-force — `crates/smollm-llama/src/launch.rs`. The same test keeps out `--reasoning-preserve`, which the
+force — `crates/freecode-llama/src/launch.rs`. The same test keeps out `--reasoning-preserve`, which the
 pinned build proposes on startup and which `/props` reports as unsupported for the 1.7B, and
 `--reasoning-budget`, because the reply cap above is the lever this app uses. Test:
 `the_bare_reasoning_flag_stays_out_because_auto_is_the_only_safe_default`; the three `--reasoning-*`
@@ -101,18 +101,18 @@ switches it does emit are the two notes above.
 
 **Empty or non-JSON `arguments` are an HTTP 500/400** (llama.cpp#112), and this model does emit
 them. _Enforced_: `ToolCall::arguments_wire` replays every call with a JSON object, `"{}"` at worst
-— `crates/smollm-tools/src/registry.rs`. Test:
+— `crates/freecode-tools/src/registry.rs`. Test:
 `an_unfinished_tool_call_is_replayed_as_an_empty_object`.
 
 **Two system messages, or one that is not first, are an HTTP 500.**
-_Enforced_: `normalize` in `crates/smollm-llama/src/client.rs` merges them into one leading message.
+_Enforced_: `normalize` in `crates/freecode-llama/src/client.rs` merges them into one leading message.
 
 **Reasoning re-rendered into later turns misses the prompt cache every turn** (Bonsai-demo#183).
 _Enforced_ from two sides: the client replays an assistant turn as its text plus its tool calls and
 never as `reasoning_content`, and `--reasoning-preserve` — which the pinned build proposes on
 startup — is kept out of the argument list for the same reason. Tests:
 `a_replayed_assistant_turn_carries_no_reasoning`, and the ignored integration test
-`crates/smollm-llama/tests/real_bonsai_server.rs`, whose
+`crates/freecode-llama/tests/real_bonsai_server.rs`, whose
 `a_second_turn_remembers_the_first_without_replaying_its_reasoning` asks a real second turn on a real
 server.
 
@@ -131,7 +131,7 @@ activation transform depends on metadata only the PrismML build applies.
 
 _Enforced_: the load guard refuses a pack whose quant type is not the fork's, or whose GGUF lacks
 every prefix the catalog entry requires, before any weight file reaches any binary —
-`crates/smollm-llama/src/load_guard.rs`. Warnings never block a launch. They are the pack's
+`crates/freecode-llama/src/load_guard.rs`. Warnings never block a launch. They are the pack's
 `[[model.packs.caveats]]` rows, and `caveat_matches` evaluates only the atoms `backend == <name>`,
 `host_has_avx512`, and the OS names `windows` / `macos` / `linux`; a row that also names `gpu == …`
 or an engine release is shown under "may or may not apply" rather than dropped, because failing open
@@ -142,7 +142,7 @@ beats quietly hiding a documented crash. The card splits the two in
 (llama.cpp#264 — upstream's row still cites Bonsai-demo#197, which the tracker redirects — open as of
 2026-10-20). _Enforced_: as a caveat on every runtime pack a HIP host can be routed to, and since
 2026-10-20 also as a decision. `HostHardware::refuse_hostile_backend`
-(`crates/smollm-models/src/hardware.rs`) takes the probe's HIP answer away from a card it classifies as
+(`crates/freecode-models/src/hardware.rs`) takes the probe's HIP answer away from a card it classifies as
 RDNA2 and hands every later step Vulkan instead: the lock lookup (the 31 MB `win-vulkan` asset rather
 than the 342 MB HIP one), the pack choice, `-ngl`, and the status card, which shows the reason and
 labels the run "Vulkan". Doing it on the probe rather than inside `resolve_for` is what keeps those
@@ -173,7 +173,7 @@ ternary cells at ✅* (partial / needs validation) on a source audit baseline ol
 and SYCL-bonsai.md's own measurement ends with "other Intel GPUs have not been measured with these
 defaults; please report numbers"; and even the demo's own scripts never select it.
 _Enforced_: the lock marks SYCL unsupported with that reason, and `EngineBinary::resolve_for` returns
-`UnsupportedBackend` rather than launching it — `crates/smollm-llama/src/engine.rs`. Test:
+`UnsupportedBackend` rather than launching it — `crates/freecode-llama/src/engine.rs`. Test:
 `sycl_is_refused_with_the_reason_from_the_lock_file`.
 
 **CUDA 13.3 builds crash on load; on Windows the server prints its banner and exits silently**
@@ -201,7 +201,7 @@ shared server is not, because it is somebody else's slot count. Test:
 
 **`q5_0` KV cache is several times slower at every depth** (llama.cpp#191).
 _Enforced_: the catalog names the types worth using, and `LaunchPlan::assemble` rejects anything else
-with `KvCacheRejected` — `crates/smollm-llama/src/launch.rs`.
+with `KvCacheRejected` — `crates/freecode-llama/src/launch.rs`.
 
 **The default 32K context does not fit on 12 GB GPUs**, because the demo scripts size the context
 from system RAM (Bonsai-demo#193). _Partly enforced_: `context_from_ram` tiers the window by machine
@@ -220,7 +220,7 @@ release it describes), plus #192 and #270,
 which stay open on Intel parts. _Enforced_ before the packing is ever chosen: `score_pack` penalises
 `PQ2_0` on a Vulkan host so `PTQ1_0` is selected, and the warning says plainly that this is this app's
 unmeasured caution rather than a known failure
-(`crates/smollm-models/src/select.rs`, test `vulkan_never_gets_pq2`). If a ternary run on a Vulkan
+(`crates/freecode-models/src/select.rs`, test `vulkan_never_gets_pq2`). If a ternary run on a Vulkan
 part is ever measured here, the rule and the wording change together.
 
 ## Vision

@@ -3,14 +3,14 @@
 // "Extensions" in a cloud app means an add-on store. This app has no add-on format and nothing to
 // install from, so the row's local meaning is the one thing that occupies the same place: the list of
 // capabilities the model is handed when it is allowed to act. That list exists in the host already —
-// `smollm_tools::registry` is what the Coding loop offers — and this page reads it rather than
+// `freecode_tools::registry` is what the Coding loop offers — and this page reads it rather than
 // restating it, so a tool added there shows up here without a second edit.
 //
 // The two facts worth a page are the ones no other surface shows. Which calls reach an executor in
 // this build (four reads and two writes inside the workspace, plus the two web calls the privacy switch
 // has to be on for; the rest are declared, and a call to one
 // is answered with a notice that says so rather than run), and what the run would do with each one
-// right now. The second is computed by `smollm_core::approvals::evaluate` against the settings and
+// right now. The second is computed by `freecode_core::approvals::evaluate` against the settings and
 // sandbox in force — the same engine that decides it mid-run, so the page cannot tell a friendlier
 // story than the loop acts.
 import { useEffect, useState } from "react";

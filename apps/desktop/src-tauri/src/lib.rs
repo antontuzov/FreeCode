@@ -1,8 +1,8 @@
-//! OpenFree's Tauri host.
+//! FreeCode's Tauri host.
 //!
 //! The crate's only jobs are to expose the Rust side to React and to keep that surface honest: the
 //! UI never computes a packing choice, an engine path or a refusal — it asks, and this host answers
-//! from `smollm-models` / `smollm-llama` / `smollm-config`. Commands are `async` so the blocking
+//! from `freecode-models` / `freecode-llama` / `freecode-config`. Commands are `async` so the blocking
 //! hardware probe and header parse run on the async runtime instead of the event-loop thread.
 
 mod agent;
@@ -33,8 +33,8 @@ use tauri::{AppHandle, Manager, Theme};
 use tauri_plugin_dialog::DialogExt;
 
 use appearance::AppearanceView;
+use freecode_config::Settings;
 use knowledge::Center;
-use smollm_config::Settings;
 use status::ModelStatusView;
 
 /// `System` asks the webview; a fixed Light/Dark is honoured even if the OS disagrees.
@@ -179,7 +179,7 @@ async fn save_settings(app: AppHandle, mut settings: Settings) -> Result<Setting
     if settings.free_model.as_deref() == Some("") {
         settings.free_model = None;
     }
-    settings.schema_version = smollm_config::SETTINGS_SCHEMA_VERSION;
+    settings.schema_version = freecode_config::SETTINGS_SCHEMA_VERSION;
     appearance::save_settings(&settings)?;
     wear_icon(&app, settings.appearance.app_icon);
     Ok(settings)
@@ -303,7 +303,7 @@ fn reap_leftover_servers() {
     let Some(path) = paths::server_pid_registry() else {
         return;
     };
-    smollm_llama::reap_orphaned_servers(&path);
+    freecode_llama::reap_orphaned_servers(&path);
 }
 
 /// SIGTERM, SIGINT and SIGHUP never reach [`RunEvent::Exit`]: their default action stops the process
@@ -449,6 +449,9 @@ pub fn run() {
             chat::purge_trashed
         ])
         .setup(|app| {
+            // Before anything reads settings or the filed conversations: the rename moved the
+            // directory they live in, and this is the one launch that has to carry them across.
+            paths::migrate_legacy_app_dir();
             // Before this process spawns a server of its own, so a leftover's port is free to be
             // chosen again and its memory is back before the first load.
             reap_leftover_servers();
@@ -456,7 +459,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building OpenFree");
+        .expect("error while building FreeCode");
 
     app.run(|app_handle, event| match event {
         // The mascot goes on the Dock here rather than in `setup`, because in a dev build Tauri puts

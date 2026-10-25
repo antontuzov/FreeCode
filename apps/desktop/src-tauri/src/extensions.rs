@@ -4,16 +4,16 @@
 //! install from, so the local answer to the same row is the list the agent itself is handed — the tool
 //! registry — plus the two facts a user cannot get from anywhere else: which of those calls run without
 //! interrupting, and which the sandbox would refuse. Both are computed by the engine that decides them
-//! at run time ([`smollm_core::approvals::evaluate`]) against the settings in force, so the page cannot
+//! at run time ([`freecode_core::approvals::evaluate`]) against the settings in force, so the page cannot
 //! tell a friendlier story than the loop acts. A tool the registry lists but this build has no executor
 //! for is said so rather than hidden, because the transcript will show a row for it either way.
 
+use freecode_config::agent::{ApprovalMode, PermissionClass};
+use freecode_config::Settings;
+use freecode_core::approvals::{evaluate, ApprovalDecision, Pending};
+use freecode_tools::{is_runnable, registry, SandboxPolicy, ToolDescriptor};
 use serde::Serialize;
 use serde_json::json;
-use smollm_config::agent::{ApprovalMode, PermissionClass};
-use smollm_config::Settings;
-use smollm_core::approvals::{evaluate, ApprovalDecision, Pending};
-use smollm_tools::{is_runnable, registry, SandboxPolicy, ToolDescriptor};
 use std::path::Path;
 
 /// One tool as the page shows it. The class is what the tool can do to the machine; the decision is
@@ -106,7 +106,7 @@ impl Inventory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smollm_config::Settings;
+    use freecode_config::Settings;
 
     fn inventory(settings: &Settings) -> Inventory {
         Inventory::build(Path::new("/tmp"), settings)
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn the_subagents_switch_is_what_moves_the_delegation_from_blocked_to_auto() {
         let settings = Settings {
-            approvals: smollm_config::agent::Approvals {
+            approvals: freecode_config::agent::Approvals {
                 subagents_enabled: true,
                 ..Default::default()
             },
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(row(&inv, "spawn_subagent").decision, "auto");
         assert_eq!(row(&inv, "terminal").decision, "blocked");
         let asking = Settings {
-            approvals: smollm_config::agent::Approvals {
+            approvals: freecode_config::agent::Approvals {
                 mode: ApprovalMode::AskAlways,
                 subagents_enabled: true,
                 ..Default::default()
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn the_terminal_switch_is_what_moves_the_shell_from_blocked_to_auto() {
         let settings = Settings {
-            approvals: smollm_config::agent::Approvals {
+            approvals: freecode_config::agent::Approvals {
                 shell_enabled: true,
                 ..Default::default()
             },
@@ -228,7 +228,7 @@ mod tests {
         // The repository reads were never behind it.
         assert_eq!(row(&inv, "git_status").decision, "auto");
         let asking = Settings {
-            approvals: smollm_config::agent::Approvals {
+            approvals: freecode_config::agent::Approvals {
                 mode: ApprovalMode::AskAlways,
                 shell_enabled: true,
                 ..Default::default()

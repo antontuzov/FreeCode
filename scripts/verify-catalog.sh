@@ -12,4 +12,4 @@ else
   step "checking the catalog against the pinned contract (set HF_VERIFY_REMOTE=1 to hit Hugging Face)"
 fi
 
-cargo run --locked -p smollm-models --bin verify-hf-gguf-catalog-entry -- "${ARGS[@]}"
+cargo run --locked -p freecode-models --bin verify-hf-gguf-catalog-entry -- "${ARGS[@]}"

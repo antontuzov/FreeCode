@@ -1,7 +1,7 @@
-# OpenFree
+# FreeCode
 
 A local-first desktop chat and coding agent for [PrismML's ternary Bonsai models](https://huggingface.co/prism-ml),
-with a free-model tier answered by OpenFree's free-model service already on this Mac. Tauri v2 shell, Rust host, one
+with a free-model tier answered by FreeCode's free-model service already on this Mac. Tauri v2 shell, Rust host, one
 supervised `llama-server` on loopback, and weights that stay on your disk.
 
 The interface is modelled on a three-column AI workbench — transcript in the middle, workspace on the left,
@@ -82,7 +82,7 @@ be set to Remote. With either missing, a prompt is refused with the setting name
 the local engine as a fallback, so "Remote" cannot silently mean "local anyway".
 
 - **The key never enters the settings document.** It is stored in the macOS Keychain (service
-  `studio.smollm.desktop.remote-provider`, account `api-key`), read only when a request is built, held in
+  `studio.freecode.desktop.remote-provider`, account `api-key`), read only when a request is built, held in
   memory for that turn, and sent as `Authorization: Bearer`. The settings file, IPC answers, logs and the
   process arguments never contain it; the UI can only ask whether one is saved.
 - **HTTPS, or loopback.** The base URL must be `https://…`; plain `http://` is accepted only for a
@@ -126,8 +126,8 @@ the local engine as a fallback, so "Remote" cannot silently mean "local anyway".
 
 | What | Where |
 | --- | --- |
-| Settings | `~/Library/Application Support/smollm-studio/settings.json` (platform standard elsewhere) |
-| Remote provider key | macOS Keychain, service `studio.smollm.desktop.remote-provider`, account `api-key` |
+| Settings | `~/Library/Application Support/freecode/settings.json` (platform standard elsewhere) |
+| Remote provider key | macOS Keychain, service `studio.freecode.desktop.remote-provider`, account `api-key` |
 | Filed conversations | `sessions/` beside it, one JSON file each |
 | Deleted conversations | `sessions/trash/`, until Settings → Storage erases one for good |
 | Server pid registry | `servers.pid` beside it |
@@ -138,7 +138,7 @@ the local engine as a fallback, so "Remote" cannot silently mean "local anyway".
 A checkout reads all of that from the repo root. An installed `.app` reads the two contract files from its
 own bundle — the code signature covers everything inside it, so downloading a 463 MB weight pack into the
 bundle is not an option, and `/Applications` is not writable at all — and mirrors them into the directory
-the app owns, which then becomes the root. `SMOLLM_STUDIO_ROOT` overrides both, and is honoured strictly:
+the app owns, which then becomes the root. `FREECODE_ROOT` overrides both, and is honoured strictly:
 a wrong override fails loudly rather than quietly verifying the wrong tree.
 
 ## Requirements
@@ -222,11 +222,11 @@ Two release steps are not wired yet, and this build makes no claim to have them:
 ## Layout
 
 ```
-crates/smollm-config    settings document, privacy and approval policy
-crates/smollm-models    the catalog contract and its verification
-crates/smollm-llama     engine launch plan, supervision, log reading
-crates/smollm-tools     the tool registry, the sandbox, the two web calls
-crates/smollm-core      the transcript model, the agent loop, approvals
+crates/freecode-config    settings document, privacy and approval policy
+crates/freecode-models    the catalog contract and its verification
+crates/freecode-llama     engine launch plan, supervision, log reading
+crates/freecode-tools     the tool registry, the sandbox, the two web calls
+crates/freecode-core      the transcript model, the agent loop, approvals
 apps/desktop            the Tauri v2 host and the React interface
 docs/reference-ui       the screenshots the interface is matched against
 docs/KNOWN_ISSUES.md    every model limit the code defends against, and where the defence is
@@ -243,5 +243,5 @@ docs/KNOWN_ISSUES.md    every model limit the code defends against, and where th
   trademarks; only the icon geometry is shared.
 - **KaTeX** fonts and stylesheet, bundled with the frontend build.
 
-OpenFree is MIT licensed; see [`LICENSE`](LICENSE). The engine and the model weights keep their own
+FreeCode is MIT licensed; see [`LICENSE`](LICENSE). The engine and the model weights keep their own
 terms, listed above.

@@ -1,5 +1,5 @@
 // A hand-rolled catalog rather than a framework: the surface is small, and every transcript label
-// already has one authoritative key in Rust (`smollm_core::transcript::StepKind::i18n_key`).
+// already has one authoritative key in Rust (`freecode_core::transcript::StepKind::i18n_key`).
 import en from "./en.json";
 import ru from "./ru.json";
 

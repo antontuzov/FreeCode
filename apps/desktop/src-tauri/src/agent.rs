@@ -1,6 +1,6 @@
 //! The tool round: run what one answer asked for, and say in the transcript what each call did.
 //!
-//! This is the half of the agent loop that touches the machine. [`smollm_tools::EXECUTABLE`] names the
+//! This is the half of the agent loop that touches the machine. [`freecode_tools::EXECUTABLE`] names the
 //! calls that have executors — four reads of the workspace, three reads of its repository, three writes
 //! inside it, two that reach the internet, one command, and the three project runners built on the same
 //! consent; anything else the model asks for is answered with a notice that says so rather than run,
@@ -9,8 +9,8 @@
 //! this user's permissions, is one the user asked for; the executors themselves are what bound them,
 //! the way the sandbox bounds the six that touch disk.
 //!
-//! Every call takes the same road: [`smollm_core::approvals`] decides, [`smollm_tools::authorize`]
-//! resolves its paths against the workspace sandbox inside [`smollm_tools::execute`], and only then
+//! Every call takes the same road: [`freecode_core::approvals`] decides, [`freecode_tools::authorize`]
+//! resolves its paths against the workspace sandbox inside [`freecode_tools::execute`], and only then
 //! does anything touch the disk. The row opens before the call and closes after it, so a call that
 //! walks a large tree shows up as work in progress rather than as a window that stopped answering.
 //!
@@ -27,14 +27,14 @@
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-use smollm_config::Settings;
-use smollm_core::approvals::{evaluate, ApprovalDecision, Pending};
-use smollm_core::events::{AgentEvent, NoticeCode, ToolOutcome};
-use smollm_core::transcript::{
+use freecode_config::Settings;
+use freecode_core::approvals::{evaluate, ApprovalDecision, Pending};
+use freecode_core::events::{AgentEvent, NoticeCode, ToolOutcome};
+use freecode_core::transcript::{
     tool_batch, DiffStat, EditedFile, Hunk, StepKind, StepStatus, TranscriptStep,
 };
-use smollm_llama::ToolCall;
-use smollm_tools::{
+use freecode_llama::ToolCall;
+use freecode_tools::{
     execute, is_delegated, is_executable, is_runnable, patch_target, Edit, SandboxPolicy,
 };
 
@@ -290,7 +290,7 @@ pub(crate) fn cleared(
     settings: &Settings,
     policy: &SandboxPolicy,
 ) -> Result<(), String> {
-    let tool = smollm_tools::find(name).ok_or_else(|| format!("no tool named {name}"))?;
+    let tool = freecode_tools::find(name).ok_or_else(|| format!("no tool named {name}"))?;
     match evaluate(&tool, arguments, &settings.approvals, policy, call_id) {
         Pending::Decided(decision) if decision.is_allowed() => Ok(()),
         Pending::Decided(ApprovalDecision::UserDenied)
@@ -403,7 +403,7 @@ pub(crate) fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
     // The plan rides on the row so the window can draw it. An invalid call is left empty here and
     // fails in `execute` with the sentence that says which step is wrong.
     if name == "todo_write" {
-        row.plan = smollm_tools::plan(arguments).unwrap_or_default();
+        row.plan = freecode_tools::plan(arguments).unwrap_or_default();
         row.detail.clear();
     }
     row
@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn a_write_that_spanned_two_files_is_reported_per_file() {
-        use smollm_tools::exec::EditHunk;
+        use freecode_tools::exec::EditHunk;
         let edits = vec![
             Edit {
                 path: "a.rs".into(),
@@ -534,13 +534,13 @@ mod tests {
     #[test]
     fn the_offered_reads_the_writes_and_the_web_calls_open_a_row() {
         // The executors and the offer have to agree, or a call would open a row nothing closes.
-        for id in smollm_tools::EXECUTABLE {
+        for id in freecode_tools::EXECUTABLE {
             assert!(is_executable(id), "{id} is offered but not runnable");
             let row = started_row(id, &json!({ "path": "a/b.rs" }));
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(smollm_tools::EXECUTABLE.len(), 17);
+        assert_eq!(freecode_tools::EXECUTABLE.len(), 17);
         // The writes are the rows the pill is built from, so none can silently degrade to a generic
         // tool — and a create says create, because a row that reads "Edit file" over a file the run
         // invented would be the transcript contradicting the review under it.
@@ -613,7 +613,7 @@ mod tests {
         assert_eq!(plan.kind, StepKind::Todo);
         assert_eq!(plan.plan.len(), 2);
         assert_eq!(plan.plan[1].text, "Run the tests");
-        assert_eq!(plan.plan[1].status, smollm_tools::PlanStatus::Active);
+        assert_eq!(plan.plan[1].status, freecode_tools::PlanStatus::Active);
         assert_eq!(plan.detail, "", "the list is the row, not a chip");
     }
 

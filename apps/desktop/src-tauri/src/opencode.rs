@@ -16,10 +16,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use freecode_core::transcript::Hunk;
+use freecode_llama::{Reply, ReplyDelta, StreamControl};
 use serde::Serialize;
 use serde_json::{json, Value};
-use smollm_core::transcript::Hunk;
-use smollm_llama::{Reply, ReplyDelta, StreamControl};
 
 /// The provider id the local service's own model list uses.
 pub const PROVIDER: &str = "opencode";
@@ -39,7 +39,7 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const STOP_POLL: Duration = Duration::from_millis(250);
 
 /// The title a session opened from here carries in OpenCode's own session list.
-const TITLE: &str = "smollm-studio";
+const TITLE: &str = "freecode";
 
 /// Whether the last probe found the service. Read synchronously by the status document, which is
 /// built on the blocking pool and cannot wait for a probe of its own.

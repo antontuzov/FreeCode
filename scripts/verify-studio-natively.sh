@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify-smollm-studio-natively: the umbrella. If this passes, the Definition of Done's quality
+# verify-freecode-natively: the umbrella. If this passes, the Definition of Done's quality
 # gate passes; it is the last job in ci.yml and the one to run before pushing.
 source "$(dirname "$0")/_env.sh"
 
@@ -8,4 +8,4 @@ for script in verify-catalog.sh verify-precommit.sh verify-tauri-ui.sh verify-de
   "./scripts/$script"
 done
 
-printf '\n\033[1mverify-smollm-studio-natively: all four gates OK\033[0m\n'
+printf '\n\033[1mverify-freecode-natively: all four gates OK\033[0m\n'

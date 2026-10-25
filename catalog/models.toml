@@ -1,4 +1,4 @@
-# OpenFree model catalog
+# FreeCode model catalog
 #
 # Source of truth for every number below, per model entry:
 #   HF model card : https://huggingface.co/<repo_id>/raw/main/README.md
@@ -28,7 +28,7 @@
 # can be read without the weights: `curl -sSL -r 0-20971519 <resolve url>` is enough to reach the end
 # of the KV section and the tensor list, so 20 MB answers a question about a 1.15 GB file. To re-read
 # the headers of the files actually on disk against this file:
-#   cargo run -p smollm-models --bin verify-hf-gguf-catalog-entry -- . --model-dir models
+#   cargo run -p freecode-models --bin verify-hf-gguf-catalog-entry -- . --model-dir models
 #
 # DO NOT edit a size, bits/weight, benchmark or throughput number by hand. Re-fetch the sources above.
 # If a source publishes no benchmark for a size, say so in [model.benchmarks].no_published_score with
@@ -120,12 +120,12 @@ preferred_for_backends = ["metal", "cpu", "cuda", "rocm", "hip"]
 notes = "Faster prefill on every backend; the pack benchmarked on Apple M5 Pro/Max."
 [[model.packs.caveats]]
 # KNOWN_ISSUES.md "CPU crash on load (AVX-512 CPUs)". The condition stays in the two atoms the load
-# guard can evaluate (`crates/smollm-llama/src/load_guard.rs::caveat_matches`), so the row fires only
+# guard can evaluate (`crates/freecode-llama/src/load_guard.rs::caveat_matches`), so the row fires only
 # on the hosts it is about instead of landing on every card as "may or may not apply". The version
 # scope therefore lives in the prose: the crash is what releases BEFORE llama.cpp#245 did, and the
 # pinned tag contains #245 (0324c665, re-checked 2026-10-20 against the current pin 73bfe6c and
 # found an ancestor of it, as of its predecessor e8fd209 too). This
-# row is inert for the engine this app installs and live only for an SMOLLM_ENGINE_TAG override or a
+# row is inert for the engine this app installs and live only for an FREECODE_ENGINE_TAG override or a
 # user-supplied older binary.
 condition = "backend == cpu and host_has_avx512"
 symptom = "segfault while loading, even with all layers offloaded to a GPU, on an engine release before llama.cpp#245 — the pinned build carries that fix, so on it this is an untested path rather than a known crash"
@@ -153,10 +153,10 @@ severity = "severe"
 # The abort is a property of the HIP backend on gfx103x parts rather than of a packing, which is why
 # this row sits on both runtime packs. Since 2026-10-20 the workaround below is applied rather than
 # only printed: `HostHardware::refuse_hostile_backend`
-# (crates/smollm-models/src/hardware.rs) swaps such a host onto the Vulkan engine, so on a machine
+# (crates/freecode-models/src/hardware.rs) swaps such a host onto the Vulkan engine, so on a machine
 # that got this far the row describes the build that was refused, not the one that runs — and because
 # `gpu ==` is an atom the load guard does not evaluate
-# (crates/smollm-llama/src/load_guard.rs::caveat_matches), it still reaches the card as "may or may not
+# (crates/freecode-llama/src/load_guard.rs::caveat_matches), it still reaches the card as "may or may not
 # apply" instead of claiming this host is affected.
 condition = "backend == hip and gpu == rdna2 (gfx103x)"
 symptom = "the server aborts during load on a consumer RDNA2 card (RX 6000 series / gfx1030), whatever the packing"
@@ -292,7 +292,7 @@ repetition_penalty = 1.0
 # accept "high" — sending it returns HTTP 500 (KNOWN_ISSUES.md). `low` is accepted but measured to
 # use about as many tokens as xhigh, so the UI maps "low" onto xhigh and says so.
 # These two lists are what the launch hands the server as --reasoning-effort-allow and
-# --reasoning-effort-fallback (crates/smollm-llama/src/launch.rs::reasoning_flags), so a client other
+# --reasoning-effort-fallback (crates/freecode-llama/src/launch.rs::reasoning_flags), so a client other
 # than this app's cannot reach the template with a level it raises on.
 default_effort = "xhigh"
 supported_efforts = ["xhigh", "medium", "none"]
@@ -865,7 +865,7 @@ severity = "severe"
 # "use the Q8_0 mmproj. With the current fork build, the BF16 mmproj can crash llama-server when
 # several image requests run at once; Q8_0 is not affected and quality is nearly the same." The
 # launcher already takes `--mmproj` and pairs it with `--image-max-tokens 1024`
-# (crates/smollm-llama/src/launch.rs, from common.sh's `bonsai_image_max_tokens()`), and the composer's
+# (crates/freecode-llama/src/launch.rs, from common.sh's `bonsai_image_max_tokens()`), and the composer's
 # attach button is what asks for it: a prompt carrying a picture starts the server with this file
 # loaded, so the picture reaches it. Weight download fetches this pack with the model pack it belongs
 # to, and skips it when the machine already holds it at the published size.

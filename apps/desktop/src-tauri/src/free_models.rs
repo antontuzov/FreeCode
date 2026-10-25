@@ -15,7 +15,7 @@
 use serde::Serialize;
 
 #[cfg(target_os = "macos")]
-const SERVICE: &str = "studio.smollm.desktop.free-models";
+const SERVICE: &str = "studio.freecode.desktop.free-models";
 #[cfg(target_os = "macos")]
 const ACCOUNT: &str = "openrouter-key";
 
@@ -59,7 +59,7 @@ pub fn models() -> &'static [FreeModel] {
         FreeModel {
             id: "big-pickle",
             label: "Big Pickle",
-            provider: "OpenFree",
+            provider: "FreeCode",
             upstream: None,
             priority: 1,
         },

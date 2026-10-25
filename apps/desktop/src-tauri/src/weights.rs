@@ -1,7 +1,7 @@
 //! The only path in the app that writes to `models/`.
 //!
 //! Weights come down through the same discipline as the engine archive — resume plus a streaming
-//! sha256 from [`smollm_models::download`], guarded by the size and digest the catalog published —
+//! sha256 from [`freecode_models::download`], guarded by the size and digest the catalog published —
 //! and they land through a `…gguf.part` sibling whose name no pack resolves to. A transfer killed
 //! halfway therefore still reads as "not downloaded", which is the honest verdict, rather than as a
 //! model file that failed verification.
@@ -26,10 +26,10 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use smollm_llama::load_guard::FileState;
-use smollm_models::catalog::{ModelEntry, Pack};
-use smollm_models::download::{self, DownloadPlan, Progress};
-use smollm_models::{gguf, IntegrityStatus, DEFAULT_HEADROOM_BYTES};
+use freecode_llama::load_guard::FileState;
+use freecode_models::catalog::{ModelEntry, Pack};
+use freecode_models::download::{self, DownloadPlan, Progress};
+use freecode_models::{gguf, IntegrityStatus, DEFAULT_HEADROOM_BYTES};
 
 use crate::status;
 
@@ -169,7 +169,7 @@ pub async fn download_weights(app: &AppHandle) -> Result<Downloaded, String> {
     })?;
 
     let client = reqwest::Client::builder()
-        .user_agent(concat!("smollm-studio/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("freecode/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| format!("cannot build the download client: {e}"))?;
     let emitter = app.clone();
@@ -302,7 +302,7 @@ mod tests {
     fn the_projector_lands_with_its_pack_and_what_is_already_here_is_left_alone() {
         let dir = tempfile::tempdir().unwrap();
         let weights = dir.path().to_path_buf();
-        let catalog = smollm_models::Catalog::load_default(&repo_root())
+        let catalog = freecode_models::Catalog::load_default(&repo_root())
             .expect("the shipped catalog loads for this test");
         let mut four = catalog
             .model("ternary-bonsai-2-4b")

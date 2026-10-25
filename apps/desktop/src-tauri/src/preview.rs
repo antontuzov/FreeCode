@@ -12,7 +12,7 @@
 
 use std::borrow::Cow;
 
-use smollm_tools::SandboxPolicy;
+use freecode_tools::SandboxPolicy;
 use tauri::http::{header, Method, Request, Response, StatusCode};
 use tauri::{AppHandle, UriSchemeContext, Wry};
 
@@ -195,7 +195,7 @@ fn hex(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smollm_tools::Access;
+    use freecode_tools::Access;
     use std::path::Path;
 
     fn fixture() -> (tempfile::TempDir, SandboxPolicy) {

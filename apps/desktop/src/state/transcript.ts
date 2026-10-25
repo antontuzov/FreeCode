@@ -1,4 +1,4 @@
-// The transcript row model. `StepKind` mirrors `smollm_core::transcript::StepKind` one-for-one and
+// The transcript row model. `StepKind` mirrors `freecode_core::transcript::StepKind` one-for-one and
 // its i18n keys match Rust's `StepKind::i18n_key`; `verify-transcript-i18n` fails the build if the
 // two lists or the catalogs drift, because a row that renders a raw key mid-sentence is a bug the
 // user sees in every language.
@@ -88,7 +88,7 @@ export type Refusal = { code: string; params: Record<string, string> };
 export type DiffStat = { added: number; removed: number };
 
 /**
- * `smollm_core::transcript::Hunk`: one block of a change as the tool that made it wrote it. `lines` is
+ * `freecode_core::transcript::Hunk`: one block of a change as the tool that made it wrote it. `lines` is
  * the diff text — `+`, `-`, and the two context lines on either side — and `at` is the line of the
  * file *before* the write that the first of them sits on, which is what lets the review number its
  * gutter rather than guess where the block fell.
@@ -96,7 +96,7 @@ export type DiffStat = { added: number; removed: number };
 export type Hunk = { at: number; lines: string };
 
 /**
- * `smollm_core::transcript::EditedFile`: one file a call changed, with the lines the call cost it and
+ * `freecode_core::transcript::EditedFile`: one file a call changed, with the lines the call cost it and
  * each block it wrote there. A row carries a list of these when one [`Hunk`] cannot describe the call:
  * a patch that named two files, or one file changed in two places.
  */
@@ -935,7 +935,7 @@ export const FIXTURE_ROWS: Row[] = [
     kind: "running",
     seconds: 10,
     children: [
-      { id: "f4a", kind: "terminal", detail: "cargo test -p smollm-core", status: "ok" },
+      { id: "f4a", kind: "terminal", detail: "cargo test -p freecode-core", status: "ok" },
       { id: "f4b", kind: "searchContent", detail: "\\.run\\(", status: "ok" },
       // The read that found the line this batch then rewrote, naming a file the round also edits:
       // opening a file is a source and changing it is a change, so the same path belongs in both of
@@ -943,7 +943,7 @@ export const FIXTURE_ROWS: Row[] = [
       {
         id: "f4b2",
         kind: "readFile",
-        subject: "crates/smollm-core/src/transcript.rs",
+        subject: "crates/freecode-core/src/transcript.rs",
         status: "ok",
       },
       // The round's one create, and the only hunk shape an edit cannot produce: every line of a new
@@ -969,11 +969,16 @@ export const FIXTURE_ROWS: Row[] = [
         },
         status: "ok",
       },
-      { id: "f4c", kind: "editFile", subject: "crates/smollm-core/src/lib.rs", status: "running" },
+      {
+        id: "f4c",
+        kind: "editFile",
+        subject: "crates/freecode-core/src/lib.rs",
+        status: "running",
+      },
       {
         id: "f4d",
         kind: "editFile",
-        subject: "crates/smollm-core/src/events.rs",
+        subject: "crates/freecode-core/src/events.rs",
         detail: "1 copy replaced",
         detailKey: "transcript.summary.copyReplaced",
         diff: { added: 7, removed: 2 },
@@ -1022,7 +1027,7 @@ export const FIXTURE_ROWS: Row[] = [
       {
         id: "f4f",
         kind: "editFile",
-        subject: "crates/smollm-core/src/transcript.rs",
+        subject: "crates/freecode-core/src/transcript.rs",
         detail: "1 copy replaced",
         detailKey: "transcript.summary.copyReplaced",
         // The third file of the round, and the one that gives the panel a section below the section a
@@ -1120,7 +1125,7 @@ export const FIXTURE_ROWS: Row[] = [
     refusal: { code: "engine-not-installed", params: {} },
     technical:
       "engine prism-b10787-73bfe6c is not installed (expected " +
-      "~/Library/Application Support/studio.smollm.desktop/engines/llama-server from " +
+      "~/Library/Application Support/studio.freecode.desktop/engines/llama-server from " +
       "llama-server-aarch64-apple-darwin-metal.tar.gz)",
     cta: {
       code: "install-engine",

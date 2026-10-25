@@ -3,7 +3,7 @@
 //!
 //! This is the phase's proof that the whole local chain works on the machine it will ship for: the
 //! same `status::Assembly` the status card renders hands the guard's verdict, the pinned binary and
-//! the weight file to `smollm_llama::server::start`, and the reply comes back from that server over
+//! the weight file to `freecode_llama::server::start`, and the reply comes back from that server over
 //! the OpenAI wire — no mock, no second implementation. A refusal therefore also arrives here as the
 //! guard's own blocker with its install action, which is what the acceptance criteria ask to see.
 //!
@@ -35,18 +35,18 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-use smollm_config::{
+use freecode_config::{
     ApprovalMode, ModelSource, PackingChoice, ReasoningEffort, Settings, DEFAULT_SYSTEM_PROMPT,
 };
-use smollm_core::events::{AgentEvent, NoticeCode, RunReport, ToolOutcome};
-use smollm_core::transcript::{DiffStat, StepStatus, TranscriptStep};
-use smollm_llama::{
+use freecode_core::events::{AgentEvent, NoticeCode, RunReport, ToolOutcome};
+use freecode_core::transcript::{DiffStat, StepStatus, TranscriptStep};
+use freecode_llama::{
     prompt_tokens, start as start_server, ChatRequest, LaunchRequest, LaunchTuning, Message,
     RemoteAccess, Reply, ReplyDelta, ServerHandle, StreamControl, IMAGE_TOKEN_CAP,
 };
-use smollm_models::{gguf, IntegrityStatus, ModelEntry};
-use smollm_tools::exec::EditHunk;
-use smollm_tools::{Access, Edit, SandboxPolicy, Summary, SummaryKey};
+use freecode_models::{gguf, IntegrityStatus, ModelEntry};
+use freecode_tools::exec::EditHunk;
+use freecode_tools::{Access, Edit, SandboxPolicy, Summary, SummaryKey};
 
 use crate::agent::{self, Ran};
 use crate::free_models::FreeModel;
@@ -269,7 +269,7 @@ impl Answer {
             Self::Local(turn) => format!("{} ({})", turn.model.name, turn.view.packing),
             Self::Remote(turn) => format!("{} (remote)", turn.model),
             Self::Free(turn) => format!("{} (free)", turn.model.label),
-            Self::OpenCode(turn) => format!("{} (OpenFree)", turn.model.label),
+            Self::OpenCode(turn) => format!("{} (FreeCode)", turn.model.label),
         }
     }
 
@@ -550,7 +550,7 @@ pub fn release_engine(state: &ChatState) -> bool {
         slot.launching = false;
         slot.running.take().is_some()
     };
-    smollm_llama::kill_spawned_servers();
+    freecode_llama::kill_spawned_servers();
     had_one
 }
 
@@ -772,7 +772,7 @@ async fn launch(app: &AppHandle, vision_projector: Option<PathBuf>) -> Result<Ru
     .map_err(|e| format!("engine resolution failed: {e}"))??;
 
     if let Some(blocker) = assembly.report.first_blocker() {
-        let info = smollm_core::blocked_info(blocker, &assembly.lock, &assembly.model.repo_id);
+        let info = freecode_core::blocked_info(blocker, &assembly.lock, &assembly.model.repo_id);
         emit(app, AgentEvent::EngineBlocked { info: info.clone() });
         // The refusal the user reads is the transcript row above, in their language. This string only
         // has to identify the problem to whoever reads the log, so it names the code and quotes the
@@ -1232,7 +1232,7 @@ async fn stream_round(
     on_write: impl FnMut(&opencode::Write),
 ) -> Result<Reply, String> {
     match answer {
-        Answer::Local(turn) => smollm_llama::stream_chat(
+        Answer::Local(turn) => freecode_llama::stream_chat(
             &turn.view.base_url,
             request,
             &turn.model,
@@ -1242,7 +1242,7 @@ async fn stream_round(
         .await
         .map_err(|e| e.to_string()),
         Answer::Remote(turn) => {
-            smollm_llama::stream_remote_chat(&remote_access(turn), request, on_delta)
+            freecode_llama::stream_remote_chat(&remote_access(turn), request, on_delta)
                 .await
                 .map_err(|e| e.to_string())
         }
@@ -1260,7 +1260,7 @@ async fn stream_round(
                 let mut landed = false;
                 let result = {
                     let deltas = &mut on_delta;
-                    smollm_llama::stream_remote_chat(&access, request, |ds| {
+                    freecode_llama::stream_remote_chat(&access, request, |ds| {
                         if !ds.is_empty() {
                             landed = true;
                         }
@@ -1329,7 +1329,7 @@ fn opencode_prompt(request: &ChatRequest, turn: &OpenCodeTurn) -> Result<String,
     if let Some(system) = request
         .messages
         .iter()
-        .find(|message| message.role == smollm_llama::Role::System)
+        .find(|message| message.role == freecode_llama::Role::System)
     {
         if !system.content.trim().is_empty() {
             prompt.push_str("Instructions for this conversation:\n");
@@ -1340,12 +1340,12 @@ fn opencode_prompt(request: &ChatRequest, turn: &OpenCodeTurn) -> Result<String,
     if turn.replay {
         prompt.push_str("The conversation so far, for context:\n\n");
         for message in &request.messages[..request.messages.len() - 1] {
-            if message.role == smollm_llama::Role::System || message.content.trim().is_empty() {
+            if message.role == freecode_llama::Role::System || message.content.trim().is_empty() {
                 continue;
             }
             let who = match message.role {
-                smollm_llama::Role::Assistant => "Assistant",
-                smollm_llama::Role::Tool => "Tool",
+                freecode_llama::Role::Assistant => "Assistant",
+                freecode_llama::Role::Tool => "Tool",
                 _ => "User",
             };
             prompt.push_str(who);
@@ -1720,14 +1720,14 @@ fn request_for(
 /// mode anyway. The planning contract can then name exactly what exists.
 fn tool_offer(settings: &Settings) -> Vec<Value> {
     if settings.approvals.mode == ApprovalMode::PlanOnly {
-        return smollm_tools::read_only_specs();
+        return freecode_tools::read_only_specs();
     }
     // Only the calls this build has runners for — the four reads, the three workspace writes, the
     // two web calls when the Privacy switch is on, the shell when Terminal access is on, and
     // delegation when Subagents is on: a schema the host cannot run, or one that would leave the
     // machine or start a second run against the user's stated wish, is a promise the model would
     // be asked to break.
-    smollm_tools::executable_specs(
+    freecode_tools::executable_specs(
         settings.privacy.allow_remote_providers,
         settings.approvals.shell_enabled,
         settings.approvals.subagents_enabled,
@@ -1807,7 +1807,7 @@ async fn delegate(
     let mut request = ChatRequest::new(history.clone());
     request.max_tokens = answer.max_tokens();
     request.reasoning_effort = answer.effort().map(str::to_string);
-    request.tools = smollm_tools::read_only_specs();
+    request.tools = freecode_tools::read_only_specs();
 
     // Only a local server can count a prompt before it answers: `/apply-template` and `/tokenize`
     // are the fork's endpoints, not the OpenAI contract. A remote provider reports the oversize
@@ -1901,10 +1901,10 @@ async fn delegate(
             let arguments: Value =
                 serde_json::from_str(&call.arguments).unwrap_or_else(|_| json!({}));
             let name = call.name.as_str();
-            let result = match smollm_tools::find(name) {
-                Some(tool) if smollm_tools::is_executable(name) && tool.is_read_only() => {
+            let result = match freecode_tools::find(name) {
+                Some(tool) if freecode_tools::is_executable(name) && tool.is_read_only() => {
                     match agent::cleared(name, &arguments, &call.id, settings, policy) {
-                        Ok(()) => match smollm_tools::execute(name, &arguments, policy) {
+                        Ok(()) => match freecode_tools::execute(name, &arguments, policy) {
                             Ok(done) => {
                                 reads += 1;
                                 clip_chars(&done.content, SUBAGENT_TOOL_CHARS)
@@ -1932,7 +1932,7 @@ async fn delegate(
         request = ChatRequest::new(history.clone());
         request.max_tokens = answer.max_tokens();
         request.reasoning_effort = answer.effort().map(str::to_string);
-        request.tools = smollm_tools::read_only_specs();
+        request.tools = freecode_tools::read_only_specs();
         if let Answer::Local(turn) = answer {
             if let Ok(sent) = prompt_tokens(
                 &turn.view.base_url,
@@ -1977,7 +1977,7 @@ async fn run_delegation(
     answer: &Answer,
     settings: &Settings,
     policy: &SandboxPolicy,
-    call: &smollm_llama::ToolCall,
+    call: &freecode_llama::ToolCall,
     stops: &Stops<'_>,
     allowed: bool,
 ) -> Ran {
@@ -2103,7 +2103,7 @@ async fn run_rounds(
         // wait on — while a delegation is itself async and streams its own request.
         let mut ran = Vec::with_capacity(calls.len());
         for call in &calls {
-            if smollm_tools::is_delegated(&call.name) {
+            if freecode_tools::is_delegated(&call.name) {
                 let allowed = delegations == 0;
                 if allowed {
                     delegations += 1;
@@ -2828,7 +2828,7 @@ fn history_of(session: &Session) -> Vec<Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smollm_llama::Timings;
+    use freecode_llama::Timings;
 
     #[test]
     fn a_stop_names_the_reply_in_flight_and_nothing_else() {
@@ -2947,7 +2947,7 @@ mod tests {
         let state = ChatState::default();
         lock(&state.history).push(Message::user("first question"));
         lock(&state.history).push(Message::assistant("first answer"));
-        *lock(&state.session) = Some(Session::new("smollm-studio", "model", "first question"));
+        *lock(&state.session) = Some(Session::new("freecode", "model", "first question"));
         forget_conversation(&state).unwrap();
         // The next request is built from this vector, so an empty one is a model that remembers
         // nothing — which is the entire behaviour the control claims.
@@ -2960,7 +2960,7 @@ mod tests {
     /// A conversation filed in a scratch directory, so the host's own copy of it can be deleted here
     /// without reaching for the one this machine keeps.
     fn filed(dir: &Path, prompt: &str) -> Session {
-        let mut session = Session::new("smollm-studio", "model", prompt);
+        let mut session = Session::new("freecode", "model", prompt);
         session.push(Role::User, prompt, None);
         session.push(Role::Assistant, "an answer", None);
         sessions::write_in(dir, &session).unwrap();
@@ -3019,7 +3019,7 @@ mod tests {
 
     #[test]
     fn a_reopened_conversation_goes_back_into_the_history_in_the_order_it_was_said() {
-        let mut session = Session::new("smollm-studio", "model", "first question");
+        let mut session = Session::new("freecode", "model", "first question");
         session.push(Role::User, "first question", None);
         session.push(Role::Assistant, "first answer", None);
         session.push(Role::User, "and then?", None);
@@ -3170,7 +3170,7 @@ mod tests {
 
     fn seeded(id: &str) -> ModelEntry {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        smollm_models::Catalog::load_default(&root)
+        freecode_models::Catalog::load_default(&root)
             .expect("catalog loads")
             .model(id)
             .expect("seeded entry")
@@ -3466,7 +3466,7 @@ mod tests {
     /// prompt about a photo the model can no longer see.
     #[test]
     fn a_filed_picture_comes_back_into_the_history_with_its_prompt() {
-        let mut session = Session::new("smollm-studio", "model", "what is in this?");
+        let mut session = Session::new("freecode", "model", "what is in this?");
         session.push(
             Role::User,
             "what is in this?",

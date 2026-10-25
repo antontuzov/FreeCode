@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window. It may call the host's own commands and nothing else: no shell, no filesystem and no network capability is granted to the UI, because every privileged path goes through smollm-tools' sandbox on the Rust side. The single exception is opening a web address, which the refusal links and the links inside an answer need — and it is scoped to `http` and `https` so a `file://` path or a `javascript:` address in model-written text cannot launch anything, whatever the user clicks.",
+  "description": "The main window. It may call the host's own commands and nothing else: no shell, no filesystem and no network capability is granted to the UI, because every privileged path goes through freecode-tools' sandbox on the Rust side. The single exception is opening a web address, which the refusal links and the links inside an answer need — and it is scoped to `http` and `https` so a `file://` path or a `javascript:` address in model-written text cannot launch anything, whatever the user clicks.",
   "windows": ["main"],
   "permissions": [
     "core:default",

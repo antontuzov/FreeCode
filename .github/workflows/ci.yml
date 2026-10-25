@@ -86,7 +86,7 @@ jobs:
       - run: pnpm build
       - run: ./scripts/verify-desktop-native.sh
 
-  verify-smollm-studio-natively:
+  verify-freecode-natively:
     needs:
       - rust-tauri-precommit-gate
       - verify-hf-gguf-catalog-entry

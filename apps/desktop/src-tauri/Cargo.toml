@@ -1,6 +1,6 @@
 [package]
-name = "smollm-desktop"
-description = "SmoLLM Studio desktop host: the Tauri v2 shell that exposes the Rust catalog, engine guard and agent core to the React UI"
+name = "freecode-desktop"
+description = "FreeCode desktop host: the Tauri v2 shell that exposes the Rust catalog, engine guard and agent core to the React UI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ authors.workspace = true
 publish = false
 
 [lib]
-name = "smollm_desktop_lib"
+name = "freecode_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -17,13 +17,13 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-smollm-config = { workspace = true }
-smollm-models = { workspace = true }
-smollm-llama = { workspace = true }
-smollm-core = { workspace = true }
+freecode-config = { workspace = true }
+freecode-models = { workspace = true }
+freecode-llama = { workspace = true }
+freecode-core = { workspace = true }
 # The tool round runs the registry's read-only executors, so the host needs the sandbox policy and
-# the offered specs directly — `smollm-core` alone only carries the vocabulary.
-smollm-tools = { workspace = true }
+# the offered specs directly — `freecode-core` alone only carries the vocabulary.
+freecode-tools = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

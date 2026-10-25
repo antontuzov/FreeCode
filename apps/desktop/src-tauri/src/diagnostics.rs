@@ -10,7 +10,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use smollm_config::Settings;
+use freecode_config::Settings;
 
 use crate::status;
 
@@ -170,7 +170,7 @@ mod tests {
         let blocker = report.blocker.expect("nothing is fetched yet");
         assert_eq!(
             blocker.info.code,
-            smollm_llama::load_guard::BlockerCode::EngineNotInstalled
+            freecode_llama::load_guard::BlockerCode::EngineNotInstalled
         );
         assert!(!report.engine_installed);
         assert_eq!(report.root, root.path().display().to_string());

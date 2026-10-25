@@ -6,10 +6,10 @@
 //! into the setting would silently turn "System" into a fixed light or dark the first time the
 //! panel saved.
 
-use serde::{Deserialize, Serialize};
-use smollm_config::{
+use freecode_config::{
     Appearance, ContentWidth, FontStyle, InterfaceStyle, Language, Settings, ThemeMode,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,9 +124,9 @@ mod tests {
     #[test]
     fn saving_the_shell_slice_lands_its_own_fields_and_leaves_the_rest_alone() {
         let mut settings = Settings::default();
-        settings.appearance.font_style = smollm_config::FontStyle::Serif;
-        settings.appearance.terminal_theme = smollm_config::TerminalTheme::Custom;
-        settings.appearance.content_width = smollm_config::ContentWidth::Wide;
+        settings.appearance.font_style = freecode_config::FontStyle::Serif;
+        settings.appearance.terminal_theme = freecode_config::TerminalTheme::Custom;
+        settings.appearance.content_width = freecode_config::ContentWidth::Wide;
         settings.appearance.dark_code_theme = "vikia".into();
         settings.appearance.show_line_numbers = false;
         settings.appearance.wrap_long_lines = true;
@@ -138,8 +138,8 @@ mod tests {
         v.ui_font_size = 16;
         // Everything the window paints from has to survive the trip back, rather than being frozen
         // at whatever the document held when the view was built.
-        v.font_style = smollm_config::FontStyle::Mono;
-        v.content_width = smollm_config::ContentWidth::Full;
+        v.font_style = freecode_config::FontStyle::Mono;
+        v.content_width = freecode_config::ContentWidth::Full;
         v.show_line_numbers = true;
         v.wrap_long_lines = false;
         v.app_icon = Some(9);
@@ -148,8 +148,8 @@ mod tests {
         assert_eq!(current.interface_style, InterfaceStyle::Forest);
         assert!(!current.glass_effects);
         assert_eq!(current.ui_font_size_px, 16);
-        assert_eq!(current.font_style, smollm_config::FontStyle::Mono);
-        assert_eq!(current.content_width, smollm_config::ContentWidth::Full);
+        assert_eq!(current.font_style, freecode_config::FontStyle::Mono);
+        assert_eq!(current.content_width, freecode_config::ContentWidth::Full);
         assert!(current.show_line_numbers);
         assert!(!current.wrap_long_lines);
         assert_eq!(current.app_icon, Some(9));

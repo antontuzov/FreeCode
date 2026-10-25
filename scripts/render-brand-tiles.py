@@ -2,7 +2,7 @@
 """Cut the brand logo into the two Dock tiles the app can wear: its mark on a white ground and on a
 black one.
 
-`apps/desktop/src-tauri/brand/smollm-logo.png` is the artwork as supplied — the mark already on its
+`apps/desktop/src-tauri/brand/freecode-logo.png` is the artwork as supplied — the mark already on its
 own dark field, edge to edge. That is one tile, and the Dock it goes on is painted either way round,
 so the same mark needs both grounds. A user asked for exactly that: "add icon for dock but make bg
 white and black".
@@ -37,7 +37,7 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw
 
-SRC = Path("apps/desktop/src-tauri/brand/smollm-logo.png")
+SRC = Path("apps/desktop/src-tauri/brand/freecode-logo.png")
 WEBP_DIR = Path("apps/desktop/src/assets/mascots")
 PNG_DIR = Path("apps/desktop/src-tauri/mascots")
 PREVIEW = Path("/tmp/brand-tiles-preview.png")

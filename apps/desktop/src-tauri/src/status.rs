@@ -3,7 +3,7 @@
 //!
 //! The assembly order is the contract's proof chain: catalog and lock files are read, the hardware
 //! is probed, a packing is chosen from that probe, the fork engine is resolved for it, and only
-//! then does `smollm_llama::load_guard` hand down the verdict. Nothing here decides policy — the
+//! then does `freecode_llama::load_guard` hand down the verdict. Nothing here decides policy — the
 //! guard owns refusals. `Assembly` is the single place that chain runs, so the UI projection and
 //! the native CI probe can never disagree about what this machine does.
 
@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use smollm_config::{ModelSource, PackingChoice, Settings};
-use smollm_llama::load_guard::{self, Blocker, FileState, GuardReport, GuardRequest};
-use smollm_llama::{models_root, EngineBinary};
-use smollm_models::catalog::CatalogDefaults;
-use smollm_models::{
+use freecode_config::{ModelSource, PackingChoice, Settings};
+use freecode_llama::load_guard::{self, Blocker, FileState, GuardReport, GuardRequest};
+use freecode_llama::{models_root, EngineBinary};
+use freecode_models::catalog::CatalogDefaults;
+use freecode_models::{
     gguf, recommend, EngineLock, HostHardware, IntegrityStatus, ModelEntry, Pack, Recommendation,
     DEFAULT_HEADROOM_BYTES,
 };
@@ -100,7 +100,7 @@ impl Assembly {
         unchecked_warnings.dedup();
 
         let blocked = self.report.first_blocker().map(|b| BlockedView {
-            info: smollm_core::blocked_info(b, &self.lock, &self.model.repo_id),
+            info: freecode_core::blocked_info(b, &self.lock, &self.model.repo_id),
             // Two refusals are things this app clears itself by fetching what it pinned. Every
             // other one is a fact about the tree — a stock binary, a stale pin, a file whose bytes
             // disagree with the catalog — and the honest answer there is the URL, not a button
@@ -168,7 +168,7 @@ impl Assembly {
 
 /// Run the whole proof chain for this machine.
 pub fn assemble(root: &Path, settings: &Settings) -> Result<Assembly, String> {
-    let catalog = smollm_models::Catalog::load_default(root).map_err(|e| e.to_string())?;
+    let catalog = freecode_models::Catalog::load_default(root).map_err(|e| e.to_string())?;
     let lock = EngineLock::load_default(root).map_err(|e| e.to_string())?;
     let model = find_model(&catalog, &settings.local_model.catalog_id)?;
 
@@ -235,7 +235,10 @@ pub fn build(root: &Path, settings: &Settings) -> Result<ModelStatusView, String
     Ok(assembly.view(settings))
 }
 
-fn find_model<'a>(catalog: &'a smollm_models::Catalog, id: &str) -> Result<&'a ModelEntry, String> {
+fn find_model<'a>(
+    catalog: &'a freecode_models::Catalog,
+    id: &str,
+) -> Result<&'a ModelEntry, String> {
     catalog
         .models
         .iter()
@@ -325,7 +328,7 @@ pub struct PackView {
 #[serde(rename_all = "camelCase")]
 pub struct BlockedView {
     #[serde(flatten)]
-    pub info: smollm_core::BlockedInfo,
+    pub info: freecode_core::BlockedInfo,
     /// True when the app can clear this itself by fetching the pinned engine; false when the fix is
     /// a file or a pin change and the URL is the honest answer.
     pub installable: bool,
@@ -409,8 +412,8 @@ pub struct ModelStatusView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smollm_models::hardware::{Backend, GpuArch};
-    use smollm_models::Catalog;
+    use freecode_models::hardware::{Backend, GpuArch};
+    use freecode_models::Catalog;
 
     fn repo_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")

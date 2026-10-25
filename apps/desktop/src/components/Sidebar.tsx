@@ -89,7 +89,7 @@ function group(items: SessionSummary[], unnamed: string): Workspace[] {
 /** Only ever rendered under `?fixture=1`, to compare the layout against docs/reference-ui. */
 const FIXTURE_WORKSPACES: Workspace[] = [
   {
-    name: "smollm-studio",
+    name: "freecode",
     conversations: [
       { id: null, title: "Phase 0 host" },
       { id: null, title: "Catalog pin" },

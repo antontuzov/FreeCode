@@ -106,7 +106,7 @@ pub fn prefer(pinned: Option<usize>) {
 /// picture on the first frame. An IPC call the UI awaited would paint some other duck for a moment
 /// before the answer arrived.
 pub fn init_script() -> String {
-    format!("window.smollmMascot = {};", tile())
+    format!("window.freecodeMascot = {};", tile())
 }
 
 /// Repaint the Dock tile. Never fails the launch: the built icon is a perfectly good face, and a
@@ -170,7 +170,10 @@ mod tests {
     fn the_script_names_the_same_duck_the_dock_does() {
         let _serial = lock();
         prefer(None);
-        assert_eq!(init_script(), format!("window.smollmMascot = {};", tile()));
+        assert_eq!(
+            init_script(),
+            format!("window.freecodeMascot = {};", tile())
+        );
     }
 
     #[test]
@@ -183,7 +186,7 @@ mod tests {
             assert_eq!(tile(), index, "{index} is the tile the user chose");
             assert_eq!(
                 init_script(),
-                format!("window.smollmMascot = {index};"),
+                format!("window.freecodeMascot = {index};"),
                 "the window and the Dock have to agree on the pinned tile"
             );
         }

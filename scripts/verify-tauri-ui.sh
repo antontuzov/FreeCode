@@ -30,7 +30,7 @@ done
 echo "OK — $(echo "$ui_cmds" | wc -l | tr -d ' ') commands wired both ways: $(echo "$ui_cmds" | tr '\n' ' ')"
 
 step "transcript i18n keys vs StepKind"
-cargo run --locked -q -p smollm-core --bin verify-transcript-i18n -- apps/desktop/src/i18n
+cargo run --locked -q -p freecode-core --bin verify-transcript-i18n -- apps/desktop/src/i18n
 
 step "locale catalogs agree, and every lookup is defined"
 node scripts/check-i18n.mjs

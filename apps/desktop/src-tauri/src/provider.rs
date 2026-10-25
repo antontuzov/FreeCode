@@ -14,7 +14,7 @@ use reqwest::Url;
 
 /// Keychain service/account pair. One provider at a time is this build's contract; changing the base
 /// URL edits the address the saved key is sent to, it does not create a second credential.
-const SERVICE: &str = "studio.smollm.desktop.remote-provider";
+const SERVICE: &str = "studio.freecode.desktop.remote-provider";
 const ACCOUNT: &str = "api-key";
 
 /// The base URL as stored and as used, with surrounding space and the trailing slash removed.

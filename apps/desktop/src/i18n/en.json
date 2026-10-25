@@ -1,5 +1,5 @@
 {
-  "app.name": "OpenFree",
+  "app.name": "FreeCode",
   "sidebar.workspaces": "Workspaces",
   "sidebar.recent": "Recent tasks",
   "sidebar.knowledge": "Knowledge Center",
@@ -154,7 +154,7 @@
   "composer.agent.on": "Every prompt runs as an agent: the model may read this workspace, make a file in it and change one, and each round it asks costs the context window one tool result. What it may change without asking is the approval dial's answer, and nothing else reaches past this machine except, while the privacy switch is on, a Wikipedia search and one page read.",
   "composer.agent.onShell": "Every prompt runs as an agent, and Terminal access is on: the model may read this workspace, make a file in it, change one, and run one command there with your own permissions. Each round it asks costs the context window one tool result. What it may change without asking is the approval dial's answer.",
   "composer.agent.subagents": "Subagents is on: one of the rounds may hand a self-contained question to a second local model run that can only read this workspace, and its answer comes back as one tool result.",
-  "composer.agent.proseRoute": "A free model is selected: OpenFree answers the run on this Mac, working in the project folder you picked, and the writes appear here as rows and a diff like a local run's. One thing that route cannot give: Revert holds no copy of the file from before the change, so a page it wrote stays written until you undo it yourself.",
+  "composer.agent.proseRoute": "A free model is selected: FreeCode answers the run on this Mac, working in the project folder you picked, and the writes appear here as rows and a diff like a local run's. One thing that route cannot give: Revert holds no copy of the file from before the change, so a page it wrote stays written until you undo it yourself.",
   "composer.picture": "Picture attached",
   "composer.picture.busy": "Shrinking the picture…",
   "composer.picture.remove": "Remove the picture",
@@ -191,7 +191,7 @@
   "settings.diag.copy": "Copy report",
   "settings.diag.copied": "Copied",
   "settings.diag.copyFailed": "The pasteboard refused it",
-  "settings.diag.heading": "OpenFree {{version}}",
+  "settings.diag.heading": "FreeCode {{version}}",
   "settings.diag.nothing": "Nothing. The guard has no warning about this machine.",
   "settings.diag.unverified": "not checked on this machine",
   "settings.group.basics": "Basics",
@@ -225,7 +225,7 @@
   "settings.section.remote": "Remote provider",
   "settings.section.remote.desc": "Where prompts are answered: this machine's engine, or an OpenAI-compatible provider. A key is held in the macOS Keychain and never written to this file.",
   "settings.section.free": "Free models",
-  "settings.section.free.desc": "The free tier OpenFree lists. The composer's model pill picks one; the free-model service on this Mac answers it when running, and the gateway key below is the route when it is not.",
+  "settings.section.free.desc": "The free tier FreeCode lists. The composer's model pill picks one; the free-model service on this Mac answers it when running, and the gateway key below is the route when it is not.",
   "settings.section.packing": "Packing",
   "settings.section.engine": "Engine",
   "settings.section.reasoning": "Reasoning",
@@ -552,7 +552,7 @@
   "notice.free-model-fallback": "{{from}} refused the request before a token landed, so the gateway moved the turn to {{to}}.",
   "notice.route-has-no-tools": "{{model}} answers this run through the free-model service, and none of this app's tools go with it: the run's steps never reach this transcript, and anything it writes lands in that service's own folder rather than this one, where Review shows nothing and this window cannot undo it. The loop that works in this folder runs on the local engine or on a provider that takes a key.",
   "blocker.engine-not-installed.title": "The engine isn't on this machine yet",
-  "blocker.engine-not-installed.detail": "OpenFree runs models with one specific build of llama.cpp, and this machine doesn't have it yet. Installing it fetches exactly the build this app was pinned to — nothing else is chosen for you.",
+  "blocker.engine-not-installed.detail": "FreeCode runs models with one specific build of llama.cpp, and this machine doesn't have it yet. Installing it fetches exactly the build this app was pinned to — nothing else is chosen for you.",
   "blocker.stock-engine-rejected.title": "This model can't run on standard llama.cpp",
   "blocker.stock-engine-rejected.detail": "The llama.cpp on this machine is the standard one, which can't read these weights. Installing the build this app pins is what fixes it; the app will never quietly fall back to a build that answers wrongly.",
   "blocker.weights-not-downloaded.title": "The model file hasn't been downloaded yet",
@@ -645,8 +645,8 @@
   "extensions.decision.blocked": "Blocked by policy",
   "extensions.note": "Both columns are the host's own answer. The classes come from the registry a run is built from, and the right-hand label comes from the policy engine that decides a call mid-run — so this list moves with the approval dial and the privacy switch in Settings, and cannot read more permissive than the agent acts.",
   "modelPicker.freeViaApp": "via the free-model service",
-  "modelPicker.freeNoteApp": "The next prompt is answered by the free model picked here, through OpenFree on this Mac. No key is used, and the free-model service has to stay running.",
+  "modelPicker.freeNoteApp": "The next prompt is answered by the free model picked here, through FreeCode on this Mac. No key is used, and the free-model service has to stay running.",
   "model.free.route": "Route",
   "model.free.appRoute": "the free-model service",
-  "model.free.appReady": "Prompts are answered by this free model through OpenFree on this Mac: no gateway key is read, and the service's password never leaves the machine. The free-model service has to stay running — a prompt sent after it stops is refused unless a gateway key is saved."
+  "model.free.appReady": "Prompts are answered by this free model through FreeCode on this Mac: no gateway key is read, and the service's password never leaves the machine. The free-model service has to stay running — a prompt sent after it stops is refused unless a gateway key is saved."
 }

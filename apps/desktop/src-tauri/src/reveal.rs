@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use smollm_tools::{Access, SandboxPolicy};
+use freecode_tools::{Access, SandboxPolicy};
 use tauri::AppHandle;
 
 /// The workspace's own policy, built here rather than borrowed from the agent's.

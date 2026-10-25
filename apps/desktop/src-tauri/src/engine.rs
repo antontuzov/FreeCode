@@ -1,7 +1,7 @@
 //! The only path in the app that writes to `engines/`, and the only one that talks to GitHub.
 //!
 //! The status strip used to print a URL and ask the user to unpack it by hand. It does not have to:
-//! `smollm_llama::install` resolves the pinned asset from `engines/lock.toml`, checks the digest the
+//! `freecode_llama::install` resolves the pinned asset from `engines/lock.toml`, checks the digest the
 //! lock recorded, and unpacks into exactly the directory `EngineBinary` looks in. This module is the
 //! thin host around that — one command, one progress event.
 //!
@@ -13,8 +13,8 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, Emitter};
 
-use smollm_llama::install::{self, Installed, Phase};
-use smollm_llama::EngineBinary;
+use freecode_llama::install::{self, Installed, Phase};
+use freecode_llama::EngineBinary;
 
 use crate::{appearance, paths, status};
 
@@ -61,7 +61,7 @@ pub async fn install_engine(app: &AppHandle) -> Result<InstallOutcome, String> {
 
     let client = reqwest::Client::builder()
         // GitHub's release CDN rejects a request with no User-Agent.
-        .user_agent(concat!("smollm-studio/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("freecode/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| format!("cannot build the download client: {e}"))?;
     let emitter = app.clone();

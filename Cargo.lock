@@ -1151,6 +1151,115 @@ dependencies = [
 ]
 
 [[package]]
+name = "freecode-config"
+version = "0.1.0"
+dependencies = [
+ "dirs 5.0.1",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "freecode-core"
+version = "0.1.0"
+dependencies = [
+ "freecode-config",
+ "freecode-llama",
+ "freecode-models",
+ "freecode-tools",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "freecode-desktop"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "freecode-config",
+ "freecode-core",
+ "freecode-llama",
+ "freecode-models",
+ "freecode-tools",
+ "keyring",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "freecode-llama"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "freecode-config",
+ "freecode-models",
+ "futures",
+ "libc",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "zip",
+]
+
+[[package]]
+name = "freecode-models"
+version = "0.1.0"
+dependencies = [
+ "dirs 5.0.1",
+ "freecode-config",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+]
+
+[[package]]
+name = "freecode-tools"
+version = "0.1.0"
+dependencies = [
+ "freecode-config",
+ "glob",
+ "libc",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3607,115 +3716,6 @@ name = "smallvec"
 version = "1.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
-
-[[package]]
-name = "smollm-config"
-version = "0.1.0"
-dependencies = [
- "dirs 5.0.1",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
-]
-
-[[package]]
-name = "smollm-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "smollm-config",
- "smollm-llama",
- "smollm-models",
- "smollm-tools",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "smollm-desktop"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "keyring",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "smollm-config",
- "smollm-core",
- "smollm-llama",
- "smollm-models",
- "smollm-tools",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "smollm-llama"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "futures",
- "libc",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "smollm-config",
- "smollm-models",
- "tar",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "zip",
-]
-
-[[package]]
-name = "smollm-models"
-version = "0.1.0"
-dependencies = [
- "dirs 5.0.1",
- "futures",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "smollm-config",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "toml 0.8.23",
- "tracing",
-]
-
-[[package]]
-name = "smollm-tools"
-version = "0.1.0"
-dependencies = [
- "glob",
- "libc",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "smollm-config",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "walkdir",
-]
 
 [[package]]
 name = "socket2"

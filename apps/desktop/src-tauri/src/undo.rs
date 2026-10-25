@@ -19,7 +19,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::Serialize;
 use serde_json::Value;
 
-use smollm_tools::{write_targets, Edit, SandboxPolicy};
+use freecode_tools::{write_targets, Edit, SandboxPolicy};
 
 /// The tools refuse to read — and so to edit — a file past this size, so a before-image can never be
 /// larger than it.
@@ -341,7 +341,7 @@ mod tests {
         });
 
         let captured = capture("edit_file", &arguments, &policy);
-        let done = smollm_tools::execute("edit_file", &arguments, &policy).unwrap();
+        let done = freecode_tools::execute("edit_file", &arguments, &policy).unwrap();
         assert_eq!(
             fs::read_to_string(&file).unwrap(),
             "alpha\nbeta edited\n",

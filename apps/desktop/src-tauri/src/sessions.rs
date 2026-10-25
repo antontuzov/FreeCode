@@ -259,7 +259,7 @@ fn trash_dir(dir: &Path) -> PathBuf {
 /// otherwise the root the host resolved — the checkout's directory in a development build, the data
 /// directory an installed app mirrored its catalog into. Sessions already filed keep the name they
 /// were filed under; picking another folder groups the new work under it rather than rewriting them.
-pub fn workspace_label(app: &AppHandle, settings: &smollm_config::Settings) -> String {
+pub fn workspace_label(app: &AppHandle, settings: &freecode_config::Settings) -> String {
     crate::paths::project_root(Some(app), settings)
         .ok()
         .or_else(|| crate::paths::workspace_root(Some(app)).ok())
@@ -575,7 +575,7 @@ mod tests {
     use super::*;
 
     fn session(prompt: &str) -> Session {
-        let mut session = Session::new("smollm-studio", "Ternary Bonsai 1.7B (PQ2_0)", prompt);
+        let mut session = Session::new("freecode", "Ternary Bonsai 1.7B (PQ2_0)", prompt);
         session.push(Role::User, prompt, None);
         session.push(Role::Assistant, "an answer", None);
         session
@@ -589,7 +589,7 @@ mod tests {
         let read = read_in(dir.path(), &first.id).unwrap();
         assert_eq!(read.turns, first.turns);
         assert_eq!(read.title, "what pins the engine?");
-        assert_eq!(read.workspace, "smollm-studio");
+        assert_eq!(read.workspace, "freecode");
     }
 
     #[test]
@@ -929,7 +929,7 @@ mod tests {
     #[test]
     fn a_match_only_in_the_answer_still_found_is_named_as_one() {
         let dir = tempfile::tempdir().unwrap();
-        let mut only = Session::new("smollm-studio", "m", "what did you say?");
+        let mut only = Session::new("freecode", "m", "what did you say?");
         only.push(Role::User, "what did you say?", None);
         only.push(Role::Assistant, "the fork commit pins the engine", None);
         write_in(dir.path(), &only).unwrap();

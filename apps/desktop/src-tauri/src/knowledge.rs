@@ -14,10 +14,10 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use smollm_config::Settings;
-use smollm_llama::EngineBinary;
-use smollm_models::catalog::{Caveat, Severity};
-use smollm_models::{gguf, Catalog, EngineLock, HostHardware, IntegrityStatus, ModelEntry};
+use freecode_config::Settings;
+use freecode_llama::EngineBinary;
+use freecode_models::catalog::{Caveat, Severity};
+use freecode_models::{gguf, Catalog, EngineLock, HostHardware, IntegrityStatus, ModelEntry};
 
 use crate::status::weights_dir;
 

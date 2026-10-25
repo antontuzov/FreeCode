@@ -1,7 +1,7 @@
 //! Locating the data files the host reads: `catalog/models.toml` and `engines/lock.toml`.
 //!
 //! An installed app carries them as bundled resources; a checkout reads them from the repo root.
-//! `SMOLLM_STUDIO_ROOT` overrides both, which is what the native-verification job points at a
+//! `FREECODE_ROOT` overrides both, which is what the native-verification job points at a
 //! scratch tree. When it is set it is honoured strictly: a wrong override must fail loudly rather
 //! than silently reading the checkout's catalog and reporting that tree as verified.
 //!
@@ -17,16 +17,49 @@ use std::path::{Component, Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
 
-pub const ROOT_ENV: &str = "SMOLLM_STUDIO_ROOT";
+pub const ROOT_ENV: &str = "FREECODE_ROOT";
+/// The directory this app wrote under its previous name. Read once by `migrate_legacy_app_dir`;
+/// nothing else in the build refers to it.
+const LEGACY_APP_DIR: &str = "smollm-studio";
 /// The file mirroring the pids of the supervised servers, one line per launch.
 const SERVER_PIDS: &str = "servers.pid";
-const CONTRACT: [&str; 2] = [smollm_models::CATALOG_REL, smollm_models::ENGINE_LOCK_REL];
+const CONTRACT: [&str; 2] = [
+    freecode_models::CATALOG_REL,
+    freecode_models::ENGINE_LOCK_REL,
+];
 
 /// The directory the app owns beside `settings.json`, and the only place a packaged app may unpack
 /// its engine or download weights. `None` on a platform that gives the app no such directory.
 pub(crate) fn app_data_dir() -> Option<PathBuf> {
-    smollm_config::Settings::default_path()
+    freecode_config::Settings::default_path()
         .and_then(|settings| settings.parent().map(|dir| absolute(dir.to_path_buf())))
+}
+
+/// Move the data directory this app wrote under its previous name to the one it uses now.
+///
+/// Settings and the filed conversations live inside it, so without the move a renamed app would open
+/// onto an empty history. It runs once, from `setup`, before any command can read the directory; a
+/// directory already under the new name is never touched, and a missing old one is not a failure.
+pub(crate) fn migrate_legacy_app_dir() {
+    let Some(new) = app_data_dir() else { return };
+    let Some(container) = new.parent() else {
+        return;
+    };
+    let old = container.join(LEGACY_APP_DIR);
+    if let Err(why) = migrate_dir(&old, &new) {
+        eprintln!(
+            "could not move {} to {}: {why}",
+            old.display(),
+            new.display()
+        );
+    }
+}
+
+fn migrate_dir(old: &Path, new: &Path) -> std::io::Result<()> {
+    if new.exists() || !old.exists() {
+        return Ok(());
+    }
+    std::fs::rename(old, new)
 }
 
 /// Where the server pid registry lives: beside `settings.json`, in the directory the app already
@@ -47,7 +80,7 @@ pub fn workspace_root(app: Option<&AppHandle>) -> Result<PathBuf, String> {
 /// report changes the user cannot find in the folder they chose.
 pub fn project_root(
     app: Option<&AppHandle>,
-    settings: &smollm_config::Settings,
+    settings: &freecode_config::Settings,
 ) -> Result<PathBuf, String> {
     let chosen = settings.project.root.trim();
     if chosen.is_empty() {
@@ -125,8 +158,8 @@ fn root_from(
 
     Err(format!(
         "no {} + {} found in any of: {}",
-        smollm_models::CATALOG_REL,
-        smollm_models::ENGINE_LOCK_REL,
+        freecode_models::CATALOG_REL,
+        freecode_models::ENGINE_LOCK_REL,
         found
             .iter()
             .map(|c| c.root.display().to_string())
@@ -249,7 +282,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         seeded(
             dir.path(),
-            &[smollm_models::CATALOG_REL, smollm_models::ENGINE_LOCK_REL],
+            &[
+                freecode_models::CATALOG_REL,
+                freecode_models::ENGINE_LOCK_REL,
+            ],
         );
         let found = root_from(override_to(dir.path()), vec![], None).unwrap();
         assert_eq!(found, dir.path());
@@ -258,7 +294,7 @@ mod tests {
     #[test]
     fn a_partial_override_is_refused_instead_of_falling_back() {
         let dir = tempfile::tempdir().unwrap();
-        seeded(dir.path(), &[smollm_models::CATALOG_REL]);
+        seeded(dir.path(), &[freecode_models::CATALOG_REL]);
         let err = root_from(override_to(dir.path()), vec![], None).unwrap_err();
         assert!(err.contains("engines/lock.toml"), "{err}");
     }
@@ -271,21 +307,21 @@ mod tests {
             "{} still has a hop the user cannot read",
             root.display()
         );
-        assert!(root.join(smollm_models::CATALOG_REL).is_file());
+        assert!(root.join(freecode_models::CATALOG_REL).is_file());
     }
 
     #[test]
     fn a_checkout_resolves_without_any_override() {
         let root = root_from(None, candidates(None), None)
             .expect("the repo root holds the contract files");
-        assert!(root.join(smollm_models::CATALOG_REL).is_file());
-        assert!(root.join(smollm_models::ENGINE_LOCK_REL).is_file());
+        assert!(root.join(freecode_models::CATALOG_REL).is_file());
+        assert!(root.join(freecode_models::ENGINE_LOCK_REL).is_file());
     }
 
     #[test]
     fn a_picked_folder_becomes_the_project_root() {
         let chosen = tempfile::tempdir().unwrap();
-        let mut settings = smollm_config::Settings::default();
+        let mut settings = freecode_config::Settings::default();
         settings.project.root = chosen.path().display().to_string();
         let root = project_root(None, &settings).unwrap();
         assert_eq!(root, chosen.path().canonicalize().unwrap());
@@ -293,9 +329,9 @@ mod tests {
 
     #[test]
     fn no_pick_keeps_the_root_the_host_resolved() {
-        let root = project_root(None, &smollm_config::Settings::default())
+        let root = project_root(None, &freecode_config::Settings::default())
             .expect("the checkout resolves without a pick");
-        assert!(root.join(smollm_models::CATALOG_REL).is_file());
+        assert!(root.join(freecode_models::CATALOG_REL).is_file());
     }
 
     /// A chosen folder that has moved must not quietly send the run to the app's own directory: the
@@ -304,7 +340,7 @@ mod tests {
     fn a_vanished_pick_is_refused_instead_of_falling_back() {
         let chosen = tempfile::tempdir().unwrap();
         let path = chosen.path().join("gone");
-        let mut settings = smollm_config::Settings::default();
+        let mut settings = freecode_config::Settings::default();
         settings.project.root = path.display().to_string();
         let why = project_root(None, &settings).unwrap_err();
         assert!(why.contains(&path.display().to_string()), "{why}");
@@ -313,7 +349,7 @@ mod tests {
 
     #[test]
     fn a_relative_pick_is_refused_because_a_bundle_starts_elsewhere() {
-        let mut settings = smollm_config::Settings::default();
+        let mut settings = freecode_config::Settings::default();
         settings.project.root = "my-project".into();
         let why = project_root(None, &settings).unwrap_err();
         assert!(why.contains("absolute"), "{why}");
@@ -322,7 +358,7 @@ mod tests {
     #[test]
     fn a_file_is_not_a_folder_the_run_can_work_in() {
         let file = tempfile::NamedTempFile::new().unwrap();
-        let mut settings = smollm_config::Settings::default();
+        let mut settings = freecode_config::Settings::default();
         settings.project.root = file.path().display().to_string();
         let why = project_root(None, &settings).unwrap_err();
         assert!(why.contains("not a folder"), "{why}");
@@ -378,10 +414,14 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         // A previous version's mirror, already in place.
         std::fs::create_dir_all(data.path().join("catalog")).unwrap();
-        std::fs::write(data.path().join(smollm_models::CATALOG_REL), "version 1").unwrap();
+        std::fs::write(data.path().join(freecode_models::CATALOG_REL), "version 1").unwrap();
 
-        let upgrade = data.path().join(smollm_models::CATALOG_REL);
-        std::fs::write(bundle.path().join(smollm_models::CATALOG_REL), "version 2").unwrap();
+        let upgrade = data.path().join(freecode_models::CATALOG_REL);
+        std::fs::write(
+            bundle.path().join(freecode_models::CATALOG_REL),
+            "version 2",
+        )
+        .unwrap();
         root_from(
             None,
             vec![bundled(bundle.path())],
@@ -403,7 +443,54 @@ mod tests {
     fn a_tree_without_contract_files_is_still_reported_by_every_place_searched() {
         let empty = tempfile::tempdir().unwrap();
         let err = root_from(None, vec![checkout(empty.path())], None).unwrap_err();
-        assert!(err.contains(smollm_models::CATALOG_REL), "{err}");
+        assert!(err.contains(freecode_models::CATALOG_REL), "{err}");
         assert!(err.contains(&empty.path().display().to_string()), "{err}");
+    }
+
+    /// The rename must not look like a first launch: the settings and the conversations written
+    /// under the previous name arrive with the directory.
+    #[test]
+    fn the_previous_names_directory_moves_with_its_contents() {
+        let container = tempfile::tempdir().unwrap();
+        let old = container.path().join("smollm-studio");
+        let new = container.path().join("freecode");
+        std::fs::create_dir_all(old.join("sessions")).unwrap();
+        std::fs::write(old.join("settings.json"), "{}").unwrap();
+
+        migrate_dir(&old, &new).unwrap();
+
+        assert!(!old.exists());
+        assert!(new.join("settings.json").is_file());
+        assert!(new.join("sessions").is_dir());
+    }
+
+    /// A directory already under the new name is the truth; the old one is left where it is rather
+    /// than merged into it behind the user's back.
+    #[test]
+    fn a_new_directory_is_never_replaced_by_the_old_one() {
+        let container = tempfile::tempdir().unwrap();
+        let old = container.path().join("smollm-studio");
+        let new = container.path().join("freecode");
+        std::fs::create_dir_all(old.join("sessions")).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+
+        migrate_dir(&old, &new).unwrap();
+
+        assert!(old.join("sessions").is_dir());
+        assert!(new.is_dir());
+    }
+
+    #[test]
+    fn a_machine_that_never_ran_the_old_name_has_nothing_to_move() {
+        let container = tempfile::tempdir().unwrap();
+        let old = container.path().join("smollm-studio");
+        let new = container.path().join("freecode");
+
+        migrate_dir(&old, &new).unwrap();
+
+        assert!(
+            !new.exists(),
+            "a migration must not invent a data directory"
+        );
     }
 }

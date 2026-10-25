@@ -1,0 +1,27 @@
+[package]
+name = "freecode-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent tool registry: JSON schemas, permission classes, the workspace sandbox and the read-only executors"
+
+[dependencies]
+freecode-config = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+glob = { workspace = true }
+regex = { workspace = true }
+walkdir = { workspace = true }
+# The two web tools. `blocking` because every executor here is a synchronous function the loop runs on
+# the blocking pool, and the plain async client would need a runtime of this crate's own to drive.
+# Already in the tree through the host's downloader, so this adds an edge rather than a package.
+reqwest = { workspace = true, features = ["blocking"] }
+
+[target.'cfg(unix)'.dependencies]
+# Killing a command's whole process group on timeout; `std` can signal the child only.
+libc = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
