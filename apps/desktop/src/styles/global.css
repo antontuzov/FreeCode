@@ -1076,6 +1076,271 @@ select.field-input {
   color: var(--text-muted);
 }
 
+/* ---- the main shell ----------------------------------------------------------------------
+ * The chat window answers in the same terminal-like voice Settings set, but the scope is each piece
+ * of chrome rather than `.app-shell` itself: a model's answer inherits the interface font the
+ * Appearance page picks, and painting mono on the root would take that choice away from the one
+ * surface it was made for. */
+.app-sidebar,
+.app-header,
+.app-status,
+.app-composer {
+  font-family: var(--font-family-code);
+  letter-spacing: -0.015em;
+}
+
+.app-sidebar .nav-item {
+  min-height: 38px;
+  font-size: var(--size-ui);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.app-sidebar .nav-item.indent {
+  min-height: 32px;
+  font-size: var(--size-quiet);
+  font-weight: 550;
+}
+.app-sidebar .section-label {
+  padding-top: var(--space-5);
+  color: var(--text-muted);
+  font-size: var(--size-micro);
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.app-sidebar .pill {
+  padding: 5px var(--space-3);
+  font-size: var(--size-fine);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.app-sidebar .icon-btn {
+  border-radius: 8px;
+}
+
+.app-header .app-title {
+  font-size: calc(var(--font-ui) + 1px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+.app-header .icon-btn {
+  border-radius: 8px;
+}
+
+.app-empty > p:first-of-type {
+  font-size: calc(var(--font-ui) + 8px);
+  font-weight: 750;
+  letter-spacing: -0.055em;
+}
+.app-empty > p:last-of-type {
+  max-width: 420px;
+  line-height: 1.55;
+}
+
+.app-composer-box {
+  border-radius: 16px;
+}
+.app-composer-field {
+  font-family: var(--font-family-ui);
+  letter-spacing: normal;
+}
+.app-composer-actions {
+  font-size: var(--size-fine);
+}
+.app-composer-actions .icon-btn {
+  border-radius: 8px;
+}
+
+.app-status {
+  font-size: var(--size-micro);
+  font-weight: 550;
+}
+.app-status > span:first-child {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Settings has the reference's terminal-like voice without forcing the transcript into mono. */
+.settings-shell {
+  font-family: var(--font-family-code);
+  letter-spacing: -0.015em;
+}
+.settings-nav-title {
+  margin: var(--space-2) 0 var(--space-4);
+  color: var(--text-strong);
+  font-size: calc(var(--font-ui) + 10px);
+  font-weight: 750;
+  letter-spacing: -0.045em;
+  line-height: 1.1;
+}
+.settings-profile {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--size-ui);
+  font-weight: 600;
+  text-align: left;
+}
+.settings-profile > span {
+  flex: 1;
+}
+.settings-profile:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.settings-search {
+  height: 40px;
+  background: var(--bg-elevated);
+}
+.settings-shell .settings-back {
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-inline: var(--space-2);
+  font-size: var(--size-fine);
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* The row starts after the traffic lights, which leaves it narrower than the column: the label gives
+ * way before the shortcut chip does, and the row never grows to two lines. */
+.settings-back > span:first-child > svg {
+  flex-shrink: 0;
+}
+.settings-back .kbd {
+  height: 24px;
+  color: var(--text-muted);
+  font-size: var(--size-micro);
+}
+.settings-shell .nav-item {
+  min-height: 40px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  font-weight: 550;
+}
+.settings-shell .nav-item[data-active="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+.settings-shell .nav-item[data-active="true"] > svg {
+  color: var(--accent-ink);
+}
+.settings-shell .section-label {
+  padding-top: var(--space-6);
+  color: var(--text-muted);
+  font-size: var(--size-micro);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.settings-version {
+  padding: var(--space-4);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--size-fine);
+  text-align: right;
+}
+.settings-page-title {
+  color: var(--accent-ink);
+  font-size: calc(var(--font-ui) + 14px);
+  font-weight: 750;
+  letter-spacing: -0.05em;
+  line-height: 1.12;
+}
+.settings-page-description {
+  max-width: 72ch;
+  font-size: var(--size-quiet);
+  line-height: 1.5;
+}
+.settings-shell .settings-tabs {
+  width: max-content;
+  gap: var(--space-6);
+  margin-top: var(--space-4);
+  margin-bottom: 32px;
+}
+.settings-shell .settings-tab {
+  font-size: var(--size-ui);
+  font-weight: 600;
+}
+.settings-section {
+  margin-bottom: 32px;
+}
+.settings-section-title {
+  color: var(--text-muted);
+  font-size: var(--size-micro);
+  font-weight: 750;
+  letter-spacing: 0.09em;
+}
+.settings-section-description {
+  max-width: 82ch;
+  font-size: var(--size-quiet);
+  line-height: 1.5;
+}
+.settings-shell .card {
+  border-radius: 16px;
+  background: var(--bg-elevated);
+}
+.settings-shell .card.surface {
+  border-color: var(--surface-border);
+  background: var(--surface-bg);
+}
+/* The rows are separated by solid hairlines, and the last row keeps none. The width and colour are
+ * part of this rule rather than only the style: `border-bottom: none` on the last row resets both to
+ * their initial values — `medium`, which is 3px, and `currentColor` — so a style-only override would
+ * paint a thick dark bar across the bottom of every card. */
+.settings-shell .card-row {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.settings-shell .card-row:last-child {
+  border-bottom: none;
+}
+.settings-shell .row-copy {
+  gap: 3px;
+}
+.settings-shell .row-title {
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+.settings-shell .row-desc {
+  max-width: 68ch;
+  line-height: 1.45;
+}
+.settings-shell .field {
+  height: 40px;
+  font-size: var(--size-quiet);
+}
+.settings-shell .theme-tile {
+  min-height: 58px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: 12px;
+  font-size: var(--size-ui);
+  font-weight: 600;
+}
+.settings-shell .theme-dot {
+  width: 13px;
+  height: 13px;
+}
+.settings-shell .theme-tile[data-selected="true"],
+.settings-shell .preset-card[data-selected="true"] {
+  font-weight: 700;
+}
+.settings-shell .preset-name {
+  font-weight: 650;
+}
+.settings-shell .accent-swatch {
+  width: 36px;
+  height: 36px;
+}
+.settings-shell .toggle {
+  border: 1px solid var(--border-strong);
+}
+.settings-shell .type-preview {
+  letter-spacing: normal;
+}
+
 /* Each tile and swatch paints its own style: `--preview` is the action colour the dots wear,
  * `--preview-chrome` is the wash the grounds are mixed from, `--swatch` is the round accent and
  * `--swatch-ink` the label colour measured against it. */

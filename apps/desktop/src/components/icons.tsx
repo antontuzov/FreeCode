@@ -122,6 +122,8 @@ const PATHS = {
   sliders:
     "M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2M16 6a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM10 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM18 18a2 2 0 1 0-4 0 2 2 0 0 0 4 0z",
   wand: "M15 4V2M15 10V8M12.5 6h-2M18.5 6h-2M5 20l9-9M13.5 7.5 16.5 10.5",
+  palette:
+    "M12 3a9 9 0 1 0 0 18h1.5a2 2 0 0 0 0-4H12a2 2 0 0 1 0-4h6a3 3 0 0 0 3-3c0-4-4-7-9-7zM7.5 10h.01M9 6.5h.01M14 6.5h.01M17 9h.01",
   shield: "M12 3 4 6v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V6z",
   cube: "M12 2 3 7v10l9 5 9-5V7zM3 7l9 5 9-5M12 12v10",
   // The provider on the other side of the network: a ring with a meridian, not a filled planet, so it

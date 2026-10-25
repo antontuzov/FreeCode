@@ -113,7 +113,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   };
 
   return (
-    <div className="shrink-0 px-[var(--space-6)] pb-[var(--space-3)]">
+    <div className="app-composer shrink-0 px-[var(--space-6)] pb-[var(--space-3)]">
       {(runRounds || runDiff) && (
         // What the run has spent and what it cost, on the line above the box it spent them in. The
         // step pill counts the loop's rounds against the budget the host announced, so a long agent
@@ -177,7 +177,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           )}
         </div>
       )}
-      <div className="mx-auto w-full max-w-[var(--content-width)] rounded-[var(--radius-lg)] border border-line bg-elevated shadow-raised transition-colors focus-within:border-accent-line">
+      <div className="app-composer-box mx-auto w-full max-w-[var(--content-width)] rounded-[var(--radius-lg)] border border-line bg-elevated shadow-raised transition-colors focus-within:border-accent-line">
         <label className="sr-only" htmlFor="composer-input">
           {translate(locale, "composer.placeholder")}
         </label>
@@ -194,7 +194,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           }}
           rows={2}
           placeholder={translate(locale, "composer.placeholder")}
-          className="w-full resize-none bg-transparent px-[var(--space-4)] pt-[var(--space-3)] text-fg outline-none placeholder:text-faint"
+          className="app-composer-field w-full resize-none bg-transparent px-[var(--space-4)] pt-[var(--space-3)] text-fg outline-none placeholder:text-faint"
         />
         {error && (
           <p role="alert" className="px-[var(--space-4)] pb-1 text-fine text-danger">
@@ -226,7 +226,7 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
             </button>
           </div>
         )}
-        <div className="flex items-center gap-2 px-[var(--space-3)] pb-[var(--space-3)]">
+        <div className="app-composer-actions flex items-center gap-2 px-[var(--space-3)] pb-[var(--space-3)]">
           {/* A plain file input, because the webview answers one with the native open panel — no
               dialog plugin and no filesystem capability handed to the interface. Only a picture is
               asked for: the engine reads images, and nothing else has a path to an answer. */}

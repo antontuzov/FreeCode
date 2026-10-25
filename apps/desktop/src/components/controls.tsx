@@ -17,9 +17,13 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="mb-[var(--space-6)]">
-      <h2 className="text-quiet uppercase tracking-[0.08em] text-muted">{label}</h2>
-      {description && <p className="mt-1 text-quiet text-muted">{description}</p>}
+    <section className="settings-section mb-[var(--space-6)]">
+      <h2 className="settings-section-title text-quiet uppercase tracking-[0.08em] text-muted">
+        {label}
+      </h2>
+      {description && (
+        <p className="settings-section-description mt-1 text-quiet text-muted">{description}</p>
+      )}
       <div className="card mt-[var(--space-3)]">{children}</div>
     </section>
   );

@@ -1,7 +1,7 @@
 // Settings, laid out control-for-control against docs/reference-ui/01-03: a searchable grouped nav
 // on the left, and one page of labelled cards on the right. Every row here binds to a field the
 // host actually persists — a setting with no storage is not rendered.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   AccentSwatch,
@@ -19,8 +19,9 @@ import {
   Toggle,
 } from "./controls";
 import { Icon, type IconName } from "./icons";
-import { MASCOT_TILES, launchTile } from "./BrandMark";
+import { MASCOT_TILES, MascotMark, launchTile } from "./BrandMark";
 import { has, translate, type Locale } from "../i18n";
+import { version } from "../../package.json";
 import { formatBytes, formatMemory } from "../lib/bytes";
 import {
   ipc,
@@ -55,8 +56,8 @@ const GROUPS: { key: string; label?: boolean; items: { id: Page; icon: IconName 
     // a heading over the first list would push four items down to say what they already are.
     label: false,
     items: [
-      { id: "appearance", icon: "wand" },
-      { id: "voice", icon: "voice" },
+      { id: "appearance", icon: "palette" },
+      { id: "voice", icon: "mic" },
       // Not the sidebar's `automations`, which this page borrows nothing from: what is set here is
       // what the agent may do to the machine, so the glyph is the one that means a boundary.
       { id: "agent", icon: "shield" },
@@ -213,6 +214,11 @@ const UI_ROWS = new Set([
   "terminalTheme",
   "builtInBrowser",
   "fileIcons",
+  "sidebarLive",
+  "sidebarConfirm",
+  "observer",
+  "observerResolved",
+  "observerModel",
 ]);
 
 const tabOf = (stem: string): TabId => (UI_ROWS.has(stem) ? "ui" : "theme");
@@ -267,6 +273,15 @@ export function Settings({
     void load();
   }, [load]);
 
+  // A page opens at its title. The rows only exist once the settings document has arrived, so the
+  // reset runs again on `doc` — a scroll held from a previous page would otherwise land in the middle
+  // of a column that was short when it was measured.
+  useLayoutEffect(() => {
+    const box = body.current;
+    if (!box || jump?.page === active) return;
+    box.scrollTop = 0;
+  }, [active, tab, jump, doc]);
+
   useEffect(() => {
     if (!jump || jump.page !== active) return;
     // Read off the rendered title rather than from an id every row would have to carry: the row the
@@ -309,29 +324,44 @@ export function Settings({
   })).filter((g) => g.items.length > 0);
 
   return (
-    <div className="relative flex h-full min-h-0 bg-bg text-fg">
+    <div className="settings-shell relative flex h-full min-h-0 bg-bg text-fg">
       <nav
         aria-label={t("title")}
-        className="flex h-full w-[var(--inspector-width)] shrink-0 flex-col border-r border-line bg-panel"
+        className="settings-nav flex h-full w-[var(--sidebar-width)] shrink-0 flex-col border-r border-line bg-panel"
       >
         <div
-          className="pt-[var(--space-3)] pb-1 pr-[var(--space-3)]"
+          className="pt-[var(--space-3)] pr-[var(--space-2)]"
           style={{ paddingLeft: "max(var(--space-4), var(--traffic-light-inset))" }}
         >
           <button
             type="button"
             title={shortcutLabel("escape")}
-            className="nav-item"
+            className="nav-item settings-back"
             onClick={onBack}
           >
-            <Icon name="back" />
-            <span>{t("back")}</span>
+            <span className="flex min-w-0 items-center gap-[var(--space-2)]">
+              <Icon name="back" />
+              <span className="truncate">{t("back")}</span>
+            </span>
+            <kbd className="kbd">ESC</kbd>
           </button>
         </div>
 
-        <div className="px-[var(--space-3)] pb-[var(--space-2)]">
-          <label className="field w-full">
-            <Icon name="search" size={14} />
+        <div className="px-[var(--space-4)] pb-[var(--space-4)] pt-[var(--space-3)]">
+          <h2 className="settings-nav-title">{t("title")}</h2>
+          <button
+            type="button"
+            className="settings-profile"
+            disabled
+            title={t("profile.single")}
+            aria-label={`${t("profile.name")} — ${t("profile.single")}`}
+          >
+            <MascotMark size={28} />
+            <span>{t("profile.name")}</span>
+            <Icon name="chevronDown" size={14} />
+          </button>
+          <label className="field settings-search w-full">
+            <Icon name="search" size={15} />
             <input
               className="field-input"
               type="search"
@@ -363,7 +393,7 @@ export function Settings({
                       className="nav-item"
                       onClick={() => onOpen(item.id)}
                     >
-                      <Icon name={item.icon} />
+                      <Icon name={item.icon} size={17} />
                       <span className="truncate">{t(`nav.${item.id}`)}</span>
                     </button>
                     {item.hits.map((k) => {
@@ -391,12 +421,13 @@ export function Settings({
             ))
           )}
         </div>
+        <div className="settings-version">{version}</div>
       </nav>
 
-      <main ref={body} className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[980px] px-[var(--space-6)] py-[var(--space-6)]">
-          <h1 className="text-page font-semibold text-fg-strong">{t(`nav.${active}`)}</h1>
-          <p className="mt-1 text-muted">{t(`about.${active}`)}</p>
+      <main ref={body} className="settings-main min-w-0 flex-1 overflow-y-auto">
+        <div className="settings-content mx-auto w-full max-w-[920px] px-[var(--space-6)] py-[var(--space-6)]">
+          <h1 className="settings-page-title">{t(`nav.${active}`)}</h1>
+          <p className="settings-page-description mt-1 text-muted">{t(`about.${active}`)}</p>
 
           {error && (
             <p

@@ -81,7 +81,7 @@ export function StatusBar({ locale }: { locale: Locale }) {
   const used = contextUsed;
 
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-line bg-bg px-[var(--space-4)] text-fine text-muted">
+    <footer className="app-status flex h-8 shrink-0 items-center gap-3 border-t border-line bg-bg px-[var(--space-4)] text-fine text-muted">
       <span className="flex items-center gap-1.5">
         <Icon name="monitor" size={13} />
         {badge}

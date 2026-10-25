@@ -287,7 +287,7 @@ export default function App() {
 
   return (
     <>
-      <div className="flex h-full flex-col bg-bg text-fg">
+      <div className="app-shell flex h-full flex-col bg-bg text-fg">
         <div className="flex min-h-0 flex-1">
           <Sidebar
             locale={locale}

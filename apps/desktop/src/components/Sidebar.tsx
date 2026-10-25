@@ -248,7 +248,7 @@ export function Sidebar({
     return (
       <nav
         aria-label={translate(locale, "sidebar.workspaces")}
-        className="flex h-full w-[var(--sidebar-rail-width)] shrink-0 flex-col items-center gap-1 border-r border-line bg-panel pt-[var(--traffic-light-clear)] pb-[var(--space-3)]"
+        className="app-sidebar flex h-full w-[var(--sidebar-rail-width)] shrink-0 flex-col items-center gap-1 border-r border-line bg-panel pt-[var(--traffic-light-clear)] pb-[var(--space-3)]"
       >
         <button
           type="button"
@@ -307,7 +307,7 @@ export function Sidebar({
   return (
     <nav
       aria-label={translate(locale, "sidebar.workspaces")}
-      className="flex h-full w-[var(--sidebar-width)] shrink-0 flex-col border-r border-line bg-panel"
+      className="app-sidebar flex h-full w-[var(--sidebar-width)] shrink-0 flex-col border-r border-line bg-panel"
     >
       {/* The traffic lights own the window's top-left, so the row starts clear of them sideways and
           sits on their centre line: this band is the titlebar's, and the reference draws the toggle

@@ -659,7 +659,7 @@ export function Transcript({
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <header
-        className={`flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b border-line px-[var(--space-4)] ${
+        className={`app-header flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b border-line px-[var(--space-4)] ${
           rail ? "clears-traffic-lights" : ""
         }`}
       >
@@ -667,7 +667,7 @@ export function Transcript({
             forward, search — stand here instead, clear of the traffic lights by the same padding. */}
         {rail && <NavSteps locale={locale} onOpenPalette={onOpenPalette} />}
         <h1
-          className="min-w-0 flex-1 truncate text-ui font-medium text-fg"
+          className="app-title min-w-0 flex-1 truncate text-ui font-medium text-fg"
           title={heading ?? undefined}
         >
           {heading}
@@ -694,7 +694,7 @@ export function Transcript({
             // the mascot, one of the drawn tiles picked once per run. A tile is a raster and
             // takes no accent, which is why it is the picture above the name rather than the mark
             // beside it: that one is still drawn, so the name reads in all eight theme combinations.
-            <div className="flex flex-col items-center gap-2 pt-[var(--space-6)] text-accent-ink">
+            <div className="app-empty flex flex-col items-center gap-2 pt-[var(--space-6)] text-accent-ink">
               <MascotMark />
               <p className="flex items-center gap-2 text-ui font-medium text-fg-strong">
                 <BrandMark size={18} />
