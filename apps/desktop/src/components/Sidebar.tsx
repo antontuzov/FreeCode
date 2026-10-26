@@ -55,7 +55,7 @@ const PLACES: NavRow[] = [
  * under — the rail only carries what this build answers. */
 const RAIL_ROWS = [...PRIMARY, ...PLACES].filter((r) => r.onActivate && !r.placeholder);
 
-type Conversation = {
+export type Conversation = {
   /** null for a row that only exists to show the layout: the fixture's tasks have no conversation to
    * reopen, and a row that looks clickable and is not is the failure this build already fixed once. */
   id: string | null;
@@ -270,6 +270,92 @@ function TaskMenu({
   );
 }
 
+/** Everything the nine presses read about the row and the window, taken in rather than closed over.
+ *
+ * The builder is a plain function of this for the same reason the row model is: which press runs and
+ * which one refuses is the part of this menu with a judgement behind it — four of the nine say no, and
+ * what makes them say no is not visible from the panel — so it has to be assertable without a screen.
+ */
+export type PressInput = {
+  conversation: Conversation;
+  /** The locale's own words, so a test can see which key a row prints rather than its English. */
+  t: (key: string) => string;
+  /** The sentence this build has for a control it has nothing behind. */
+  notInBuild: string;
+  /** The conversation on screen is mid-reply: its transcript is being written, and deleting the row
+   * underneath a running reply would take the file out from under the turn filing into it. */
+  busy: boolean;
+  /** Whether delete has already been pressed once in this menu. */
+  armed: boolean;
+  /** What the copy press answered with, or `null` before it was pressed. */
+  copied: boolean | null;
+  onCopy: (id: string) => void;
+  onRename: (id: string, from: string) => void;
+  onExport: (id: string) => void;
+  onPin: (id: string) => void;
+  onDelete: (id: string) => void;
+};
+
+/**
+ * The presses the reference's menu draws, and what this build runs behind each of them.
+ *
+ * Four of the nine are the reference's own rows with nothing behind them here, and they stay on screen
+ * saying so: the window is one conversation deep (the host holds a single history), the groups are
+ * derived from the folder a run worked in rather than sorted by hand, and nothing arrives for a row to
+ * be unread. Their presses are the layout's contract; their refusal is the honest part.
+ */
+export function taskPresses({
+  conversation,
+  t,
+  notInBuild,
+  busy,
+  armed,
+  copied,
+  onCopy,
+  onRename,
+  onExport,
+  onPin,
+  onDelete,
+}: PressInput): Press[] {
+  const id = conversation.id ?? "";
+  return [
+    { id: "window", icon: "sites", label: t("task.openWindow"), refuse: notInBuild },
+    {
+      id: "copy",
+      icon: "copy",
+      label: t("task.copyId"),
+      value: copied === null ? undefined : t(copied ? "task.copied" : "task.copyFailed"),
+      run: () => onCopy(id),
+    },
+    {
+      id: "rename",
+      icon: "editFile",
+      label: t("task.rename"),
+      run: () => onRename(id, conversation.title),
+    },
+    { id: "export", icon: "download", label: t("task.export"), run: () => onExport(id) },
+    {
+      id: "pin",
+      icon: "pin",
+      label: t(conversation.pinned ? "task.unpin" : "task.pin"),
+      value: conversation.pinned ? t("task.pinned") : undefined,
+      run: () => onPin(id),
+    },
+    { id: "group", icon: "workspace", label: t("task.group"), chevron: true, refuse: notInBuild },
+    { id: "unread", icon: "mail", label: t("task.unread"), refuse: notInBuild },
+    { id: "side", icon: "fork", label: t("task.sideTask"), refuse: notInBuild },
+    {
+      id: "delete",
+      icon: "trash",
+      label: t(busy ? "sidebar.delete.busy" : armed ? "sidebar.deleteAgain" : "sidebar.delete"),
+      danger: true,
+      // A reply is writing this conversation's file; the press waits for it rather than arming.
+      refuse: busy ? t("sidebar.delete.busy") : undefined,
+      run: () => onDelete(id),
+    },
+  ];
+}
+
 export type SidebarActions = {
   /** Forget the conversation and keep the server: the one row this build can honour. */
   newTask: () => void;
@@ -439,67 +525,28 @@ export function Sidebar({
     void remove(id);
   };
 
-  /** The presses the reference's menu draws, and what this build runs behind each of them.
-   *
-   * Four of the nine are the reference's own rows with nothing behind them here, and they stay on
-   * screen saying so: the window is one conversation deep (the host holds a single history), the
-   * groups are derived from the folder a run worked in rather than sorted by hand, and nothing arrives
-   * for a row to be unread. Their presses are the layout's contract; their refusal is the honest part.
-   */
-  const presses = (c: Conversation): Press[] => {
-    const busy = c.id !== null && c.id === activeId && running;
-    return [
-      { id: "window", icon: "sites", label: t("task.openWindow"), refuse: notInBuild },
-      {
-        id: "copy",
-        icon: "copy",
-        label: t("task.copyId"),
-        value: copied === null ? undefined : t(copied ? "task.copied" : "task.copyFailed"),
-        run: () => copyId(c.id ?? ""),
+  /** The panel's presses, built by the same function the tests assert against. */
+  const presses = (c: Conversation): Press[] =>
+    taskPresses({
+      conversation: c,
+      t,
+      notInBuild,
+      busy: c.id !== null && c.id === activeId && running,
+      armed: armed === c.id,
+      copied,
+      onCopy: copyId,
+      onRename: startRename,
+      onExport: (id) => {
+        closeMenu();
+        // The host asks where to put the document, and a cancelled chooser answers with nothing.
+        if (id) void exportTo(id);
       },
-      {
-        id: "rename",
-        icon: "editFile",
-        label: t("task.rename"),
-        run: () => startRename(c.id ?? "", c.title),
+      onPin: (id) => {
+        closeMenu();
+        if (id) void togglePinned(id);
       },
-      {
-        id: "export",
-        icon: "download",
-        label: t("task.export"),
-        run: () => {
-          const id = c.id;
-          closeMenu();
-          // The host asks where to put the document, and a cancelled chooser answers with nothing.
-          if (id) void exportTo(id);
-        },
-      },
-      {
-        id: "pin",
-        icon: "pin",
-        label: t(c.pinned ? "task.unpin" : "task.pin"),
-        value: c.pinned ? t("task.pinned") : undefined,
-        run: () => {
-          const id = c.id;
-          closeMenu();
-          if (id) void togglePinned(id);
-        },
-      },
-      { id: "group", icon: "workspace", label: t("task.group"), chevron: true, refuse: notInBuild },
-      { id: "unread", icon: "mail", label: t("task.unread"), refuse: notInBuild },
-      { id: "side", icon: "fork", label: t("task.sideTask"), refuse: notInBuild },
-      {
-        id: "delete",
-        icon: "trash",
-        label: t(
-          busy ? "sidebar.delete.busy" : armed === c.id ? "sidebar.deleteAgain" : "sidebar.delete",
-        ),
-        danger: true,
-        refuse: busy ? t("sidebar.delete.busy") : undefined,
-        run: () => pressDelete(c.id ?? ""),
-      },
-    ];
-  };
+      onDelete: pressDelete,
+    });
 
   const row = (r: NavRow) => (
     <Row
