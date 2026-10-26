@@ -893,6 +893,53 @@ select.field-input {
   margin: var(--space-1) var(--space-3);
   background: var(--border);
 }
+/* A conversation row's menu: one column of presses, opening below the row it belongs to and reaching
+ * past the sidebar's edge the reference's does. It is placed from the script rather than anchored to
+ * the column because the list it sits on scrolls, and a panel inside a scroll container is clipped by
+ * it — the rows at the bottom would get a menu cut in half. `fixed` against the viewport, with the
+ * coordinates the row's own rect gave, is the only place the whole panel can be drawn. */
+.menu-panel--row {
+  position: fixed;
+  top: auto;
+  right: 0;
+  bottom: auto;
+  left: auto;
+  z-index: 32;
+}
+/* The press that ends a conversation, in the colour the window already uses for what cannot be taken
+ * back. Its hover is the same colour washed into the row's own background rather than the neutral
+ * hover fill, so a press that is being confirmed does not look like any other press. */
+.menu-row--danger {
+  color: var(--danger);
+}
+.menu-row--danger:hover,
+.menu-row--danger:focus-visible {
+  background: color-mix(in oklab, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+/* A row this build has nothing behind. It stays on screen — the menu's shape is the reference's
+ * contract — and says so on hover, the same way the sidebar's placeholder rows do. */
+.menu-row--inert {
+  color: var(--text-faint);
+}
+.menu-row--inert:hover {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+/* The rename press does not open a dialog: the row's own name becomes the field, so the name being
+ * changed is the one on screen while it is being typed. `field-input` keeps it in the row's own
+ * typeface — an input in the browser default would make the label visibly jump when the press lands —
+ * and the outline is the same accent line a Settings field takes when it is live. */
+.rename-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-1);
+  outline: 1px solid var(--accent-line);
+}
+.rename-field:focus {
+  outline-color: var(--accent);
+}
 
 /* The eight theme tiles. Each paints the three colours it is made of through the `swatch-*` family
  * below: the action colour, the wash the chrome is mixed from, and the neutral ground. Selection is

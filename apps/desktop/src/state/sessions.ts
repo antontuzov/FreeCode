@@ -110,6 +110,12 @@ type SessionStore = {
   open: (id: string) => Promise<void>;
   /** Delete one's file, and the row with it. */
   remove: (id: string) => Promise<void>;
+  /** Rename one, and the row with it. */
+  rename: (id: string, title: string) => Promise<void>;
+  /** Hold one at the head of the list, or let it fall back into the order. */
+  togglePinned: (id: string) => Promise<void>;
+  /** Write one out as a markdown document to a path the host's chooser picked. */
+  exportTo: (id: string) => Promise<void>;
 };
 
 export const useSessions = create<SessionStore>((set, get) => ({
@@ -170,5 +176,50 @@ export const useSessions = create<SessionStore>((set, get) => ({
     useTranscript.getState().setRows([]);
     forgetRun();
     set({ activeId: null });
+  },
+  /**
+   * Name a conversation what the user calls it. The row is replaced in place rather than re-listed,
+   * because a rename is the one change to a conversation that cannot move it: the name is not a field
+   * the list sorts by, so the host's answer belongs exactly where the row already sits.
+   */
+  rename: async (id, title) => {
+    set({ error: null });
+    try {
+      const after = await ipc.renameSession(id, title);
+      set((s) => ({ items: s.items.map((item) => (item.id === id ? after : item)) }));
+    } catch (error) {
+      // The row keeps the name it had, because that is still the name the file holds.
+      set({ error: String(error) });
+    }
+  },
+  /**
+   * Pin a conversation, or let it go. The whole list is re-read here rather than the one row patched,
+   * because this is the change that moves the row and the order it moves into is the host's to decide
+   * — a local guess at where a pinned row belongs would be a second sort rule, free to drift from the
+   * first.
+   */
+  togglePinned: async (id) => {
+    set({ error: null });
+    const was = get().items.find((item) => item.id === id)?.pinned ?? false;
+    try {
+      await ipc.setSessionPinned(id, !was);
+    } catch (error) {
+      set({ error: String(error) });
+      return;
+    }
+    await get().refresh();
+  },
+  /**
+   * Write a conversation out as a document. A cancelled chooser is not a failure and the host says so
+   * by answering with nothing, so this says nothing either — the row stays as it was and the sidebar
+   * keeps quiet, which is what a change of mind should look like.
+   */
+  exportTo: async (id) => {
+    set({ error: null });
+    try {
+      await ipc.exportSession(id);
+    } catch (error) {
+      set({ error: String(error) });
+    }
   },
 }));

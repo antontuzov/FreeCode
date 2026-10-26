@@ -112,6 +112,17 @@ pub struct Session {
     /// ignores it and reopens the conversation as the exchange alone, which is what it did anyway.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rows: Vec<serde_json::Value>,
+    /// Whether the row holds its place at the head of the list whatever else happened.
+    ///
+    /// Additive like `rows`, and for the same reason: a build from before this field reads the file
+    /// fine and simply sorts the conversation where it always did. Nothing else about it changes —
+    /// a pinned conversation still files turns, still goes to the Trash when deleted, and stays
+    /// pinned when it does, so unpinning is not something a delete can do for you.
+    ///
+    /// Left out of the document entirely when it is `false`, so the files this build writes for an
+    /// ordinary conversation are byte for byte what the build before the field wrote.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pinned: bool,
     /// The OpenCode session this conversation continues in, when its turns are answered by the
     /// OpenCode app on this Mac. Stored so reopening the conversation tomorrow continues the same
     /// exchange instead of asking a fresh session what the window still shows. Additive for the same
@@ -130,6 +141,9 @@ pub struct Summary {
     pub model: String,
     pub updated_at_ms: u64,
     pub turn_count: usize,
+    /// Carried so the row can draw the pin it is filed with. The list is already sorted pinned-first,
+    /// so a row that does not show it would be pinned by a rule the sidebar hides.
+    pub pinned: bool,
 }
 
 impl From<&Session> for Summary {
@@ -141,6 +155,7 @@ impl From<&Session> for Summary {
             model: session.model.clone(),
             updated_at_ms: session.updated_at_ms,
             turn_count: session.turns.len(),
+            pinned: session.pinned,
         }
     }
 }
@@ -174,6 +189,7 @@ impl Session {
             updated_at_ms: now_ms(),
             turns: Vec::new(),
             rows: Vec::new(),
+            pinned: false,
             opencode_session: None,
         }
     }
@@ -212,6 +228,11 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|since| since.as_millis() as u64)
         .unwrap_or_default()
+}
+
+/// What `skip_serializing_if` wants for a flag whose absence means the same as `false`.
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// `pid` keeps two windows of the same checkout from minting the same id in the same millisecond;
@@ -317,6 +338,156 @@ pub fn read_in(dir: &Path, id: &str) -> Result<Session, String> {
 pub fn read(id: &str) -> Result<Session, String> {
     let dir = dir().ok_or("this platform gives the app no conversation directory")?;
     read_in(&dir, id)
+}
+
+/// Change what the window asks to change, and write the whole conversation back.
+///
+/// Read-modify-write rather than a text patch of the file, because the file *is* the record and a
+/// partial rewrite of it can leave a conversation that reads as nothing. What it costs is a re-encode
+/// of a few dozen kilobytes, which is what one click on a row is worth.
+///
+/// Deliberately not touching `updated_at_ms`: that field is what the list sorts by and what the row
+/// prints, so renaming a conversation from last month would otherwise move it to the top of the list
+/// and claim it happened now.
+fn revise(dir: &Path, id: &str, change: impl FnOnce(&mut Session)) -> Result<Summary, String> {
+    let mut session = read_in(dir, id)?;
+    change(&mut session);
+    write_in(dir, &session)?;
+    Ok(session.summary())
+}
+
+/// Name a conversation what the user calls it rather than the first sentence it began with.
+///
+/// The name sticks because nothing recomputes it: `Session::new` titles a conversation once and every
+/// later filing keeps the title the file already held. Not clipped to [`TITLE_MAX`] the way a
+/// generated one is — that limit exists so a pasted stack trace does not become a label nobody chose,
+/// and a name someone typed is a name they chose at exactly the length they chose it.
+pub fn rename_in(dir: &Path, id: &str, title: &str) -> Result<Summary, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("a conversation needs a name to show on its row".into());
+    }
+    let title = title.to_string();
+    revise(dir, id, move |session| session.title = title)
+}
+
+pub fn rename(id: &str, title: &str) -> Result<Summary, String> {
+    let dir = dir().ok_or("this platform gives the app no conversation directory")?;
+    rename_in(&dir, id, title)
+}
+
+/// Hold a conversation at the head of the list, or let it fall back into the newest-first order.
+pub fn set_pinned_in(dir: &Path, id: &str, pinned: bool) -> Result<Summary, String> {
+    revise(dir, id, move |session| session.pinned = pinned)
+}
+
+pub fn set_pinned(id: &str, pinned: bool) -> Result<Summary, String> {
+    let dir = dir().ok_or("this platform gives the app no conversation directory")?;
+    set_pinned_in(&dir, id, pinned)
+}
+
+/// The date a filing's wall-clock milliseconds fall on, in UTC, as `YYYY-MM-DD`.
+///
+/// The civil-from-days conversion is the standard one — the epoch shifted to a 1 March year so the
+/// leap day lands last — because this crate carries no calendar dependency, and an exported history
+/// with no date on it is a history that cannot be told apart from the next one.
+fn civil_from_epoch(ms: u64) -> (i64, u32, u32) {
+    let days = (ms / 86_400_000) as i64;
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
+}
+
+impl Session {
+    /// The conversation as a markdown document: its exchange in order, with the run's steps named
+    /// under the answer they belong to.
+    ///
+    /// The turns are what an export has to carry, because they are what the engine was told and what
+    /// it said back. The rows are listed as the one-line shape the transcript drew them in — the tool
+    /// a call ran and the path it touched — rather than re-rendered here, because a second copy of
+    /// the row model would be a second definition of it, and a picture's bytes stay out for the same
+    /// reason they stay out of a filed row: the turn already holds them.
+    pub fn markdown(&self) -> String {
+        let (year, month, day) = civil_from_epoch(self.updated_at_ms);
+        let mut out = String::new();
+        out.push_str(&format!("# {}\n\n", self.title));
+        out.push_str(&format!("- Workspace: {}\n", self.workspace));
+        out.push_str(&format!("- Model: {}\n", self.model));
+        out.push_str(&format!("- Last turn: {year:04}-{month:02}-{day:02}\n"));
+        out.push_str(&format!("- Turns: {}\n", self.turns.len()));
+        if self.pinned {
+            out.push_str("- Pinned\n");
+        }
+        for turn in &self.turns {
+            let who = match turn.role {
+                Role::User => "You",
+                Role::Assistant => "FreeCode",
+            };
+            out.push_str(&format!("\n## {who}\n\n{}\n", turn.text));
+            if turn.image.is_some() {
+                out.push_str("\n_(an image was attached to this prompt)_\n");
+            }
+        }
+        if !self.rows.is_empty() {
+            out.push_str("\n## What the runs did\n\n");
+            for row in &self.rows {
+                for line in step_lines(row, 0) {
+                    out.push_str(&line);
+                    out.push('\n');
+                }
+            }
+        }
+        out
+    }
+}
+
+/// One transcript row as lines of the export: a step's kind, the path or command it names, and what
+/// its diff left behind.
+///
+/// A turn row is the exchange and is already written above, so it is skipped here. A notice carries
+/// only a catalog code and its parameters, which are the interface's sentence rather than anything the
+/// run did, so it goes out as the code. The rows nest one deep — a batch header over the calls it
+/// folded — and `depth` is what indents the children under it.
+fn step_lines(row: &serde_json::Value, depth: usize) -> Vec<String> {
+    let Some(kind) = row.get("kind").and_then(serde_json::Value::as_str) else {
+        return Vec::new();
+    };
+    if kind == "turn" {
+        return Vec::new();
+    }
+    let pad = "  ".repeat(depth);
+    let named = ["subject", "detail"]
+        .iter()
+        .find_map(|key| row.get(*key).and_then(serde_json::Value::as_str));
+    let status = row.get("status").and_then(serde_json::Value::as_str);
+    let mut line = format!("{pad}- `{kind}`");
+    if let Some(named) = named {
+        line.push_str(&format!(" {named}"));
+    }
+    if let Some(status) = status.filter(|s| *s != "ok") {
+        line.push_str(&format!(" ({status})"));
+    }
+    if let Some(diff) = row.get("diff") {
+        let added = diff.get("added").and_then(serde_json::Value::as_u64);
+        let removed = diff.get("removed").and_then(serde_json::Value::as_u64);
+        if let (Some(added), Some(removed)) = (added, removed) {
+            line.push_str(&format!(" (+{added}/-{removed})"));
+        }
+    }
+    let mut lines = vec![line];
+    if let Some(children) = row.get("children").and_then(serde_json::Value::as_array) {
+        for child in children {
+            lines.extend(step_lines(child, depth + 1));
+        }
+    }
+    lines
 }
 
 /// Move one conversation's file into the Trash.
@@ -467,7 +638,15 @@ fn sessions_in(dir: &Path) -> Vec<Session> {
             found.push(session);
         }
     }
-    found.sort_by_key(|session| std::cmp::Reverse(session.updated_at_ms));
+    // Pinned first, then newest. The id breaks a tie so that two conversations filed in the same
+    // millisecond keep one order across two windows, rather than the order the directory was walked.
+    found.sort_by(|a, b| {
+        (!a.pinned, std::cmp::Reverse(&a.updated_at_ms), &a.id).cmp(&(
+            !b.pinned,
+            std::cmp::Reverse(&b.updated_at_ms),
+            &b.id,
+        ))
+    });
     found
 }
 
@@ -1007,5 +1186,141 @@ mod tests {
 
         assert_eq!(list_in(dir.path()).len(), 1);
         assert_eq!(search_in(dir.path(), "catalog pin").len(), 1);
+    }
+
+    #[test]
+    fn renaming_replaces_the_name_and_leaves_the_rest_of_the_record_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = session("why does the loop stop early");
+        let (id, turns, filed_at, workspace) = (
+            first.id.clone(),
+            first.turns.len(),
+            first.updated_at_ms,
+            first.workspace.clone(),
+        );
+        write_in(dir.path(), &first).unwrap();
+
+        let after = rename_in(dir.path(), &id, "Round budget").unwrap();
+
+        assert_eq!(after.title, "Round budget");
+        let read = read_in(dir.path(), &id).unwrap();
+        assert_eq!(read.title, "Round budget");
+        // The rename is a name, not a new conversation: the exchange, the folder and the moment it
+        // last happened all stay where the row said they were.
+        assert_eq!(read.turns.len(), turns);
+        assert_eq!(read.workspace, workspace);
+        assert_eq!(read.updated_at_ms, filed_at);
+    }
+
+    #[test]
+    fn a_name_of_nothing_is_refused_rather_than_a_row_with_no_label() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = session("kept");
+        write_in(dir.path(), &first).unwrap();
+        assert!(rename_in(dir.path(), &first.id, "   ").is_err());
+        assert_eq!(read_in(dir.path(), &first.id).unwrap().title, first.title);
+    }
+
+    #[test]
+    fn a_pinned_conversation_leads_the_list_however_new_the_rest_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut old = session("the old one");
+        old.updated_at_ms = 1_000;
+        let mut mid = session("the pinned one");
+        mid.updated_at_ms = 2_000;
+        mid.pinned = true;
+        let mut fresh = session("the newest one");
+        fresh.updated_at_ms = 3_000;
+        for session in [&old, &mid, &fresh] {
+            write_in(dir.path(), session).unwrap();
+        }
+
+        let titles: Vec<_> = list_in(dir.path()).into_iter().map(|s| s.title).collect();
+        assert_eq!(
+            titles,
+            vec!["the pinned one", "the newest one", "the old one"]
+        );
+
+        // Unpinning lets it fall back into the order rather than leaving it stranded at the top.
+        set_pinned_in(dir.path(), &mid.id, false).unwrap();
+        let titles: Vec<_> = list_in(dir.path()).into_iter().map(|s| s.title).collect();
+        assert_eq!(
+            titles,
+            vec!["the newest one", "the pinned one", "the old one"]
+        );
+    }
+
+    #[test]
+    fn pinning_does_not_claim_a_conversation_happened_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut first = session("kept");
+        first.updated_at_ms = 1_000;
+        write_in(dir.path(), &first).unwrap();
+
+        let after = set_pinned_in(dir.path(), &first.id, true).unwrap();
+        assert_eq!(after.updated_at_ms, 1_000);
+        assert!(after.pinned);
+    }
+
+    #[test]
+    fn a_file_from_before_the_pin_still_reads_and_starts_unpinned() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = session("kept");
+        write_in(dir.path(), &first).unwrap();
+        // The bytes a build from before the field wrote, which an unpinned conversation still is: no
+        // `pinned` key anywhere in the document.
+        let path = dir.path().join(format!("{}.json", first.id));
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("pinned"));
+        assert!(!read_in(dir.path(), &first.id).unwrap().pinned);
+
+        // The key appears the moment it means something, and a build that has never heard of it
+        // ignores an unknown field rather than failing to read the file.
+        set_pinned_in(dir.path(), &first.id, true).unwrap();
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("\"pinned\": true"));
+    }
+
+    #[test]
+    fn an_export_carries_the_exchange_in_order_and_the_steps_under_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut first = session("what pins the engine?");
+        first.set_rows(vec![
+            serde_json::json!({ "id": "t1", "kind": "turn", "role": "user", "text": "what pins the engine?" }),
+            serde_json::json!({
+                "id": "b1",
+                "kind": "toolBatch",
+                "children": [
+                    { "id": "s1", "kind": "readFile", "subject": "engine.rs", "status": "ok" },
+                    { "id": "s2", "kind": "editFile", "subject": "pin.rs", "status": "error", "diff": { "added": 7, "removed": 2 } }
+                ]
+            }),
+        ]);
+        write_in(dir.path(), &first).unwrap();
+
+        let body = read_in(dir.path(), &first.id).unwrap().markdown();
+
+        assert!(body.starts_with("# what pins the engine?\n"));
+        // Both sides, in the order they happened, under the names the window uses for them.
+        let asked = body.find("## You").unwrap();
+        let answered = body.find("## FreeCode").unwrap();
+        assert!(asked < answered);
+        assert!(body.contains("an answer"));
+        // A turn row is the exchange and is written above once, not again as a step.
+        assert_eq!(body.matches("## You").count(), 1);
+        // A batch's children are listed under it, and the one that failed says so with its counts.
+        assert!(body.contains("- `readFile` engine.rs"));
+        assert!(body.contains("  - `editFile` pin.rs (error) (+7/-2)"));
+    }
+
+    #[test]
+    fn a_filing_moment_becomes_the_utc_day_it_falls_on() {
+        // The epoch itself, and a date on either side of a leap day, so the 1 March era shift and the
+        // century rule are both answered rather than assumed.
+        assert_eq!(civil_from_epoch(0), (1970, 1, 1));
+        assert_eq!(civil_from_epoch(1_735_689_600_000), (2025, 1, 1));
+        assert_eq!(civil_from_epoch(1_709_164_800_000), (2024, 2, 29));
+        assert_eq!(civil_from_epoch(1_704_067_200_000), (2024, 1, 1));
     }
 }

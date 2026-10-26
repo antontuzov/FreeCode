@@ -612,6 +612,9 @@ export type Session = {
   updatedAtMs: number;
   turns: SessionTurn[];
   rows?: Row[];
+  /** Whether the row holds the head of the list whatever else happened. Absent on a conversation an
+   * older build filed, which is the same as not pinned. */
+  pinned?: boolean;
 };
 
 /** What a sidebar row needs, without every answer's text crossing the boundary to get it. */
@@ -962,6 +965,23 @@ export const ipc = {
    * because the run would file its answer back into the row that has just gone.
    */
   deleteSession: (id: string) => invoke<void>("delete_session", { id }),
+  /**
+   * Name a conversation what the user calls it rather than the first sentence it began with. The host
+   * changes the file and its own copy of it together, so the next answer does not write the old name
+   * back. Not refused mid-reply: nothing on screen changes, so the streaming answer still belongs to
+   * the conversation it is answering.
+   */
+  renameSession: (id: string, title: string) =>
+    invoke<SessionSummary>("rename_session", { id, title }),
+  /** Hold a conversation at the head of the list, or let it fall back into the newest-first order. */
+  setSessionPinned: (id: string, pinned: boolean) =>
+    invoke<SessionSummary>("set_session_pinned", { id, pinned }),
+  /**
+   * Write one filed conversation out as a markdown document, to a path the user picks in the dialog
+   * the host opens. The answer is the path written, or nothing when the chooser was cancelled — which
+   * is a decision rather than a failure, and the window should not say anything about it.
+   */
+  exportSession: (id: string) => invoke<string | null>("export_session", { id }),
   /**
    * File the transcript the window is holding over the conversation on screen, so a reopened one
    * comes back with the run's step rows and their hunks rather than only its sentences.

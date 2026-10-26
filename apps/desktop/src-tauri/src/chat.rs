@@ -34,6 +34,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 use freecode_config::{
     ApprovalMode, ModelSource, PackingChoice, ReasoningEffort, Settings, DEFAULT_SYSTEM_PROMPT,
@@ -2711,6 +2712,106 @@ pub async fn list_sessions() -> Result<Vec<sessions::Summary>, String> {
     Ok(sessions::list())
 }
 
+/// Name a conversation what the user calls it rather than the first sentence it began with.
+///
+/// Both copies change, because the window's is the one the next turn writes back: [`file_turn`]
+/// appends to the session it already holds rather than reading the file again, so a rename that only
+/// reached the disk would be overwritten by the next answer with the name the row just threw away.
+/// Not refused mid-reply the way opening one is — nothing on screen changes, so the streaming answer
+/// still belongs to the conversation it is answering.
+#[tauri::command]
+pub async fn rename_session(
+    app: AppHandle,
+    id: String,
+    title: String,
+) -> Result<sessions::Summary, String> {
+    let summary = sessions::rename(&id, &title)?;
+    let state = app.state::<ChatState>();
+    {
+        let mut cell = lock(&state.session);
+        if let Some(session) = cell.as_mut().filter(|session| session.id == id) {
+            session.title = summary.title.clone();
+        }
+    }
+    Ok(summary)
+}
+
+/// Hold a conversation at the head of the sidebar's list, or let it fall back into the order.
+///
+/// The same two copies for the same reason: the pin lives in the file, and the window holds the file.
+#[tauri::command]
+pub async fn set_session_pinned(
+    app: AppHandle,
+    id: String,
+    pinned: bool,
+) -> Result<sessions::Summary, String> {
+    let summary = sessions::set_pinned(&id, pinned)?;
+    let state = app.state::<ChatState>();
+    {
+        let mut cell = lock(&state.session);
+        if let Some(session) = cell.as_mut().filter(|session| session.id == id) {
+            session.pinned = pinned;
+        }
+    }
+    Ok(summary)
+}
+
+/// A conversation's name as a filename: the title with everything a path could read as structure
+/// taken out, and the id behind it so two conversations that share a short name still ask for
+/// different files.
+///
+/// The title is the user's own first sentence, so it can be `../../etc/passwd` or contain a
+/// separator, and this string is handed to the save dialog as the name it pre-fills. Only characters
+/// that cannot mean anything to a path survive, which is also what keeps a pasted stack trace from
+/// becoming one.
+fn suggested_stem(session: &Session) -> String {
+    let cleaned: String = session
+        .title
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .chars()
+        .take(48)
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        return session.id.clone();
+    }
+    format!("{cleaned}-{id}", id = session.id)
+}
+
+/// Write one filed conversation out as a markdown document, to a path the user picks.
+///
+/// Reads the file rather than the window's copy, because the file is the record: what has been filed
+/// is what comes out, and a run still in flight has not filed its answer yet. Nothing is written when
+/// the chooser is cancelled, and the answer is the path that was — `None` for a cancel, which is a
+/// decision rather than a failure.
+#[tauri::command]
+pub async fn export_session(app: AppHandle, id: String) -> Result<Option<String>, String> {
+    let session = sessions::read(&id)?;
+    let body = session.markdown();
+    let name = format!("{}.md", suggested_stem(&session));
+    let handle = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .dialog()
+            .file()
+            .set_file_name(name)
+            .add_filter("Markdown", &["md"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| format!("the save chooser stopped: {e}"))?;
+    let Some(path) = picked else { return Ok(None) };
+    let path = path
+        .into_path()
+        .map_err(|_| "the chosen name is not a path".to_string())?;
+    std::fs::write(&path, body).map_err(|e| format!("writing {} failed: {e}", path.display()))?;
+    Ok(Some(path.display().to_string()))
+}
+
 /// The filed conversations that say what the query says. What the palette lists.
 ///
 /// The search is the host's rather than the window's because the words it looks for are in the
@@ -3055,6 +3156,26 @@ mod tests {
         // And the next prompt opens its own file rather than appending to the one just left, or the
         // two conversations would be written over each other.
         assert!(lock(&state.session).is_none());
+    }
+
+    #[test]
+    fn a_conversation_named_by_a_path_cannot_ask_for_one() {
+        // The title is the user's own first sentence, and it pre-fills the save dialog, so a title
+        // that reads as a path must not become one. What survives is the words with the structure
+        // taken out, and the id behind them so two conversations sharing a name still differ.
+        let mut session = Session::new("freecode", "model", "../../../../etc/passwd");
+        let id = session.id.clone();
+        assert_eq!(suggested_stem(&session), format!("etcpasswd-{id}"));
+
+        session.title = String::new();
+        assert_eq!(suggested_stem(&session), id);
+
+        session.title = "Fix the loop".into();
+        assert_eq!(suggested_stem(&session), format!("Fix the loop-{id}"));
+
+        // A title is a suggestion to a dialog, not a document, so it is capped rather than kept whole.
+        session.title = "x".repeat(400);
+        assert_eq!(suggested_stem(&session).chars().count(), 48 + 1 + id.len());
     }
 
     /// A conversation filed in a scratch directory, so the host's own copy of it can be deleted here

@@ -765,6 +765,37 @@ mod tests {
     }
 
     #[test]
+    fn the_system_prompt_names_no_tool_a_run_could_not_be_offered() {
+        // The contract tells a small model which call to reach for, and a name it cannot answer is a
+        // round spent on a refusal — worse, a habit the model keeps trying. So the two lists are held
+        // against each other here rather than in someone's memory of what the prompt says.
+        for t in registry() {
+            if is_runnable(t.id) {
+                continue;
+            }
+            assert!(
+                !freecode_config::DEFAULT_SYSTEM_PROMPT.contains(t.id),
+                "the shipped contract tells a run to reach for {}, which nothing can execute",
+                t.id
+            );
+        }
+        // The reading end of the same rule: the calls the prompt leans on have to still be there.
+        for id in [
+            "read_file",
+            "edit_file",
+            "apply_patch",
+            "write_file",
+            "todo_write",
+        ] {
+            assert!(
+                freecode_config::DEFAULT_SYSTEM_PROMPT.contains(id),
+                "the contract no longer tells the model about {id}"
+            );
+            assert!(is_runnable(id), "{id} is gone from the offer");
+        }
+    }
+
+    #[test]
     fn network_tools_are_hidden_until_a_remote_provider_is_configured() {
         let offline = tool_specs(false);
         let online = tool_specs(true);

@@ -175,6 +175,23 @@ const PATHS = {
   warning:
     "M12 9v4M12 17h.01M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z",
   external: "M17 3h4v4M21 3l-9 9M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
+  /* The row's own menu. Drawn as three painted discs rather than three hairline strokes on the round
+     cap, because the cap is 1.7 units on a 24 grid and at the 13px this control renders at that is a
+     dot of ink a pixel wide — the reference's ⋯ is a mark you see without looking for it. */
+  more: "M7 12a1.5 1.5 0 1 1-3 0 1.5 1.5 0 1 1 3 0M13.5 12a1.5 1.5 0 1 1-3 0 1.5 1.5 0 1 1 3 0M20 12a1.5 1.5 0 1 1-3 0 1.5 1.5 0 1 1 3 0",
+  // A thumbtack: a head that flares to its base and the needle below it. Not a magnet or a star, which
+  // both say "favourite" — this says "this row does not move".
+  pin: "M8.5 3.5h7l-1 5.5 2.5 3h-10l2.5-3zM12 12v9",
+  // An envelope with its flap, for the row that has not been looked at. The flap is drawn to the box's
+  // own corners so the two read as one object at 14px rather than a V lying on a rectangle.
+  mail: "M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM3.5 7.5 12 13.5l8.5-6",
+  // Two tasks becoming one, then one becoming two again: the side task that branches off a
+  // conversation and merges back. Three discs and the elbows that join them.
+  fork: "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6M12 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9M12 12v3",
+  // A box with its lid as a separate band, and the slot the handle cuts. `trash` is the tapered can
+  // with slats; the archive is square and lidded so the pair never swap places at a glance.
+  archive:
+    "M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zM5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8M10 12h4",
 } as const;
 
 export type IconName = keyof typeof PATHS;
@@ -194,8 +211,12 @@ const DETAILS: Partial<Record<IconName, string>> = {
  * A brand mark is a silhouette, not line art, so it is painted rather than drawn: stroking a filled
  * path doubles its weight and turns a site's sign into a smudge at chip size. They still take
  * `currentColor`, which is what keeps a mark legible on every interface style.
+ *
+ * `more` joins them for a different reason: a stroked circle whose radius is smaller than half the
+ * stroke width closes up into a ring with no hole, and three of those at 13px read as one smudge.
+ * Painted, the three discs keep the air between them the reference's ⋯ is made of.
  */
-const SOLID = new Set<IconName>(["github", "huggingFace", "wikipedia"]);
+const SOLID = new Set<IconName>(["github", "huggingFace", "wikipedia", "more"]);
 
 /**
  * The two glyphs the reference cuts rather than draws. Its bolt ends in square tips and turns at

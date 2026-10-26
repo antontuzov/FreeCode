@@ -1,7 +1,8 @@
 // A filed conversation is the host's file read back into this window's row model. These tests hold
 // the join to its contract: ids are re-keyed so they cannot collide with a new run, pictures come
 // back from `turns` and only onto the row that earned them, and a delete that succeeds is the one
-// thing that empties the screen.
+// thing that empties the screen. The three presses the row's `⋯` menu adds each keep the same rule:
+// the list only changes when the host agrees it should, and only a pin is allowed to move a row.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ipc, type RunReport, type Session, type SessionSummary } from "../lib/ipc";
@@ -13,6 +14,9 @@ vi.mock("../lib/ipc", () => ({
     listSessions: vi.fn(),
     openSession: vi.fn(),
     deleteSession: vi.fn(),
+    renameSession: vi.fn(),
+    setSessionPinned: vi.fn(),
+    exportSession: vi.fn(),
   },
 }));
 
@@ -220,6 +224,72 @@ describe("deleting a conversation", () => {
     expect(useSessions.getState().activeId).toBe("a");
     expect(useTranscript.getState().rows).toBe(showing);
     expect(useSessions.getState().error).toContain("reply is streaming");
+  });
+});
+
+describe("naming, holding and writing out a conversation", () => {
+  it("puts the new name on the row without moving it, because a title is not a sort key", async () => {
+    useSessions.setState({ items: [summary("a"), summary("b"), summary("c")] });
+    mock.renameSession.mockResolvedValueOnce({ ...summary("b"), title: "Fix the loop" });
+
+    await useSessions.getState().rename("b", "Fix the loop");
+
+    expect(useSessions.getState().items.map((item) => item.title)).toEqual([
+      "a",
+      "Fix the loop",
+      "c",
+    ]);
+    expect(mock.renameSession).toHaveBeenCalledWith("b", "Fix the loop");
+    expect(useSessions.getState().error).toBeNull();
+  });
+
+  it("leaves the row's old name alone when the host refuses it, because that is still the file's", async () => {
+    useSessions.setState({ items: [summary("a")] });
+    mock.renameSession.mockRejectedValueOnce(new Error("a conversation needs a name"));
+
+    await useSessions.getState().rename("a", "   ");
+
+    expect(useSessions.getState().items.map((item) => item.title)).toEqual(["a"]);
+    expect(useSessions.getState().error).toContain("needs a name");
+  });
+
+  it("re-reads the whole list after a pin, because where the row goes is the host's decision", async () => {
+    useSessions.setState({ items: [summary("a"), summary("b")] });
+    mock.setSessionPinned.mockResolvedValueOnce({ ...summary("b"), pinned: true });
+    // The host's answer to the next list: the pinned row leads, however new the rest were.
+    mock.listSessions.mockResolvedValueOnce([{ ...summary("b"), pinned: true }, summary("a")]);
+
+    await useSessions.getState().togglePinned("b");
+
+    expect(mock.setSessionPinned).toHaveBeenCalledWith("b", true);
+    expect(useSessions.getState().items.map((item) => item.id)).toEqual(["b", "a"]);
+  });
+
+  it("lets go of a pinned row, and never re-lists one the host refused to change", async () => {
+    useSessions.setState({ items: [{ ...summary("a"), pinned: true }] });
+    mock.setSessionPinned.mockResolvedValueOnce({ ...summary("a"), pinned: false });
+    mock.listSessions.mockResolvedValueOnce([summary("a")]);
+    await useSessions.getState().togglePinned("a");
+    expect(mock.setSessionPinned).toHaveBeenLastCalledWith("a", false);
+
+    useSessions.setState({ items: [{ ...summary("a"), pinned: true }] });
+    mock.listSessions.mockClear();
+    mock.setSessionPinned.mockRejectedValueOnce(new Error("no such conversation"));
+
+    await useSessions.getState().togglePinned("a");
+
+    expect(useSessions.getState().error).toContain("no such conversation");
+    expect(mock.listSessions).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when the save chooser is closed, which is a change of mind and not a failure", async () => {
+    mock.exportSession.mockResolvedValueOnce(null);
+    await useSessions.getState().exportTo("a");
+    expect(useSessions.getState().error).toBeNull();
+
+    mock.exportSession.mockRejectedValueOnce(new Error("the disk would not take it"));
+    await useSessions.getState().exportTo("a");
+    expect(useSessions.getState().error).toContain("would not take it");
   });
 });
 

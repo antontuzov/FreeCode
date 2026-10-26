@@ -444,6 +444,12 @@ pub fn run() {
             // The transcript a reopened conversation comes back to: the window hands the host the rows
             // it drew, so the run's steps and diff survive with its words. See `chat::file_rows`.
             chat::file_rows,
+            // The three things a row's menu asks of a conversation it has already filed: a name the
+            // user chose, a place at the head of the list, and a copy of the whole exchange written
+            // out to a file they pick.
+            chat::rename_session,
+            chat::set_session_pinned,
+            chat::export_session,
             // What the Trash holds, and the two presses it offers: put one back on the list, or take
             // its file off the machine. Only the second one is a loss.
             chat::list_trashed,

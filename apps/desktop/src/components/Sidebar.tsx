@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { MascotMark } from "./BrandMark";
 import { IdentityMenu } from "./IdentityMenu";
@@ -63,6 +63,8 @@ type Conversation = {
   /** The model that answered, shown on hover rather than in the row: the column is 260 px wide and
    * the conversation's own words are what identifies it. */
   meta?: string;
+  /** Whether the row is held at the head of the list, which the row marks with a tack. */
+  pinned: boolean;
 };
 
 type Workspace = { name: string; conversations: Conversation[] };
@@ -79,7 +81,12 @@ function group(items: SessionSummary[], unnamed: string): Workspace[] {
   for (const item of items) {
     const name = item.workspace || unnamed;
     const found = byName.get(name);
-    const conversation: Conversation = { id: item.id, title: item.title, meta: item.model };
+    const conversation: Conversation = {
+      id: item.id,
+      title: item.title,
+      meta: item.model,
+      pinned: item.pinned ?? false,
+    };
     if (found) found.conversations.push(conversation);
     else byName.set(name, { name, conversations: [conversation] });
   }
@@ -91,8 +98,8 @@ const FIXTURE_WORKSPACES: Workspace[] = [
   {
     name: "freecode",
     conversations: [
-      { id: null, title: "Phase 0 host" },
-      { id: null, title: "Catalog pin" },
+      { id: null, title: "Phase 0 host", pinned: false },
+      { id: null, title: "Catalog pin", pinned: false },
     ],
   },
 ];
@@ -107,6 +114,7 @@ function Row({
   shortcut,
   tip,
   className,
+  gutter,
 }: {
   icon?: IconName;
   label: string;
@@ -120,6 +128,12 @@ function Row({
   tip?: string;
   /** A `.nav-item` modifier — `trailing`, which clears room for a control at the row's right end. */
   className?: string;
+  /**
+   * A conversation row's tack slot: `true` holds the row at the head of the list and draws the tack,
+   * `false` reserves the same air empty. The slot is on every conversation row rather than only the
+   * pinned ones, because a list whose labels start at two different x is read as two lists.
+   */
+  gutter?: boolean;
 }) {
   return (
     <button
@@ -132,9 +146,127 @@ function Row({
       className={`nav-item ${indent ? "indent" : ""} ${className ?? ""}`}
       onClick={onClick}
     >
+      {gutter !== undefined && (
+        <span aria-hidden className="grid w-4 shrink-0 place-items-center">
+          {gutter && <Icon name="pin" size={11} className="text-faint" />}
+        </span>
+      )}
       {icon && <Icon name={icon} />}
       <span className="truncate">{label}</span>
     </button>
+  );
+}
+
+/** One press in a conversation row's menu. */
+type Press = {
+  id: string;
+  icon: IconName;
+  label: string;
+  /** The note at the press's right end, where an outcome is worth printing rather than assuming: the
+   * copy press leaves "Copied" there, the pinned one says where the row now sits. */
+  value?: string;
+  /** The arrow that promises a column this press does not open — a group picker the build has no. */
+  chevron?: boolean;
+  /** The one press that costs something, drawn in the colour the window already uses for that. */
+  danger?: boolean;
+  /** Why this press does not run, said on hover. A press that refuses runs nothing on click. */
+  refuse?: string;
+  run?: () => void;
+};
+
+/** The gap the panel keeps from the row it belongs to, and the same air at the viewport's edge. */
+const MENU_GAP = 4;
+
+/**
+ * `?rowmenu=<conversation id>` opens that row's menu the first time the list shows it.
+ *
+ * Dev-only, and for the same reason the footer's `?menu=` and the picker's `?picker` exist: this panel
+ * is behind a press on a control the hover brings out, and the window takes no injected clicks, so
+ * without a seed its pixels could never be compared against the reference. Nothing in the shipped UI
+ * sets it.
+ */
+const SEEDED_ROW = new URLSearchParams(window.location.search).get("rowmenu");
+
+/**
+ * A conversation row's menu, floating where the row's `⋯` was pressed.
+ *
+ * It is placed from the row's own rect rather than anchored inside the column because the list it sits
+ * on scrolls, and a panel drawn inside a scroll container is clipped by it — the rows at the bottom
+ * would get a menu cut in half. So it is fixed to the viewport, aligned to the row's right edge like
+ * the reference's, and turned to open upward when the space below the row cannot hold it.
+ */
+function TaskMenu({
+  anchor,
+  presses,
+  onClose,
+}: {
+  anchor: { top: number; bottom: number; right: number };
+  presses: Press[];
+  onClose: () => void;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+  // Measured after the first paint rather than estimated from the row count: the panel's height is the
+  // sum of a font, a padding and a separator, and a constant for it would be wrong the moment the type
+  // scale moved. One extra layout on the press that opens the menu is the whole of the cost.
+  const [top, setTop] = useState(anchor.bottom + MENU_GAP);
+  useLayoutEffect(() => {
+    const height = panel.current?.offsetHeight ?? 0;
+    const below = anchor.bottom + MENU_GAP;
+    setTop(
+      below + height > window.innerHeight
+        ? Math.max(MENU_GAP, anchor.top - MENU_GAP - height)
+        : below,
+    );
+  }, [anchor]);
+
+  return (
+    <>
+      {/* Transparent, as the footer menu's scrim is: the panel repaints nothing behind it, and a mask
+          over the window would hide the row the menu is about. */}
+      <span className="picker-scrim" onClick={onClose} />
+      <div
+        ref={panel}
+        role="menu"
+        className="menu-panel menu-panel--row"
+        style={{ top, right: anchor.right }}
+        onKeyDown={(e) => {
+          if (e.key !== "Escape") return;
+          e.preventDefault();
+          e.stopPropagation();
+          onClose();
+        }}
+      >
+        <div className="menu-main">
+          {presses.map((p) => (
+            <Fragment key={p.id}>
+              {/* The line belongs to the press that ends a conversation, not to the row above it: the
+                  reference separates the keeping from the losing, and only that. */}
+              {p.danger && <div className="menu-sep" />}
+              <button
+                type="button"
+                role="menuitem"
+                aria-disabled={p.refuse ? true : undefined}
+                title={p.refuse ?? p.label}
+                className={`menu-row ${p.danger ? "menu-row--danger" : ""} ${
+                  p.refuse && !p.danger ? "menu-row--inert" : ""
+                }`}
+                onClick={() => {
+                  if (p.refuse) return;
+                  p.run?.();
+                }}
+              >
+                <Icon name={p.icon} size={14} className="shrink-0" />
+                <span className="menu-label truncate">{p.label}</span>
+                {p.value && <span className="menu-value">{p.value}</span>}
+                {p.chevron && (
+                  <Icon name="chevronRight" size={12} className="shrink-0 text-faint" />
+                )}
+              </button>
+            </Fragment>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -215,18 +347,159 @@ export function Sidebar({
   const activeId = useSessions((s) => s.activeId);
   const open = useSessions((s) => s.open);
   const remove = useSessions((s) => s.remove);
+  const rename = useSessions((s) => s.rename);
+  const togglePinned = useSessions((s) => s.togglePinned);
+  const exportTo = useSessions((s) => s.exportTo);
   const running = useTranscript((s) => s.running);
-  // Which row's trash has been pressed once. Deleting a conversation has no undo and no second copy —
-  // the file *is* the record — so the control asks for the press twice. One row at a time can be
-  // armed, because an arm that follows the pointer to its neighbour would have the second press
-  // delete a conversation nobody promised to delete.
+  /* Which row's delete has been pressed once. Deleting a conversation has no undo in this window —
+   * the file goes to the Trash, but the row and everything the transcript was showing leave the
+   * screen — so the press asks for itself twice. One row at a time can be armed, because an arm that
+   * follows the pointer to its neighbour would have the second press delete a conversation nobody
+   * promised to delete. It lives in the menu now rather than on the row, which is where the sentence
+   * "press again" has room to be read. */
   const [armed, setArmed] = useState<string | null>(null);
+  // The row whose `⋯` has been pressed, and the rect that press was made in. The rect is stored rather
+  // than read on every render so the panel stays where it was opened even as the list reflows under it.
+  const [menu, setMenu] = useState<{
+    id: string;
+    top: number;
+    bottom: number;
+    right: number;
+  } | null>(null);
+  // The copy press keeps its menu open to say whether it worked, which is the only reason this exists.
+  const [copied, setCopied] = useState<boolean | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
   const collapsed = useNav((s) => s.collapsed);
   const toggleSidebar = useNav((s) => s.toggleSidebar);
   const notInBuild = translate(locale, "common.notInBuild");
+  const t = (key: string) => translate(locale, key);
   const workspaces = fixture
     ? FIXTURE_WORKSPACES
     : group(items, translate(locale, "sidebar.localUser"));
+
+  const closeMenu = () => {
+    setMenu(null);
+    setArmed(null);
+    setCopied(null);
+  };
+
+  // The seed runs once, and on the render after the list arrives: the conversations come back from the
+  // host, so the first pass has no row to find. Running once is also what lets the seeded panel be
+  // closed — a seed that re-fired whenever the menu went null would reopen it under the pointer.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!SEEDED_ROW || seeded.current) return;
+    const found = [...document.querySelectorAll<HTMLElement>("[data-task-menu]")].find(
+      (el) => el.dataset.taskMenu === SEEDED_ROW,
+    );
+    if (!found) return;
+    seeded.current = true;
+    const rect = found.getBoundingClientRect();
+    setMenu({
+      id: SEEDED_ROW,
+      top: rect.top,
+      bottom: rect.bottom,
+      right: window.innerWidth - rect.right + 3,
+    });
+  }, [items]);
+
+  const startRename = (id: string, from: string) => {
+    closeMenu();
+    setRenaming(id);
+    setDraft(from);
+  };
+
+  /** Keep what was typed. An empty field is not a name — the host refuses one for the same reason the
+   * row would otherwise disappear into a blank label — so a cleared field cancels rather than files a
+   * conversation with nothing on it. */
+  const commitRename = (id: string) => {
+    if (renaming !== id) return;
+    setRenaming(null);
+    const title = draft.trim();
+    if (title) void rename(id, title);
+  };
+
+  const copyId = (id: string) => {
+    // No plugin: this is the web standard, and the press that needs it is a click, which is the focus
+    // the clipboard asks for. A rejection is printed in the row that was pressed rather than swallowed,
+    // because a copy that silently did nothing is indistinguishable from one that worked.
+    navigator.clipboard
+      ?.writeText(id)
+      .then(() => setCopied(true))
+      .catch(() => setCopied(false));
+  };
+
+  const pressDelete = (id: string) => {
+    if (armed !== id) {
+      setArmed(id);
+      return;
+    }
+    closeMenu();
+    void remove(id);
+  };
+
+  /** The presses the reference's menu draws, and what this build runs behind each of them.
+   *
+   * Four of the nine are the reference's own rows with nothing behind them here, and they stay on
+   * screen saying so: the window is one conversation deep (the host holds a single history), the
+   * groups are derived from the folder a run worked in rather than sorted by hand, and nothing arrives
+   * for a row to be unread. Their presses are the layout's contract; their refusal is the honest part.
+   */
+  const presses = (c: Conversation): Press[] => {
+    const busy = c.id !== null && c.id === activeId && running;
+    return [
+      { id: "window", icon: "sites", label: t("task.openWindow"), refuse: notInBuild },
+      {
+        id: "copy",
+        icon: "copy",
+        label: t("task.copyId"),
+        value: copied === null ? undefined : t(copied ? "task.copied" : "task.copyFailed"),
+        run: () => copyId(c.id ?? ""),
+      },
+      {
+        id: "rename",
+        icon: "editFile",
+        label: t("task.rename"),
+        run: () => startRename(c.id ?? "", c.title),
+      },
+      {
+        id: "export",
+        icon: "download",
+        label: t("task.export"),
+        run: () => {
+          const id = c.id;
+          closeMenu();
+          // The host asks where to put the document, and a cancelled chooser answers with nothing.
+          if (id) void exportTo(id);
+        },
+      },
+      {
+        id: "pin",
+        icon: "pin",
+        label: t(c.pinned ? "task.unpin" : "task.pin"),
+        value: c.pinned ? t("task.pinned") : undefined,
+        run: () => {
+          const id = c.id;
+          closeMenu();
+          if (id) void togglePinned(id);
+        },
+      },
+      { id: "group", icon: "workspace", label: t("task.group"), chevron: true, refuse: notInBuild },
+      { id: "unread", icon: "mail", label: t("task.unread"), refuse: notInBuild },
+      { id: "side", icon: "fork", label: t("task.sideTask"), refuse: notInBuild },
+      {
+        id: "delete",
+        icon: "trash",
+        label: t(
+          busy ? "sidebar.delete.busy" : armed === c.id ? "sidebar.deleteAgain" : "sidebar.delete",
+        ),
+        danger: true,
+        refuse: busy ? t("sidebar.delete.busy") : undefined,
+        run: () => pressDelete(c.id ?? ""),
+      },
+    ];
+  };
 
   const row = (r: NavRow) => (
     <Row
@@ -360,65 +633,86 @@ export function Sidebar({
                 // A local, because the handler below runs after the check and a property's narrowing
                 // does not carry into a closure the way a local's does.
                 const id = c.id;
-                const isArmed = id !== null && armed === id;
-                // The host refuses to delete the conversation a reply is streaming into, because the
-                // run would file its answer back into the row that has just gone. So the control that
-                // would be refused stays on the row that is running and says why, rather than looking
-                // like a trash can that does not work.
-                const busy = id !== null && id === activeId && running;
-                const label = translate(
-                  locale,
-                  busy ? "sidebar.delete.busy" : isArmed ? "sidebar.deleteAgain" : "sidebar.delete",
-                );
+                const isOpen = id !== null && menu?.id === id;
                 return (
-                  <div
-                    key={id ?? c.title}
-                    className="group relative"
-                    // Sliding off the row disarms it. That is the whole of the timeout this control
-                    // would otherwise need, and it has no timer to leak when the column folds.
-                    onMouseLeave={() => setArmed((a) => (a === id ? null : a))}
-                  >
-                    <Row
-                      label={c.title}
-                      indent
-                      className={id ? "trailing" : undefined}
-                      active={id !== null && id === activeId}
-                      tip={
-                        c.meta
-                          ? `${translate(locale, "sidebar.openConversation")} · ${c.meta}`
-                          : undefined
-                      }
-                      onClick={id ? () => void open(id) : undefined}
-                    />
-                    {id && (
-                      // Only on hover, because a trash glyph standing on every row of the list makes
-                      // the sidebar look like a bin rather than a history. The one that has been
-                      // pressed once stays lit — that state has to be visible to mean anything.
+                  <div key={id ?? c.title} className="group relative">
+                    {renaming === id ? (
+                      // The name being changed stays on the row it belongs to rather than moving into a
+                      // dialog: the field is the row, and the row is what the rest of the list is
+                      // comparing it against.
+                      <div className="nav-item indent">
+                        <span aria-hidden className="w-4 shrink-0" />
+                        <input
+                          autoFocus
+                          className="field-input rename-field"
+                          aria-label={t("task.rename")}
+                          value={draft}
+                          onChange={(e) => setDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              commitRename(id ?? "");
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              // Escape abandons the text; blur below keeps it, which is the difference
+                              // between the two ways out of a field.
+                              setRenaming(null);
+                            }
+                          }}
+                          onBlur={() => commitRename(id ?? "")}
+                        />
+                      </div>
+                    ) : (
+                      <Row
+                        label={c.title}
+                        indent
+                        gutter={c.pinned}
+                        className={id ? "trailing" : undefined}
+                        active={id !== null && id === activeId}
+                        tip={
+                          c.meta
+                            ? `${translate(locale, "sidebar.openConversation")} · ${c.meta}`
+                            : undefined
+                        }
+                        onClick={id ? () => void open(id) : undefined}
+                      />
+                    )}
+                    {id && renaming !== id && (
+                      // Only on hover, because a control standing on every row of the list makes the
+                      // sidebar look like a toolbar rather than a history. The one whose menu is open
+                      // stays lit: a press that vanishes with the pointer off it looks like a press
+                      // that did not land.
                       <button
                         type="button"
-                        aria-label={label}
-                        aria-disabled={busy ? true : undefined}
-                        title={label}
+                        aria-label={t("task.menu")}
+                        aria-expanded={isOpen}
+                        aria-haspopup="menu"
+                        title={t("task.menu")}
+                        data-task-menu={id}
                         className={`absolute right-[3px] top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-[var(--radius-sm)] transition-opacity hover:bg-[var(--bg-hover)] focus-visible:opacity-100 ${
-                          busy
-                            ? "text-faint opacity-100"
-                            : isArmed
-                              ? "text-danger opacity-100"
-                              : "text-muted opacity-0 group-hover:opacity-100"
+                          isOpen
+                            ? "text-fg opacity-100"
+                            : "text-muted opacity-0 group-hover:opacity-100"
                         }`}
                         onClick={(event) => {
                           // The row underneath opens the conversation; this press is not that.
                           event.stopPropagation();
-                          if (busy) return;
-                          if (isArmed) {
-                            setArmed(null);
-                            void remove(id);
-                          } else {
-                            setArmed(id);
+                          if (isOpen) {
+                            closeMenu();
+                            return;
                           }
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setMenu({
+                            id,
+                            top: rect.top,
+                            bottom: rect.bottom,
+                            right: window.innerWidth - rect.right + 3,
+                          });
+                          setCopied(null);
+                          setArmed(null);
                         }}
                       >
-                        <Icon name="trash" size={13} />
+                        <Icon name="more" size={14} />
                       </button>
                     )}
                   </div>
@@ -453,6 +747,20 @@ export function Sidebar({
           <Icon name="settings" />
         </button>
       </div>
+
+      {menu &&
+        (() => {
+          // The row is looked up rather than carried in the menu state, so a rename or a pin that
+          // re-lists the conversations cannot leave the open panel describing the row as it was before
+          // the press. A menu whose row has gone — deleted from the Trash page while the panel sat
+          // open — draws nothing rather than a panel of presses with nothing to press on.
+          const conversation = workspaces
+            .flatMap((ws) => ws.conversations)
+            .find((c) => c.id === menu.id);
+          return conversation ? (
+            <TaskMenu anchor={menu} presses={presses(conversation)} onClose={closeMenu} />
+          ) : null;
+        })()}
     </nav>
   );
 }

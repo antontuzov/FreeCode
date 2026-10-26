@@ -41,8 +41,44 @@ pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
 /// A small model given "You are a helpful assistant" answers like a chatbot: it describes changes
 /// instead of making them, writes files it has not read, and stops before checking its work. The
 /// contract below is written for the loop this app actually runs — read-only tools, sandboxed
-/// writes, an optional shell — and stays short enough that a 1.7B can hold it.
+/// writes, an optional shell — and every tool it names is one of the 31 the registry declares, so a
+/// run is never told to reach for a call it was not offered.
+///
+/// It is grouped under five headings rather than numbered one to seventeen, because the section is
+/// what a 1.7B model holds onto: the rules below it are the same handful, and a run that has lost the
+/// list can still tell "change as little as is correct" from "check it".
 pub const DEFAULT_SYSTEM_PROMPT: &str = "\
+You are FreeCode, a coding agent working in the user's workspace on their own machine. Do what was asked; do not describe how it could be done.
+
+SEE WHAT IS THERE FIRST
+1. Never invent a file, path, symbol or API. read_file, list_dir, glob and grep_search answer what a name or a string is; git_status, git_diff and git_log answer what the repository has done.
+2. When the answer is already in the conversation or on disk, get it there. Ask the user only for what only the user can decide.
+3. terminal, run_tests, run_build, run_linter, web_search and fetch_url exist only in a run the user switched on. Where a tool is not offered, say the run cannot do it rather than pretending to.
+
+CHANGE AS LITTLE AS IS CORRECT
+4. For work with more than about three steps, call todo_write first: one short line per step, all pending except the one you are on. Call todo_write again whenever a step starts or finishes. One step is active at a time, and a step is done only once you have seen its result.
+5. edit_file makes one precise replacement — old_string has to appear in the file exactly once, whitespace and all, and must differ from new_string. apply_patch carries a change that spans several files as one unified diff. write_file is only for a file that does not exist yet. Never rewrite whole a file you could have edited.
+6. Group one file's changes into one call instead of a series of small ones. Match the code already there, and add every import a change needs.
+7. Nothing here deletes, renames, commits or pushes. The three git calls read the repository and change no part of it, so a request to alter that is a thing to say you cannot do rather than a thing to work around with writes.
+
+CHECK IT
+8. After you write, run the project's own checks — run_tests, run_build, run_linter — and read what comes back. Fix what fails and run it again. Where no check was offered, say so plainly instead of claiming it passed.
+9. When a call fails, read the reason and change your approach. Never repeat a call unchanged after it has failed.
+10. Address every part of the request, then look once more for what is still missing and finish that too.
+11. For a page or a site, write the files and say which one to open; the window shows what a run has built in its own browser panel. A server started with terminal keeps running after the round ends, so start one only when the task needs it.
+
+SAY WHAT YOU DID
+12. Never print a secret and never read one — the workspace's credential files are refused for a reason.
+13. Do not name tools to the user; say what you did. Do not hand back a command for them to run when you can run it yourself.
+14. Finish by stating what changed, in which files, and how you checked it. If you were blocked, name the block. Nothing counts as done without a tool result behind it.";
+
+/// The contract that shipped before the one above.
+///
+/// A model told to "run the project's tests, build or linter when a shell is available" reaches for
+/// those three by name and gets refused for the two it did not read about, so the tool surface is
+/// now spelled out. This text is kept only so an install that never wrote its own prompt moves
+/// forward rather than staying on a contract the loop no longer matches.
+const SYSTEM_PROMPT_V2: &str = "\
 You are FreeCode, a coding assistant running locally on the user's machine.
 
 Your job is to make the change the user asked for, correctly, in their workspace — not to describe how it could be made.
@@ -58,9 +94,14 @@ Rules:
 
 When a question needs no tools, answer it directly and briefly. Put code in fenced blocks with a language tag. Do not claim something is done unless a tool result shows it.";
 
-/// The default v1 shipped. Kept only to move a stored document that never changed it forward; a
-/// prompt the user wrote is never touched.
-const LEGACY_SYSTEM_PROMPT: &str = "You are a helpful assistant";
+/// Every prompt this app has shipped as its default, oldest first — including the plain chatbot line
+/// the very first build stored.
+///
+/// `migrated` replaces any of these with [`DEFAULT_SYSTEM_PROMPT`] and nothing else. The point is that
+/// the shipped contract can keep changing without installs being stranded on the version they
+/// happened to download, while a prompt someone wrote stays theirs no matter how close it reads to
+/// one of these.
+const PREVIOUS_SYSTEM_PROMPTS: &[&str] = &["You are a helpful assistant", SYSTEM_PROMPT_V2];
 
 pub const APP_CONFIG_DIR: &str = "freecode";
 
@@ -270,10 +311,12 @@ impl Settings {
     }
 
     fn migrated(mut self) -> Self {
-        // v1 shipped the chatbot default. Replace it only when the stored turn is still exactly that
-        // default: trimming is deliberate, because a document that never carried user words should
-        // move forward, while a prompt someone wrote stays theirs even if it is short.
-        if self.sampling.system_prompt.trim() == LEGACY_SYSTEM_PROMPT {
+        // Each build ships a new contract, and an install that never edited it should be answering on
+        // the one this loop matches. Replacing only an exact stored default is what makes that safe:
+        // trimming is deliberate, because a document that never carried user words moves forward,
+        // while a prompt someone wrote stays theirs even if it is short.
+        let stored = self.sampling.system_prompt.trim();
+        if PREVIOUS_SYSTEM_PROMPTS.contains(&stored) {
             self.sampling.system_prompt = DEFAULT_SYSTEM_PROMPT.to_string();
         }
         self.schema_version = SETTINGS_SCHEMA_VERSION;
@@ -324,8 +367,8 @@ mod tests {
     fn the_default_system_prompt_is_a_coding_contract() {
         let prompt = SamplingSettings::default().system_prompt;
         assert_eq!(prompt, DEFAULT_SYSTEM_PROMPT);
-        assert!(!prompt.contains(LEGACY_SYSTEM_PROMPT));
-        assert!(prompt.contains("Read before you write"));
+        assert!(!prompt.contains("helpful assistant"));
+        assert!(prompt.contains("Never invent a file, path, symbol or API"));
     }
 
     #[test]
@@ -333,15 +376,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
 
-        let mut old = Settings {
-            schema_version: 1,
-            ..Settings::default()
-        };
-        old.sampling.system_prompt = LEGACY_SYSTEM_PROMPT.into();
-        old.save(&path).unwrap();
-        let back = Settings::load(&path).unwrap();
-        assert_eq!(back.sampling.system_prompt, DEFAULT_SYSTEM_PROMPT);
-        assert_eq!(back.schema_version, SETTINGS_SCHEMA_VERSION);
+        // Both defaults this app has ever shipped move forward, so an install is not stranded on the
+        // contract the build it happened to download carried.
+        for previous in PREVIOUS_SYSTEM_PROMPTS {
+            let mut old = Settings {
+                schema_version: 1,
+                ..Settings::default()
+            };
+            old.sampling.system_prompt = (*previous).into();
+            old.save(&path).unwrap();
+            let back = Settings::load(&path).unwrap();
+            assert_eq!(back.sampling.system_prompt, DEFAULT_SYSTEM_PROMPT);
+            assert_eq!(back.schema_version, SETTINGS_SCHEMA_VERSION);
+        }
 
         let mut mine = Settings::default();
         mine.sampling.system_prompt = "Answer like a pirate.".into();
@@ -349,6 +396,15 @@ mod tests {
         assert_eq!(
             Settings::load(&path).unwrap().sampling.system_prompt,
             "Answer like a pirate."
+        );
+
+        // A prompt that is the shipped one with a word added is no longer the shipped one. The contract
+        // moved on, but this is a document someone edited, and editing it back is their press to make.
+        mine.sampling.system_prompt = format!("{SYSTEM_PROMPT_V2}\nBe terse.");
+        mine.save(&path).unwrap();
+        assert_eq!(
+            Settings::load(&path).unwrap().sampling.system_prompt,
+            format!("{SYSTEM_PROMPT_V2}\nBe terse.")
         );
 
         // A cleared prompt is a choice too: the run sends no system turn, and loading must not
