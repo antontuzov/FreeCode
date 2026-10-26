@@ -906,6 +906,28 @@ select.field-input {
   left: auto;
   z-index: 32;
 }
+/* The row menu at the reference's measure. The 250px column above is sized for the footer's menu, whose
+ * second column of style names has to be readable; this one holds nine verbs and nothing else, and the
+ * reference draws it at 160px so that it stays inside the sidebar's own width when the window is small.
+ * At 250px the panel reached the window's left edge and covered the row it belonged to, which is the one
+ * thing a menu about a row must not do. It is bounded rather than fixed: 176px is the reference's
+ * measure at the English labels, and a locale whose verbs are longer may take up to 200px, which is
+ * still short of the 262px column the panel opens from. The type steps down to the fine size for the
+ * same reason — the reference's labels measure ~12px. */
+.menu-panel--row .menu-main {
+  min-width: 176px;
+  max-width: 200px;
+  width: auto;
+}
+/* 8px of air over a 12px glyph is the reference's 28px row pitch, held by the icon's own box rather
+ * than the line-height so the row does not change height with the locale. The line-height is pinned to
+ * the font size for the same reason: the interface's own leading is ~1.5, which put 34px between the
+ * rows' centres and made the panel taller than the list it opens from. */
+.menu-panel--row .menu-row {
+  padding: 8px var(--space-3);
+  font-size: var(--size-fine);
+  line-height: 1;
+}
 /* The press that ends a conversation, in the colour the window already uses for what cannot be taken
  * back. Its hover is the same colour washed into the row's own background rather than the neutral
  * hover fill, so a press that is being confirmed does not look like any other press. */

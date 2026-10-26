@@ -171,6 +171,11 @@ type Press = {
   danger?: boolean;
   /** Why this press does not run, said on hover. A press that refuses runs nothing on click. */
   refuse?: string;
+  /** The whole sentence behind a label the panel had to shorten. The reference's menu is 160px wide and
+   * this one is 176, which is not enough for "Move this conversation to the Trash" in either language,
+   * and a truncated press is a press nobody dares to take. The row prints the verb; the hover line
+   * prints what the verb does. */
+  hint?: string;
   run?: () => void;
 };
 
@@ -246,7 +251,7 @@ function TaskMenu({
                 type="button"
                 role="menuitem"
                 aria-disabled={p.refuse ? true : undefined}
-                title={p.refuse ?? p.label}
+                title={p.refuse ?? p.hint ?? p.label}
                 className={`menu-row ${p.danger ? "menu-row--danger" : ""} ${
                   p.refuse && !p.danger ? "menu-row--inert" : ""
                 }`}
@@ -255,7 +260,9 @@ function TaskMenu({
                   p.run?.();
                 }}
               >
-                <Icon name={p.icon} size={14} className="shrink-0" />
+                {/* The reference's menu glyphs measure 12px on the screen, one step below the row
+                    icons the panel opens from, and the panel's whole width is spent on the labels. */}
+                <Icon name={p.icon} size={12} className="shrink-0" />
                 <span className="menu-label truncate">{p.label}</span>
                 {p.value && <span className="menu-value">{p.value}</span>}
                 {p.chevron && (
@@ -347,7 +354,8 @@ export function taskPresses({
     {
       id: "delete",
       icon: "trash",
-      label: t(busy ? "sidebar.delete.busy" : armed ? "sidebar.deleteAgain" : "sidebar.delete"),
+      label: t(busy ? "task.deleteBusy" : armed ? "task.deleteAgain" : "task.delete"),
+      hint: t("sidebar.delete"),
       danger: true,
       // A reply is writing this conversation's file; the press waits for it rather than arming.
       refuse: busy ? t("sidebar.delete.busy") : undefined,

@@ -7,6 +7,8 @@
 // test that was really asking which sentence a row prints.
 import { describe, expect, it, vi } from "vitest";
 
+import en from "../i18n/en.json";
+import ru from "../i18n/ru.json";
 import { taskPresses, type Conversation, type PressInput } from "./Sidebar";
 
 // Importing the sidebar pulls the brand mark in with it, and that reads the host's mascot number at
@@ -69,6 +71,49 @@ describe("the panel the reference draws", () => {
         .map((p) => p.id),
     ).toEqual(["delete"]);
   });
+
+  // The panel is 176px at the reference's measure, and 11px of padding, a 12px glyph and an 8px gap
+  // leave ~134px for the label — about 22 characters of the fine size. That makes the panel's width a
+  // claim about the words, not only about the CSS: a press that overflows is a press that prints as
+  // "Move this conversation t…", and nobody presses a sentence he cannot read. So the shipped
+  // catalogs, in both languages, are held to the measure here rather than found out in a screenshot.
+  const MEASURE = 22;
+  for (const [locale, catalog] of [
+    ["en", en],
+    ["ru", ru],
+  ] as const) {
+    it(`fits every label in ${locale} inside the panel's measure`, () => {
+      const words = catalog as Record<string, string>;
+      // The delete row has two more states than the nine defaults — a reply writing the file, and the
+      // first press having gone out — and the panel prints each in the same 134px.
+      const keys = [
+        ...presses().map((p) => p.label),
+        ...presses({ busy: true }).map((p) => p.label),
+        ...presses({ armed: true }).map((p) => p.label),
+      ];
+      const over = keys.filter((k) => (words[k]?.length ?? 0) > MEASURE);
+      expect(over.map((k) => `${k}=${words[k]}`)).toEqual([]);
+      // Every row is accounted for: a key missing from a catalog would slip through the test above as
+      // an undefined length, so the count is what says the nine were really the nine measured.
+      expect(new Set(keys).size).toBe(11);
+      for (const k of keys) expect(words[k], k).toBeTypeOf("string");
+
+      // A note shares its row with the press's own words rather than having the line to itself, so it
+      // gets the remainder of the measure — and `menu-value` does not shrink, so an overlong one is
+      // what pushes the label out, not the other way round.
+      const notes = ["task.copied", "task.copyFailed", "task.pinned"];
+      expect(
+        notes.filter((k) => (words[k]?.length ?? 0) > 12).map((k) => `${k}=${words[k]}`),
+      ).toEqual([]);
+    });
+  }
+
+  it("keeps the whole sentence a shortened press stands for", () => {
+    // Truncating a press is only honest if the full words are somewhere the pointer finds them.
+    const del = byId(presses(), "delete");
+    expect(del.hint).toBe("sidebar.delete");
+    expect((en as Record<string, string>)["sidebar.delete"]).toContain("Trash");
+  });
 });
 
 describe("what this build refuses", () => {
@@ -97,7 +142,7 @@ describe("what this build refuses", () => {
   it("refuses to delete the conversation a reply is still writing", () => {
     const list = presses({ busy: true });
     const del = byId(list, "delete");
-    expect(del.label).toBe("sidebar.delete.busy");
+    expect(del.label).toBe("task.deleteBusy");
     // The press keeps its handler here, unlike the four with nothing behind them: this one would run,
     // and it is the panel's check on `refuse` that holds it back until the reply files its turn.
     expect(del.refuse).toBe("sidebar.delete.busy");
@@ -136,7 +181,7 @@ describe("what this build runs", () => {
   });
 
   it("asks for the second press that deletes, and only on the row that was armed", () => {
-    expect(byId(presses(), "delete").label).toBe("sidebar.delete");
-    expect(byId(presses({ armed: true }), "delete").label).toBe("sidebar.deleteAgain");
+    expect(byId(presses(), "delete").label).toBe("task.delete");
+    expect(byId(presses({ armed: true }), "delete").label).toBe("task.deleteAgain");
   });
 });
