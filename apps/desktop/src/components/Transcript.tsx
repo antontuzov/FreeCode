@@ -32,7 +32,12 @@ function StatusMark({ step }: { step: Step }) {
   // The row that restates the plan is marked with the plan's own glyph, so the list under it and the
   // header control that keeps it reachable are visibly the same thing.
   if (step.kind === "todo") return <Icon name="checklist" size={13} className="text-accent-ink" />;
-  return <Icon name="check" size={13} className="text-accent-ink" />;
+  // The green of an outcome, not the accent of the theme. The reference's finished-step tick is the
+  // same green in every window, because it reports what happened rather than what the window is
+  // wearing — and the accent follows the interface style, so a check that took it would go near-black
+  // in Ink and pink in Rose. `--success` is the one ink the theme set was tuned around: every style's
+  // panel ground is chosen so this mark clears AA on it.
+  return <Icon name="check" size={13} className="text-success" />;
 }
 
 /**
@@ -145,7 +150,7 @@ function StepRow({
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            className="icon-btn size-5"
+            className="icon-btn step-toggle"
             aria-label={stepLabel(locale, step)}
           >
             <Icon

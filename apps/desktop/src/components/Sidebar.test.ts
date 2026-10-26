@@ -72,8 +72,9 @@ describe("the panel the reference draws", () => {
     ).toEqual(["delete"]);
   });
 
-  // The panel is 176px at the reference's measure, and 11px of padding, a 12px glyph and an 8px gap
-  // leave ~134px for the label — about 22 characters of the fine size. That makes the panel's width a
+  // The panel is 168px at the reference's measure and may grow to 200 for a locale that needs it, and
+  // 12px of padding, a 12px glyph and an 8px gap leave ~156px for the label — about 22 characters of
+  // the interface's own size. That makes the panel's width a
   // claim about the words, not only about the CSS: a press that overflows is a press that prints as
   // "Move this conversation t…", and nobody presses a sentence he cannot read. So the shipped
   // catalogs, in both languages, are held to the measure here rather than found out in a screenshot.

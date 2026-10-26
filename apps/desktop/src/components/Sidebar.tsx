@@ -171,8 +171,8 @@ type Press = {
   danger?: boolean;
   /** Why this press does not run, said on hover. A press that refuses runs nothing on click. */
   refuse?: string;
-  /** The whole sentence behind a label the panel had to shorten. The reference's menu is 160px wide and
-   * this one is 176, which is not enough for "Move this conversation to the Trash" in either language,
+  /** The whole sentence behind a label the panel had to shorten. The reference's menu is 162px wide and
+   * this one is 168, which is not enough for "Move this conversation to the Trash" in either language,
    * and a truncated press is a press nobody dares to take. The row prints the verb; the hover line
    * prints what the verb does. */
   hint?: string;

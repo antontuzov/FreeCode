@@ -395,6 +395,32 @@ button.card-row:disabled {
   font-size: var(--size-quiet);
 }
 
+/* A round of calls folded shut is the reference's loudest row in the column, and the outline is why:
+ * folded, a bare `>` in front of "Ran 14 tools" reads as punctuation the row happens to start with,
+ * while the same glyph inside a bordered square reads as the thing you press to see the fourteen.
+ * Measured from the capture at 2x: a 20px square (40 device px) with a 1px outline at #424843 over a
+ * ground one step above the column at #232523, corners at 5px. `--border-strong` is the token that
+ * sits on that outline — `--border` is a step too quiet to be seen around a 13px glyph — and
+ * `--bg-hover` is the reference's lift, so the square is drawn at rest rather than only under the
+ * pointer. It is a class and not `size-5`: `.icon-btn` is unlayered and so outranks the utility
+ * layer, which left the square at the header's 28px measure. */
+.step-toggle {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-hover);
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    border-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+/* The ground is already spent at rest, so hovering moves the outline and the glyph instead. */
+.step-toggle:hover {
+  border-color: var(--text-muted);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 /* ---- turn checkpoints ---- */
 
 /* The reference marks a turn with a short dash at the right edge of the column, not a numbered
@@ -908,24 +934,24 @@ select.field-input {
 }
 /* The row menu at the reference's measure. The 250px column above is sized for the footer's menu, whose
  * second column of style names has to be readable; this one holds nine verbs and nothing else, and the
- * reference draws it at 160px so that it stays inside the sidebar's own width when the window is small.
+ * reference draws it at 162px so that it stays inside the sidebar's own width when the window is small.
  * At 250px the panel reached the window's left edge and covered the row it belonged to, which is the one
- * thing a menu about a row must not do. It is bounded rather than fixed: 176px is the reference's
+ * thing a menu about a row must not do. It is bounded rather than fixed: 168px is the reference's
  * measure at the English labels, and a locale whose verbs are longer may take up to 200px, which is
- * still short of the 262px column the panel opens from. The type steps down to the fine size for the
- * same reason — the reference's labels measure ~12px. */
+ * still short of the 262px column the panel opens from. */
 .menu-panel--row .menu-main {
-  min-width: 176px;
+  min-width: 168px;
   max-width: 200px;
   width: auto;
 }
-/* 8px of air over a 12px glyph is the reference's 28px row pitch, held by the icon's own box rather
- * than the line-height so the row does not change height with the locale. The line-height is pinned to
- * the font size for the same reason: the interface's own leading is ~1.5, which put 34px between the
- * rows' centres and made the panel taller than the list it opens from. */
+/* What the reference measures inside that panel: a 12px glyph, a 14px verb, and 28px between the rows'
+ * centres. The verb is the interface's own size and not the fine one — the panel is narrow because it
+ * holds one column of short words, not because it is written small, and stepping the type down with the
+ * width turned a menu into a caption. 7px of air over a 14px line is the 28px pitch, held by the line
+ * box rather than the locale's leading, which is ~1.5 and put 34px between the rows. */
 .menu-panel--row .menu-row {
-  padding: 8px var(--space-3);
-  font-size: var(--size-fine);
+  padding: 7px var(--space-3);
+  font-size: var(--size-ui);
   line-height: 1;
 }
 /* The press that ends a conversation, in the colour the window already uses for what cannot be taken
@@ -958,6 +984,11 @@ select.field-input {
   border-radius: var(--radius-sm);
   padding: 1px var(--space-1);
   outline: 1px solid var(--accent-line);
+  /* The name being typed is the reading ink, not the row's quiet one. `field-input` inherits, and the
+   * row it opens inside is `--text-muted` until it is hovered — so on any row but the active one the
+   * letters came out in the colour the window uses for what is not selected, and a name being written
+   * looked like a placeholder being waited for. */
+  color: var(--text);
 }
 .rename-field:focus {
   outline-color: var(--accent);

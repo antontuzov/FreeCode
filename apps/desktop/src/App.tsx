@@ -139,9 +139,17 @@ export default function App() {
   // `?fixture=1` renders the shell with a scripted run so the layout can be compared against
   // docs/reference-ui. Nothing sets it by default: an empty transcript is honest, an invented one
   // is not.
+  //
+  // `?batch=open` unfolds the scripted round's calls on top of it. The host declares a finished batch
+  // folded, and the native window takes no injected clicks, so without a seed the expanded half of the
+  // reference's "Ran N tools" — one check-circle per call — is a surface no capture can reach.
   useEffect(() => {
     if (!fixture) return;
-    setRows(FIXTURE_ROWS);
+    setRows(
+      query("batch") === "open"
+        ? FIXTURE_ROWS.map((r) => (r.kind === "toolBatch" ? { ...r, collapsed: false } : r))
+        : FIXTURE_ROWS,
+    );
     // The shot this is compared against has a context meter part-filled. Only the fixture can claim
     // a number; a real run reports none until the engine measures it.
     setContextUsed(40);
