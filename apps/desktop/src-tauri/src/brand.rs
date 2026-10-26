@@ -28,9 +28,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// The tiles, numbered the way `?mascot=<1..14>` names them: the twelve ducks, cut from the sheet by
-/// `scripts/render-mascot-logos.py` alongside the webp set the webview loads, and the brand mark on
-/// the two grounds a Dock can have, cut by `scripts/render-brand-tiles.py`.
+/// The tiles, numbered the way `?mascot=<1..17>` names them: the twelve ducks, cut from the sheet by
+/// `scripts/render-mascot-logos.py` alongside the webp set the webview loads; the brand mark on the
+/// two grounds a Dock can have, cut by `scripts/render-brand-tiles.py`; and the three themed logos —
+/// one face and one style-family ground each, the head rising out of the tile's bottom edge — cut by
+/// `scripts/render-duck-theme-logos.py`.
 const TILES: &[&[u8]] = &[
     include_bytes!("../mascots/mascot-01.png"),
     include_bytes!("../mascots/mascot-02.png"),
@@ -46,6 +48,9 @@ const TILES: &[&[u8]] = &[
     include_bytes!("../mascots/mascot-12.png"),
     include_bytes!("../mascots/mascot-13.png"),
     include_bytes!("../mascots/mascot-14.png"),
+    include_bytes!("../mascots/mascot-15.png"),
+    include_bytes!("../mascots/mascot-16.png"),
+    include_bytes!("../mascots/mascot-17.png"),
 ];
 
 /// The mascot for this process, one-based so the number the Dock was drawn from is the number the

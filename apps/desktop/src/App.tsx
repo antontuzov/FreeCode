@@ -21,7 +21,14 @@ import { currentView, useNav } from "./state/nav";
 import { useOnboarding } from "./state/onboarding";
 import { useSettings } from "./state/settings";
 import { useSessions } from "./state/sessions";
-import { FIXTURE_DIFF, FIXTURE_ROUNDS, FIXTURE_ROWS, useTranscript } from "./state/transcript";
+import {
+  FIXTURE_DIFF,
+  FIXTURE_ROUNDS,
+  FIXTURE_ROWS,
+  builtPage,
+  isTurn,
+  useTranscript,
+} from "./state/transcript";
 
 export default function App() {
   const load = useAppearance((s) => s.load);
@@ -194,6 +201,28 @@ export default function App() {
   // starting rather than from the window opening, because the engine spends seconds loading weights
   // and a timer from mount would press Stop before there was a reply to stop.
   const sending = useChat((s) => s.sending);
+
+  // A run that built a page opens it: "build me a game" ends with the game on screen, rather than a
+  // path the user has to go and find. Read out of the store the moment the send settles instead of
+  // from a render, because the run's last events and the command's return race and the store is the one
+  // place both have landed by then. A stopped run opens nothing — its page is half-written, and the
+  // frame would be showing the user their own interruption.
+  const wasSending = useRef(false);
+  useEffect(() => {
+    const settled = wasSending.current && !sending;
+    wasSending.current = sending;
+    if (!settled) return;
+    const rows = useTranscript.getState().rows;
+    const last = [...rows].reverse().find((row) => isTurn(row) && row.role === "assistant");
+    if (last && isTurn(last) && last.stopped) return;
+    const page = builtPage(rows);
+    if (!page) return;
+    void ipc.previewUrl(page).then(
+      (url) => openPreview(url, page),
+      () => {},
+    );
+  }, [sending, openPreview]);
+
   useEffect(() => {
     if (!stopAfter || !sending) return;
     const timer = setTimeout(() => void stop(), stopAfter);

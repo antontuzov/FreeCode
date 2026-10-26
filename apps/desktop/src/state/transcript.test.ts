@@ -5,8 +5,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { AgentEvent, HostStep, RunReport } from "../lib/ipc";
 import {
+  builtPage,
   changedFiles,
   ctaLabel,
+  isPagePath,
   isTurn,
   readSubjects,
   reviewRows,
@@ -318,6 +320,78 @@ describe("derivations off the rows", () => {
       { id: "b", kind: "blocked", status: "error" },
     ];
     expect(usedCapabilities(used).map((step) => step.id)).toEqual(["r1", "t1", "tool1"]);
+  });
+
+  it("opens the page a run built, preferring the entry page over the sheets beside it", () => {
+    const built: Row[] = [
+      { id: "u", kind: "turn", role: "user", text: "build me a snake game" },
+      {
+        id: "batch",
+        kind: "toolBatch",
+        children: [
+          { id: "c1", kind: "createFile", subject: "snake/game.js", status: "ok" },
+          { id: "c2", kind: "createFile", subject: "snake/style.css", status: "ok" },
+          { id: "c3", kind: "createFile", subject: "snake/index.html", status: "ok" },
+        ],
+      },
+    ];
+    expect(builtPage(built)).toBe("snake/index.html");
+  });
+
+  it("takes the last page a run made when none of them is an index", () => {
+    const built: Row[] = [
+      { id: "u", kind: "turn", role: "user", text: "make a demo page" },
+      { id: "c1", kind: "createFile", subject: "draft.html", status: "ok" },
+      { id: "c2", kind: "createFile", subject: "final.htm", status: "ok" },
+    ];
+    expect(builtPage(built)).toBe("final.htm");
+  });
+
+  it("reads a patch that created several files as the pages among them", () => {
+    const built: Row[] = [
+      { id: "u", kind: "turn", role: "user", text: "build the site" },
+      {
+        id: "c1",
+        kind: "createFile",
+        status: "ok",
+        files: [
+          { path: "site/index.html", added: 10, removed: 0, hunks: [] },
+          { path: "site/readme.md", added: 2, removed: 0, hunks: [] },
+        ],
+      },
+    ];
+    expect(builtPage(built)).toBe("site/index.html");
+  });
+
+  it("leaves the browser shut for an edit to a page an earlier turn made", () => {
+    const rows: Row[] = [
+      { id: "u1", kind: "turn", role: "user", text: "build me a game" },
+      { id: "c1", kind: "createFile", subject: "index.html", status: "ok" },
+      { id: "a1", kind: "turn", role: "assistant", text: "Done." },
+      { id: "u2", kind: "turn", role: "user", text: "make the duck bigger" },
+      { id: "e1", kind: "editFile", subject: "index.html", status: "ok" },
+    ];
+    // The panel would be answering a question nobody asked: the page is one the user has already seen.
+    expect(builtPage(rows)).toBeNull();
+  });
+
+  it("ignores a page whose write failed or is still in flight", () => {
+    const rows: Row[] = [
+      { id: "u", kind: "turn", role: "user", text: "build a page" },
+      { id: "c1", kind: "createFile", subject: "broken.html", status: "error" },
+      { id: "c2", kind: "createFile", subject: "still-going.html", status: "running" },
+    ];
+    expect(builtPage(rows)).toBeNull();
+  });
+
+  it("treats a non-page it wrote as no page at all", () => {
+    const rows: Row[] = [
+      { id: "u", kind: "turn", role: "user", text: "write the notes" },
+      { id: "c1", kind: "createFile", subject: "notes.md", status: "ok" },
+    ];
+    expect(builtPage(rows)).toBeNull();
+    expect(isPagePath("a/b.HTM")).toBe(true);
+    expect(isPagePath("a/b.md")).toBe(false);
   });
 
   it("lists the delegations that came back with an answer, even under a folded round", () => {

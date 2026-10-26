@@ -11,3 +11,4 @@ engines/*
 .DS_Store
 *.log
 coverage/
+__pycache__/

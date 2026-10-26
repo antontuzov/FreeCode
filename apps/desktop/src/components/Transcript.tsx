@@ -291,11 +291,19 @@ function TurnRow({
         </p>
       )}
       {turn.thought && (
-        // Open while it is the only thing there, folded once the answer arrives.
-        <details className="mb-1.5" open={!turn.text}>
-          <summary className="flex cursor-pointer items-center gap-1.5 text-fine text-muted">
-            <Icon name="thought" size={13} />
+        // One folded line, in the shape the run's own "Ran 8 tools" header is drawn in: reasoning is
+        // the model talking to itself, and a column that streamed it in full would put that thinking
+        // between the user and the answer they asked for. It stays reachable — the press is there for
+        // whoever wants to read how the answer was reached — but it never opens itself, not even while
+        // it is the only thing the turn has said yet.
+        <details className="mb-1.5">
+          <summary className="flex cursor-pointer items-center gap-1.5 py-0.5 text-quiet text-fg">
+            <Icon name="chevronRight" size={13} className="disclosure-icon" />
+            <Icon name="thought" size={13} className="text-faint" />
             {translate(locale, turn.text ? "transcript.step.thought" : "chat.thinking")}
+            {/* The row is the only thing on screen until the answer starts, so it carries the beat:
+                a window with a folded line and no motion in it reads as one that stopped. */}
+            {turn.streaming && !turn.text && <span className="dot-running" aria-hidden />}
           </summary>
           <p className="disclosure-panel mt-1 whitespace-pre-wrap break-words border-l border-line pl-3 text-fine text-muted">
             {turn.thought}

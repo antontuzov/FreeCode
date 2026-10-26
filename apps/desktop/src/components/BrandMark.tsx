@@ -49,10 +49,11 @@ export function BrandMark({ size = 44 }: { size?: number }) {
 }
 
 /** Cut from the sheet by `scripts/render-mascot-logos.py`, plus the brand mark on the two grounds
- * `scripts/render-brand-tiles.py` draws. The set is the directory rather than a list of imports, so a
- * thirteenth tile is a file dropped beside the others — though the host keeps its own list in
- * `brand.rs`, because a Dock tile is bytes handed to `NSImage` and wants a line there too. The test
- * beside that list is what keeps the two in step. */
+ * `scripts/render-brand-tiles.py` draws and the three themed logos
+ * `scripts/render-duck-theme-logos.py` paints. The set is the directory rather than a list of
+ * imports, so a new tile is a file dropped beside the others — though the host keeps its own list
+ * in `brand.rs`, because a Dock tile is bytes handed to `NSImage` and wants a line there too. The
+ * test beside that list is what keeps the two in step. */
 const mascotTiles = import.meta.glob<string>("../assets/mascots/*.webp", {
   eager: true,
   query: "?url",
@@ -71,7 +72,7 @@ export const MASCOT_TILES = mascots;
  * opens (`brand.rs`), so the window that asks would otherwise be wearing a different face than the
  * tile beside it.
  *
- * `?mascot=<1..14>` names the tile instead, for the same reason the other deep links exist: a pick
+ * `?mascot=<1..17>` names the tile instead, for the same reason the other deep links exist: a pick
  * nobody can re-ask for is a set nobody has all looked at. */
 const urlTile = (() => {
   const forced = Number(new URLSearchParams(window.location.search).get("mascot"));

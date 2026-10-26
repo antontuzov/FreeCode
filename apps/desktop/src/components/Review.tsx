@@ -5,17 +5,13 @@ import { ipc } from "../lib/ipc";
 import { useNav } from "../state/nav";
 import {
   changedFiles,
+  isPagePath,
   reviewRows,
   useTranscript,
   type Hunk,
   type ReviewScope,
 } from "../state/transcript";
 import { Icon } from "./icons";
-
-/** A page the run built is shown inside the app; anything else goes to the desktop's handler. */
-function isPage(path: string): boolean {
-  return /\.html?$/i.test(path);
-}
 
 /**
  * One line of a hunk, with the file line it stands on.
@@ -192,7 +188,7 @@ export function Review({ locale }: { locale: Locale }) {
       return rest;
     });
     try {
-      if (isPage(path)) {
+      if (isPagePath(path)) {
         openPreview(await ipc.previewUrl(path), path);
       } else {
         await ipc.openFile(path);
@@ -512,9 +508,12 @@ export function Review({ locale }: { locale: Locale }) {
                     className="icon-btn mr-[var(--space-2)] shrink-0"
                     aria-label={translate(
                       locale,
-                      isPage(file.path) ? "review.openPage" : "review.open",
+                      isPagePath(file.path) ? "review.openPage" : "review.open",
                     )}
-                    title={translate(locale, isPage(file.path) ? "review.openPage" : "review.open")}
+                    title={translate(
+                      locale,
+                      isPagePath(file.path) ? "review.openPage" : "review.open",
+                    )}
                   >
                     <Icon name="external" size={13} />
                   </button>

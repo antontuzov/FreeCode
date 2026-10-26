@@ -584,6 +584,40 @@ export function readSubjects(rows: Row[], kind: "webReading" | "readFile"): stri
 }
 
 /**
+ * The page this run just built, if it built one: `index.html` when it wrote one, else the last page it
+ * made. This is what the window opens in its own browser when the run closes, so the answer to "build
+ * me a game" is something the user can play rather than a path they have to go find.
+ *
+ * Read off `createFile` rows only — the run that follows up with an edit to a page from an earlier turn
+ * changed an app the user has already seen, and reopening the panel over their new question would be
+ * the window answering a question nobody asked. Only the last turn's rows count, for the same reason
+ * the review's default scope is the last turn: an earlier turn's page was already offered.
+ */
+export function builtPage(rows: Row[]): string | null {
+  const made = everyStep(reviewRows(rows, "lastTurn")).flatMap((row) => {
+    // A status the host never set is a row that is not claiming a failure, so only a row that says it
+    // failed or is still in flight is left out.
+    if (row.kind !== "createFile" || (row.status && row.status !== "ok")) return [];
+    const paths = row.files?.length
+      ? row.files.map((file) => file.path)
+      : row.subject
+        ? [row.subject]
+        : [];
+    return paths.filter(isPagePath);
+  });
+  if (made.length === 0) return null;
+  // A run that also wrote a style sheet or a script made one page among several files; the entry page
+  // is the one the others are for, and the one a browser can open on its own.
+  return made.filter((path) => /(^|\/)index\.html?$/i.test(path)).at(-1) ?? made.at(-1)!;
+}
+
+/** Whether a path names something a browser renders, which is the whole test the in-app panel applies
+ * to decide between framing a file and handing it to the desktop. */
+export function isPagePath(path: string): boolean {
+  return /\.html?$/i.test(path);
+}
+
+/**
  * The delegations this span's rows say the run made, in the order it made them: one entry per
  * `spawn_subagent` row that came back with an answer. A refused delegation is excluded on the same
  * reading as a refused read — the run asked, and asking is not an answer — and the host's one-per-run
@@ -872,6 +906,12 @@ export const FIXTURE_ROWS: Row[] = [
     // shapes the gutter and the wrap toggle are judged on: a numbered blank row, no phantom row from
     // the fence's trailing newline, and a continuation that either scrolls or breaks.
     text: "Picking up the next phase rather than waiting: wiring the loop, since that is what makes everything so far actually runnable.\n\nThe budget per turn is $O(n^2)$ in the replayed history, so the cache does most of the work:\n\n```rust\nlet ratio = cached as f32 / prompt as f32;\n// A line this long is what the wrap toggle is for: either it runs past the column and the block scrolls, or it breaks inside itself.\nif ratio > 0.6 { reuse(ratio) } else { replay_from_turn(0) }\n\nreplay_from_turn(0)\n```\n\nThe build that reads these weights is [the PrismML fork](https://github.com/PrismML-Eng/llama.cpp).",
+    // The reasoning that streamed in before the answer above. It is here so the folded row the column
+    // draws over a turn's thinking is a surface a capture can reach: the native window takes no
+    // injected clicks, and a real run's reasoning is not something a capture can wait on. It is not
+    // answer text, which is the whole point of the row — the paragraph below is what was asked for.
+    thought:
+      "The prompt asks to wire the loop, so the shape to settle first is the budget: replaying the whole history each turn is O(n^2) and the machine cannot pay that. Cache the prefix and replay only what the last turn changed. The catalog already pins a fork-only engine, so the reasoner switches are available; no need to invent a second path.",
   },
   {
     id: "f2",
