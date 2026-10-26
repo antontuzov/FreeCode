@@ -299,6 +299,15 @@ mod tests {
     }
 
     #[test]
+    fn the_settings_default_names_a_model_this_build_carries() {
+        let default = find(freecode_config::DEFAULT_FREE_MODEL_ID)
+            .expect("the settings default must be a registry id");
+        // It is a promotion row, which is what makes the default answerable through the OpenCode app
+        // on this Mac rather than through a gateway key nobody saved.
+        assert_eq!(default.upstream, None);
+    }
+
+    #[test]
     fn the_promo_models_stay_listed_but_unroutable() {
         let big_pickle = find("big-pickle").unwrap();
         assert_eq!(big_pickle.upstream, None);

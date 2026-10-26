@@ -10,6 +10,7 @@ import {
   ctaLabel,
   isPagePath,
   isTurn,
+  liveRows,
   readSubjects,
   reviewRows,
   stepLabel,
@@ -430,6 +431,63 @@ describe("derivations off the rows", () => {
         detail: "2 rounds · 3 reads",
       },
     ]);
+  });
+});
+
+describe("the live round", () => {
+  it("is the calls above the answer the run is still writing, not the earlier folded round", () => {
+    const list: Row[] = [
+      { id: "q", kind: "turn", role: "user", text: "build it" },
+      { id: "a", kind: "turn", role: "assistant", text: "Reading first." },
+      {
+        id: "b",
+        kind: "toolBatch",
+        status: "ok",
+        collapsed: true,
+        children: [{ id: "old", kind: "readFile", status: "ok" }],
+      },
+      { id: "x", kind: "editFile", subject: "index.html", status: "ok" },
+      { id: "y", kind: "terminal", status: "running" },
+      { id: "open", kind: "turn", role: "assistant", text: "", streaming: true },
+    ];
+    expect(liveRows(list).map((step) => step.id)).toEqual(["x", "y"]);
+  });
+
+  it("keeps the route's reasoning inside the card, in the order it streamed", () => {
+    // The OpenCode route streams a thought-only turn after every call, and the reference draws that
+    // reasoning as one more row of the round: the card holds both, and the call above it is still
+    // the round in flight rather than history.
+    const list: Row[] = [
+      { id: "q", kind: "turn", role: "user", text: "build it" },
+      { id: "a", kind: "turn", role: "assistant", text: "Building it." },
+      { id: "x", kind: "editFile", subject: "index.html", status: "ok" },
+      {
+        id: "t",
+        kind: "turn",
+        role: "assistant",
+        text: "",
+        thought: "Now check it.",
+        streaming: true,
+      },
+    ];
+    expect(liveRows(list).map((row) => row.id)).toEqual(["x", "t"]);
+  });
+
+  it("is nothing once the answer the round was writing has started", () => {
+    const list: Row[] = [
+      { id: "x", kind: "readFile", status: "ok" },
+      { id: "a", kind: "turn", role: "assistant", text: "Done.", streaming: true },
+    ];
+    expect(liveRows(list)).toEqual([]);
+  });
+
+  it("stops at the plan and the refusal rows, which the card does not own", () => {
+    const list: Row[] = [
+      { id: "x", kind: "readFile", status: "ok" },
+      { id: "todo", kind: "todo", status: "ok" },
+      { id: "open", kind: "turn", role: "assistant", text: "", streaming: true },
+    ];
+    expect(liveRows(list)).toEqual([]);
   });
 });
 

@@ -449,7 +449,7 @@ function pushStep(rows: Row[], step: Step): Row[] {
  * batch ran it. A plan is the run's own narration of the round rather than one of its calls — folded
  * into the count it would disappear behind a disclosure on every update, which is the one row the
  * user is watching. */
-function isToolStep(row: Row): boolean {
+function isToolStep(row: Row): row is Step {
   return !isTurn(row) && row.kind !== "toolBatch" && row.kind !== "blocked" && row.kind !== "todo";
 }
 
@@ -503,6 +503,34 @@ export function reviewRows(rows: Row[], scope: ReviewScope): Row[] {
     if (row && isTurn(row) && row.role === "user") return rows.slice(i + 1);
   }
   return rows;
+}
+
+/**
+ * The rows of the round still in flight, in the order they ran.
+ *
+ * The round opens under the last prose the run spoke, so everything after that turn is the card's:
+ * its calls and the reasoning it streamed between them. The walk back therefore takes assistant turns
+ * that carry only a thought and the tool rows beside them, and stops at the first turn with an answer
+ * — that turn is the narration the round opened with — at the prompt, or at a row the card does not
+ * own (a folded round, a plan, a refusal). Every earlier round has folded under its "Ran N tools"
+ * header, which is what leaves one card's worth of rows here rather than the whole run.
+ */
+export function liveRows(rows: Row[]): Row[] {
+  const live: Row[] = [];
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (!row) break;
+    if (isTurn(row)) {
+      if (row.role !== "assistant" || row.text) break;
+      // The empty turn the run is about to speak through holds nothing to draw; the loop steps over
+      // it and keeps walking, because the round above it is still the round in flight.
+      if (row.thought) live.unshift(row);
+      continue;
+    }
+    if (!isToolStep(row)) break;
+    live.unshift(row);
+  }
+  return live;
 }
 
 /**

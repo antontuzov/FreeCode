@@ -7,7 +7,7 @@ import { shortcutLabel } from "../lib/shortcuts";
 import { useChat } from "../state/chat";
 import { useNav } from "../state/nav";
 import { useSettings } from "../state/settings";
-import { useTranscript } from "../state/transcript";
+import { useTranscript, type RunDiff, type RunRounds } from "../state/transcript";
 import { Icon } from "./icons";
 import { ModelPicker } from "./ModelPicker";
 
@@ -16,6 +16,62 @@ import { ModelPicker } from "./ModelPicker";
  * a per-tool table only Settings can fill, so a press leaves that mode rather than landing in it.
  */
 const DIAL: ApprovalMode[] = ["auto_approve", "ask_always", "plan_only"];
+
+/**
+ * What the run's pill says: the spinner while calls are in flight, the budget it is spending, and the
+ * ledger it is leaving. The dot is the reference's separator between the two readings; the spinner is
+ * the same arc the header's step glyph draws, turning only while there is something to wait for.
+ */
+function PillBody({
+  locale,
+  running,
+  runRounds,
+  runDiff,
+}: {
+  locale: Locale;
+  running: boolean;
+  runRounds: RunRounds | null;
+  runDiff: RunDiff | null;
+}) {
+  return (
+    <>
+      <Icon
+        name={running ? "step" : "review"}
+        size={13}
+        className={`shrink-0 ${running ? "animate-spin" : ""}`}
+        aria-hidden
+      />
+      {runRounds && (
+        <span className="tabular-nums">
+          {translate(locale, "composer.step", {
+            done: runRounds.done,
+            max: runRounds.max,
+          })}
+        </span>
+      )}
+      {runRounds && runDiff && (
+        <span className="run-pill-sep" aria-hidden>
+          ·
+        </span>
+      )}
+      {runDiff && (
+        <>
+          <span className="whitespace-nowrap">
+            {translate(
+              locale,
+              runDiff.files === 1 ? "transcript.diff.fileChanged" : "transcript.diff.filesChanged",
+              { count: runDiff.files },
+            )}
+          </span>
+          <span className="font-mono tabular-nums">
+            <span className="text-success">+{runDiff.added}</span>{" "}
+            <span className="text-danger">−{runDiff.removed}</span>
+          </span>
+        </>
+      )}
+    </>
+  );
+}
 
 /**
  * The composer's approval selector is the agent loop's permission dial, and it edits the one value the
@@ -115,65 +171,25 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   return (
     <div className="app-composer shrink-0 px-[var(--space-6)] pb-[var(--space-3)]">
       {(runRounds || runDiff) && (
-        // What the run has spent and what it cost, on the line above the box it spent them in. The
-        // step pill counts the loop's rounds against the budget the host announced, so a long agent
-        // run says where it is as well as where it is going; the diff pill counts the writes.
-        <div className="mx-auto mb-[var(--space-2)] flex w-full max-w-[var(--content-width)] flex-wrap items-center gap-[var(--space-2)]">
-          {runRounds && (
-            <span className="inline-flex items-center gap-[var(--space-2)] rounded-[var(--radius-pill)] border border-line bg-elevated px-[var(--space-3)] py-1 text-fine text-muted">
-              <Icon
-                name="step"
-                size={13}
-                className={running ? "animate-spin" : undefined}
-                aria-hidden
-              />
-              {translate(locale, "composer.step", {
-                done: runRounds.done,
-                max: runRounds.max,
-              })}
-            </span>
-          )}
-          {runDiff && (
-            // What the run changed, where the composer already is. The count is the host's ledger of
-            // distinct files, not the number of edit rows, and it moves while the run goes rather than
-            // arriving once it ends — an agent that has changed six files is a different thing to
-            // watch than one that has changed none.
-            //
-            // It is also the control that opens the change. Every write row carries the lines it wrote
-            // from the build that stages them, so a pill that counted a diff and could not show one
-            // would be a number the user has to go and find in the workspace themselves.
+        // One capsule above the box, as the reference draws it: the spinner, the round counter, a
+        // dot, then what the run has changed. The two readings were separate pills, which read as two
+        // unrelated facts; they are one line about the same run. The pill doubles as the way into
+        // Review, because a count that cannot show what it counts is a number to go and find yourself.
+        <div className="mx-auto mb-[var(--space-2)] flex w-full max-w-[var(--content-width)] justify-center">
+          {runDiff ? (
             <button
               type="button"
               onClick={toggleReview}
               aria-expanded={review}
               title={translate(locale, review ? "composer.review.close" : "composer.review.open")}
-              className={`inline-flex items-center gap-[var(--space-2)] rounded-[var(--radius-pill)] border px-[var(--space-3)] py-1 text-fine transition-colors ${
-                review
-                  ? "border-accent-line bg-accent-soft text-fg"
-                  : "border-line bg-elevated text-muted hover:bg-hover hover:text-fg"
-              }`}
+              className="run-pill"
             >
-              <Icon name="review" size={13} />
-              {translate(
-                locale,
-                runDiff.files === 1
-                  ? "transcript.diff.fileChanged"
-                  : "transcript.diff.filesChanged",
-                { count: runDiff.files },
-              )}
-              <span className="font-mono tabular-nums">
-                <span className="text-success">+{runDiff.added}</span>{" "}
-                <span className="text-danger">−{runDiff.removed}</span>
-              </span>
-              {/* The one glyph that says which way this press goes: down opens, and the same control
-                  with the chevron turned is the one that closes. */}
-              <Icon
-                name="chevronDown"
-                size={12}
-                className={`disclosure-icon shrink-0 ${review ? "rotate-180" : ""}`}
-                aria-hidden
-              />
+              <PillBody locale={locale} running={running} runRounds={runRounds} runDiff={runDiff} />
             </button>
+          ) : (
+            <span className="run-pill">
+              <PillBody locale={locale} running={running} runRounds={runRounds} runDiff={null} />
+            </span>
           )}
         </div>
       )}

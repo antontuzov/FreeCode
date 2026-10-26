@@ -1104,6 +1104,17 @@ async fn free_answer(app: &AppHandle, settings: &Settings) -> Result<Answer, Str
             directory,
         }));
     }
+    // A promotion with no upstream id is served only by the service above, so its absence is the
+    // reason to give: "not routable" would send the user to a picker whose other promotions the same
+    // missing service would refuse next. This is the first-run state of a build that defaults onto
+    // a promotion, so it says what to start rather than what the registry thinks of the row.
+    if model.upstream.is_none() {
+        return Err(format!(
+            "{} is served by the free-model service on this Mac, which is not answering; start it, \
+             or pick a free model the gateway carries",
+            model.label
+        ));
+    }
     let (model, max_tokens) = free_plan(settings)?;
     // Read from the Keychain on the blocking pool and lives in this struct and the requests it
     // makes; nothing here logs or echoes it.

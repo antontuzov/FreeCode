@@ -395,6 +395,134 @@ button.card-row:disabled {
   font-size: var(--size-quiet);
 }
 
+/* ---- the round in flight ---- */
+
+/* The reference draws a run's current round as one card: the square chevron and "Running · 71s" at
+ * the column's left edge, then the calls under a hairline that starts below the chevron and ends
+ * with the last one. Earlier rounds have folded into their "Ran N tools" line, so the card holds one
+ * round's calls and never grows with the run. */
+.run-card {
+  margin-block: var(--space-1) var(--space-2);
+}
+.run-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--size-quiet);
+  font-weight: 500;
+}
+/* The body scrolls on its own once a round is longer than the column should give it: forty reads in
+ * one round must not push the composer off the window. The thumb is quiet — the list is a detail of
+ * the card, not a second scroll region the user is meant to hunt for. */
+.run-card-body {
+  margin: var(--space-2) 0 0 9px;
+  padding-left: 22px;
+  border-left: 1px solid var(--border);
+  max-height: min(440px, 52vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+/* The card's rows sit closer than the column's: the reference reads them as one block under the
+ * header, and the tool row's own 6px rhythm would make a nine-call round twice its height. */
+.run-card-body > li > div {
+  padding-block: 3px;
+}
+
+/* ---- between rounds ---- */
+
+/* No call is running, so the card is all ticks and the run is preparing the next one. The reference
+ * says it with a lit 3x3 grid and a quietly shimmering line; the dots breathe in a diagonal wave so
+ * the row reads as motion without a spinner arguing it is busy with something specific. */
+.getting-ready {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-2) var(--space-1);
+  font-size: var(--size-quiet);
+}
+.dot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 3px);
+  gap: 3px;
+  padding: 1px;
+}
+.dot-grid > span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.25;
+  animation: dot-grid 1.3s ease-in-out infinite;
+}
+@keyframes dot-grid {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+.getting-ready-label {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--text-faint) 25%,
+    var(--text-muted) 50%,
+    var(--text-faint) 75%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: getting-ready 2s linear infinite;
+}
+@keyframes getting-ready {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+/* ---- the run's pill ---- */
+
+/* One capsule above the composer, as the reference draws it: the spinner, the round counter, a dot,
+ * then what the run has changed. It used to be two pills, which read as two unrelated facts; the
+ * reference says they are one line about the same run. The border stays visible at rest because the
+ * pill is also the way into Review. */
+.run-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: var(--size-fine);
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    border-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+button.run-pill:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+button.run-pill[aria-expanded="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.run-pill-sep {
+  color: var(--text-faint);
+}
+
 /* A round of calls folded shut is the reference's loudest row in the column, and the outline is why:
  * folded, a bare `>` in front of "Ran 14 tools" reads as punctuation the row happens to start with,
  * while the same glyph inside a bordered square reads as the thing you press to see the fourteen.
@@ -1564,6 +1692,8 @@ select.field-input {
 @media (prefers-reduced-motion: reduce) {
   .dot-running,
   .skeleton-line,
+  .dot-grid > span,
+  .getting-ready-label,
   .caret-streaming > :last-child::after,
   .row-enter,
   .disclosure-panel,

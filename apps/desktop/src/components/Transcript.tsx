@@ -7,6 +7,7 @@ import { effortReachesRoute, nextEffort, useSettings } from "../state/settings";
 import {
   ctaLabel,
   isTurn,
+  liveRows,
   stepLabel,
   stepText,
   taskTitle,
@@ -397,18 +398,105 @@ function useRunSeconds(startedAt: number | null): number | null {
 }
 
 /**
- * The line's words for how far into a wait the user is.
+ * The round in flight, in the reference's shape: a square chevron and "Running · 71s" over the work
+ * that round has done, indented under a hairline that ends with the last row. A closed round folds
+ * into the "Ran N tools" line above, so this card is only ever one round's worth of rows.
  *
- * The clock is the only thing the app knows about a run that has not answered yet — the engine reports
- * no progress while it pages weights in or reads the replay — so the ticker says where the *wait* is
- * rather than pretending to know where the answer is. Three tiers of the same honest number: a run that
- * has been going for four minutes should not read like one that started a second ago, which is what
- * makes the reference's rotating line feel alive instead of stuck.
+ * The body scrolls on its own once a round has more rows than the column should give it: a run that
+ * reads forty files in one round is not a run whose card should push the composer off the window.
+ * A route that streams its reasoning gets a row for it here too — the reference draws a thought as
+ * one more tick in the card rather than as a block between the calls.
  */
-function waitKey(seconds: number): string {
-  if (seconds >= 120) return "transcript.keepGoing.veryLong";
-  if (seconds >= 30) return "transcript.keepGoing.long";
-  return "transcript.keepGoing.elapsed";
+function RunCard({
+  locale,
+  seconds,
+  rows,
+}: {
+  locale: Locale;
+  seconds: number | null;
+  rows: Row[];
+}) {
+  const [open, setOpen] = useState(true);
+  const body = useRef<HTMLUListElement>(null);
+  // The newest row is the one being watched, and the card is the only part of the column that can
+  // scroll under the user's eyes without moving the turn above it.
+  useEffect(() => {
+    const box = body.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [rows.length]);
+  const label =
+    seconds === null
+      ? translate(locale, "transcript.run.starting")
+      : translate(locale, "transcript.run.running", { seconds });
+  return (
+    <section className="run-card" aria-label={translate(locale, "transcript.run.title")}>
+      <div className="run-card-head">
+        <button
+          type="button"
+          onClick={() => setOpen((was) => !was)}
+          aria-expanded={open}
+          className="icon-btn step-toggle"
+          aria-label={translate(locale, "transcript.run.title")}
+        >
+          <Icon
+            name="chevronRight"
+            size={13}
+            className={`disclosure-icon ${open ? "rotate-90" : ""}`}
+          />
+        </button>
+        <span className="text-fg">{label}</span>
+      </div>
+      {open && rows.length > 0 && (
+        <ul ref={body} className="run-card-body">
+          {rows.map((row) =>
+            isTurn(row) ? (
+              <LiveThought key={row.id} turn={row} locale={locale} />
+            ) : (
+              <StepRow key={row.id} step={row} locale={locale} />
+            ),
+          )}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** A thought inside the live card. The reference gives reasoning the same tick as a call and the
+ *  beginning of what it said; the whole text stays in the turn's own disclosure once the run is done. */
+function LiveThought({ turn, locale }: { turn: Turn; locale: Locale }) {
+  return (
+    <li className="row-enter">
+      <div className="flex items-center gap-2 py-1.5">
+        {turn.streaming ? (
+          <span className="dot-running" aria-hidden />
+        ) : (
+          <Icon name="check" size={13} className="text-success" />
+        )}
+        <span className="shrink-0 text-quiet font-medium text-fg">
+          {translate(locale, "transcript.step.thought")}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-fine text-faint">· {turn.thought}</span>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * The reference's waiting row: a grid of lit dots and a soft "Getting ready..." under the card. It
+ * stands between two rounds, which is when the run is preparing the next call rather than running one
+ * — a card full of finished ticks with nothing under it reads as a run that stopped.
+ */
+function GettingReady({ locale }: { locale: Locale }) {
+  return (
+    <p className="getting-ready" role="status">
+      <span className="dot-grid" aria-hidden>
+        {Array.from({ length: 9 }, (_, i) => (
+          <span key={i} style={{ animationDelay: `${i * 0.1}s` }} />
+        ))}
+      </span>
+      <span className="getting-ready-label">{translate(locale, "transcript.gettingReady")}</span>
+    </p>
+  );
 }
 
 /**
@@ -624,6 +712,15 @@ export function Transcript({
   const checkpoints = useMemo(() => checkpointsOf(rows), [rows]);
   const latest = useMemo(() => latestPlan(rows), [rows]);
   const plan = latest?.items ?? null;
+  // The round still in flight is drawn as one card under the column; the rows it holds are taken out
+  // of the plain list so a call is never on screen twice. Its calls and the reasoning between them
+  // both belong to the card — a thought is one more tick of the round, as the reference draws it.
+  const live = useMemo(() => (running ? liveRows(rows) : []), [rows, running]);
+  const liveIds = useMemo(() => new Set(live.map((row) => row.id)), [live]);
+  // Between rounds the model is preparing the next call: no call is running, and the card's ticks are
+  // all that is left of the round. That is the beat the reference fills with its dot grid.
+  const preparing =
+    running && live.length > 0 && !live.some((row) => !isTurn(row) && row.status === "running");
 
   // The dash marks the pair at the top of the column, which is the pair the user is looking at.
   const spy = useCallback(() => {
@@ -719,8 +816,17 @@ export function Transcript({
             </div>
           ) : (
             <ul className="mx-auto w-full max-w-[var(--content-width)]">
-              {rows.map((row) =>
-                isTurn(row) && row.role === "user" ? (
+              {rows.map((row) => {
+                if (liveIds.has(row.id)) {
+                  // The card takes the place of the round's first row, so a thought the route
+                  // streams under the round still lands below the card rather than above it.
+                  return row.id === live[0]?.id ? (
+                    <li key="run-card" className="list-none">
+                      <RunCard locale={locale} seconds={waited} rows={live} />
+                    </li>
+                  ) : null;
+                }
+                return isTurn(row) && row.role === "user" ? (
                   <TurnRow
                     key={row.id}
                     turn={row}
@@ -733,17 +839,14 @@ export function Transcript({
                   />
                 ) : (
                   <RowView key={row.id} row={row} locale={locale} livePlanId={latest?.id} />
-                ),
+                );
+              })}
+              {preparing && (
+                <li className="list-none">
+                  <GettingReady locale={locale} />
+                </li>
               )}
             </ul>
-          )}
-          {running && (
-            <p className="transcript-row mt-[var(--space-3)] tabular-nums">
-              <span className="dot-running" aria-hidden />
-              {waited === null
-                ? translate(locale, "transcript.keepGoing")
-                : translate(locale, waitKey(waited), { seconds: waited })}
-            </p>
           )}
         </div>
 

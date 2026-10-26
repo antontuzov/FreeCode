@@ -34,7 +34,19 @@ pub use voice::{InputDevice, Shortcut, Voice};
 pub const DEFAULT_MODEL_ID: &str = "ternary-bonsai-1-7b";
 
 /// Bump when a stored document must be migrated rather than silently defaulted.
-pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
+///
+/// 3 — a document that never picked a model is moved onto [`DEFAULT_FREE_MODEL_ID`]. The app answers
+/// on the free tier by default now, and an install that was set up before that choice existed would
+/// otherwise keep reaching for the local engine's weights.
+pub const SETTINGS_SCHEMA_VERSION: u32 = 3;
+
+/// The model a run answers on when the user has not picked one.
+///
+/// It is OpenCode's own promotion, the one their app serves from the service already running on this
+/// Mac with no gateway key: picking a routable row instead would make the default depend on a key
+/// nobody saved. The picker still decides — an explicit local or remote model clears `free_model` —
+/// but a fresh install starts on a free model rather than on weights it has to download first.
+pub const DEFAULT_FREE_MODEL_ID: &str = "big-pickle";
 
 /// The system turn every conversation starts with unless the user has written their own.
 ///
@@ -190,9 +202,11 @@ pub struct Settings {
     pub project: Project,
     pub local_model: LocalModel,
     pub remote_provider: RemoteProvider,
-    /// The free-model picker's choice, by registry id. `None` means no free model is selected.
-    /// The answer order is free first, then the remote provider, then the local engine — the picker
-    /// is the most recent intent, and picking a local model clears this field.
+    /// The free-model picker's choice, by registry id. It starts at [`DEFAULT_FREE_MODEL_ID`], so a
+    /// window with no choice recorded still answers on a free model; `None` is the picker's way of
+    /// saying the chosen route is the local engine or the remote provider. The answer order is free
+    /// first, then the remote provider, then the local engine — the picker is the most recent intent,
+    /// and picking a local model clears this field.
     pub free_model: Option<String>,
     pub onboarding: Onboarding,
 }
@@ -210,7 +224,7 @@ impl Default for Settings {
             project: Project::default(),
             local_model: LocalModel::default(),
             remote_provider: RemoteProvider::default(),
-            free_model: None,
+            free_model: Some(DEFAULT_FREE_MODEL_ID.into()),
             onboarding: Onboarding::default(),
         }
     }
@@ -354,6 +368,9 @@ impl Settings {
     }
 
     fn migrated(mut self) -> Self {
+        // Read before the version is restamped: the free default is a one-time move, not a rule that
+        // keeps overriding a local pick on every load.
+        let stored_schema = self.schema_version;
         // Each build ships a new contract, and an install that never edited it should be answering on
         // the one this loop matches. Replacing only an exact stored default is what makes that safe:
         // trimming is deliberate, because a document that never carried user words moves forward,
@@ -361,6 +378,16 @@ impl Settings {
         let stored = self.sampling.system_prompt.trim();
         if PREVIOUS_SYSTEM_PROMPTS.contains(&stored) {
             self.sampling.system_prompt = DEFAULT_SYSTEM_PROMPT.to_string();
+        }
+        // A document from before this build had no way to record "answer on the free tier" except by
+        // opening the picker, so an install that was set up earlier would keep reaching for the local
+        // engine. A remote provider is the one deliberate route this does not step on; a local pick
+        // made after this build is a schema-3 document and is left alone.
+        if stored_schema < 3
+            && self.free_model.is_none()
+            && self.remote_provider.source != ModelSource::Remote
+        {
+            self.free_model = Some(DEFAULT_FREE_MODEL_ID.into());
         }
         self.schema_version = SETTINGS_SCHEMA_VERSION;
         self
@@ -404,6 +431,47 @@ mod tests {
             ..s
         };
         assert_eq!(s.active(), SamplingProfile::INSTRUCT);
+    }
+
+    #[test]
+    fn the_free_default_reaches_an_older_document_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert_eq!(
+            Settings::default().free_model.as_deref(),
+            Some(DEFAULT_FREE_MODEL_ID)
+        );
+
+        // A document written before this build never picked a model; it moves onto the free tier.
+        let old = Settings {
+            schema_version: 2,
+            free_model: None,
+            ..Settings::default()
+        };
+        old.save(&path).unwrap();
+        let back = Settings::load(&path).unwrap();
+        assert_eq!(back.free_model.as_deref(), Some(DEFAULT_FREE_MODEL_ID));
+        assert_eq!(back.schema_version, SETTINGS_SCHEMA_VERSION);
+
+        // A local pick saved by this build stays local: the migration is a one-time move, not a rule
+        // that keeps overriding the picker every time the file is read.
+        let mut local = back;
+        local.free_model = None;
+        local.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap().free_model, None);
+
+        // The remote provider is the one route the migration refuses to step on.
+        let remote = Settings {
+            schema_version: 2,
+            free_model: None,
+            remote_provider: RemoteProvider {
+                source: ModelSource::Remote,
+                ..RemoteProvider::default()
+            },
+            ..Settings::default()
+        };
+        remote.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap().free_model, None);
     }
 
     #[test]
