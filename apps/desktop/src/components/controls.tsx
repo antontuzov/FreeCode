@@ -10,10 +10,14 @@ import { shortcutChips } from "../lib/shortcuts";
 export function Section({
   label,
   description,
+  bare,
   children,
 }: {
   label: string;
   description?: string;
+  /** A section whose content is its own surface — a row of circles needs no card around it, and the
+   * card's hairline would only draw a box the picker does not have. */
+  bare?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -24,7 +28,7 @@ export function Section({
       {description && (
         <p className="settings-section-description mt-1 text-quiet text-muted">{description}</p>
       )}
-      <div className="card mt-[var(--space-3)]">{children}</div>
+      <div className={bare ? "mt-[var(--space-3)]" : "card mt-[var(--space-3)]"}>{children}</div>
     </section>
   );
 }
@@ -279,8 +283,8 @@ export function ThemeTile({
   );
 }
 
-/** One accent swatch. Selected is the ring the reference draws: a gap the page's own colour then a
- * ring in the swatch itself, so the mark still reads on a pale swatch. */
+/** One accent swatch. The chosen one is marked by its tick alone: the picker is a straight row of
+ * plain circles, so a ring around one of them would outline a shape the row does not otherwise have. */
 export function AccentSwatch({
   style,
   name,

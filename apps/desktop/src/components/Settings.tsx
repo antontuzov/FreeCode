@@ -330,13 +330,13 @@ export function Settings({
         className="settings-nav flex h-full w-[var(--sidebar-width)] shrink-0 flex-col border-r border-line bg-panel"
       >
         <div
-          className="pt-[var(--space-3)] pr-[var(--space-2)]"
+          className="flex h-[calc(var(--traffic-light-center)*2)] items-center pr-[var(--space-2)]"
           style={{ paddingLeft: "max(var(--space-4), var(--traffic-light-inset))" }}
         >
           <button
             type="button"
             title={shortcutLabel("escape")}
-            className="nav-item settings-back"
+            className="nav-item settings-back w-full"
             onClick={onBack}
           >
             <span className="flex min-w-0 items-center gap-[var(--space-2)]">
@@ -671,11 +671,11 @@ function ThemeTab({ doc, set, t, locale }: { doc: SettingsDoc; set: SetFn; t: T;
         </Row>
       </Section>
 
-      <Section label={t("section.accent")} description={t("section.accent.desc")}>
+      <Section label={t("section.accent")} description={t("section.accent.desc")} bare>
         <div
           role="group"
           aria-label={t("section.accent")}
-          className="flex flex-wrap items-center gap-[var(--space-3)] px-[var(--space-4)] py-[var(--space-5)]"
+          className="flex items-center justify-between gap-[var(--space-3)] py-[var(--space-4)]"
         >
           {STYLES.map((s) => (
             <AccentSwatch
@@ -697,9 +697,7 @@ function ThemeTab({ doc, set, t, locale }: { doc: SettingsDoc; set: SetFn; t: T;
             <Icon name="editFile" size={15} />
           </button>
         </div>
-        <p className="px-[var(--space-4)] pb-[var(--space-4)] text-fine text-muted">
-          {t("accent.note")}
-        </p>
+        <p className="text-fine text-muted">{t("accent.note")}</p>
       </Section>
 
       <Section label={t("section.typography")} description={t("section.typography.desc")}>
