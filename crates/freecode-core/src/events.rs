@@ -140,7 +140,7 @@ pub enum NoticeCode {
     EffortNotSupported,
     /// The saved reasoning effort went nowhere because this route sends no effort field at all.
     ///
-    /// The free gateway, a remote provider and the FreeCode service each answer without one, and
+    /// A remote provider and the FreeCode service each answer without one, and
     /// none of them falls back to the local engine. Said rather than left to the dial's own silence,
     /// because the user's choice is a promise the run could not keep.
     EffortNotSent,
@@ -168,9 +168,12 @@ pub enum NoticeCode {
     ProjectorLoading,
     /// The selected model publishes no projector at all, so it cannot be given a picture.
     ModelTakesNoImages,
-    /// The chosen free model refused the request before a token landed, and the gateway moved the
-    /// turn to the next routable one. Said out loud because the answer that follows is not the model
-    /// the picker named.
+    /// A free turn was refused before a token landed and an older build moved it to the next model in
+    /// its list, which is why the answer that followed was not the one the picker named.
+    ///
+    /// The gateway this announced is gone, and nothing emits this code now. The variant stays
+    /// because a conversation filed while it did fire has to read back the way it was seen, and the
+    /// transcript has no other way to say that a different model answered it.
     FreeModelFallback,
     /// The prompt asked for the agent loop and the route that answers it carries none of this app's
     /// tools, so the run's work happens out of this window's sight.

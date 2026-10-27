@@ -56,12 +56,10 @@ export type ModelStatus = {
     id: string;
     label: string;
     provider: string;
-    /** False for the promotion rows, which the gateway route refuses rather than routing. */
-    routable: boolean;
   } | null;
   /**
-   * The OpenCode app's local service, which answers every free row without a gateway key. `available`
-   * is a probe of this machine, not a setting: the picker's rows go live when it is true.
+   * The FreeCode app's local service, which is the only thing that answers a free row. `available` is
+   * a probe of this machine, not a setting: the picker's rows go live when it is true.
    */
   opencode: { available: boolean; version: string | null };
   packing: string;
@@ -83,17 +81,15 @@ export type ModelStatus = {
 
 /**
  * One free-model registry entry, as the picker draws it. Mirrors
- * `freecode_desktop_lib::free_models::FreeModelInfo`. `routable` is about the gateway key: a row whose
- * model OpenRouter does not list cannot be sent there. `local` is the other route — the OpenCode app
- * on this Mac, which answers the whole list — so a row can be unpickable for the key and pickable
- * for the app in the same breath.
+ * `freecode_desktop_lib::free_models::FreeModelInfo`. `local` is the whole of pickability: these
+ * models are served by the FreeCode app on this Mac, so a row the service is not answering is listed
+ * and not choosable. There is no second route to be routable or unroutable about.
  */
 export type FreeModelInfo = {
   id: string;
   label: string;
   provider: string;
   isFree: boolean;
-  routable: boolean;
   local: boolean;
 };
 
@@ -856,17 +852,11 @@ export const ipc = {
   /** Remove the saved key; answers whether one is saved now, which is always `false` on success. */
   clearRemoteKey: () => invoke<boolean>("clear_remote_key"),
   /**
-   * The free-model registry as the picker draws it. No secret rides along: ids, labels, providers,
-   * whether the gateway can be reached with this entry, and whether the OpenCode app on this Mac is
-   * answering.
+   * The free-model registry as the picker draws it. No secret rides along, because none is used: ids,
+   * labels, providers, and whether the FreeCode app on this Mac is answering — which is the only way
+   * any of these can be asked.
    */
   freeModelsList: () => invoke<FreeModelInfo[]>("free_models_list"),
-  /** Whether the Keychain holds the free gateway key. The key itself is never returned. */
-  freeKeyPresent: () => invoke<boolean>("free_key_present"),
-  /** Write a pasted gateway key to the login Keychain; answers whether one is saved now. */
-  saveFreeKey: (key: string) => invoke<boolean>("save_free_key", { key }),
-  /** Remove the saved gateway key; answers whether one is saved now, always `false` on success. */
-  clearFreeKey: () => invoke<boolean>("clear_free_key"),
   /**
    * Whether the OpenCode app's local service answers, and its version. A probe of this machine, not
    * a credential: the service's own password never crosses this boundary.

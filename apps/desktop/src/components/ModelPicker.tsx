@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 
 import { Icon } from "./icons";
+import { ModelMark } from "./ModelMark";
 import { translate, type Locale } from "../i18n";
 import { ipc, type CatalogModel, type FreeModelInfo, type KnowledgeCenter } from "../lib/ipc";
 import { useModel } from "../state/model";
@@ -41,8 +42,8 @@ export function ModelPicker({
   // A remote provider has no pack, no download and no catalog row here: its model id is free text in
   // Settings, so this panel can only say which provider answers and offer the page that changes it.
   const remote = status?.remote ?? null;
-  // A free pick is the third source the pill names: it has a registry row here, and its one gateway
-  // key lives in Settings like the provider's.
+  // A free pick is the third source the pill names: it has a registry row here, and all of them are
+  // answered by the free-model service on this Mac rather than by a key in Settings.
   const free = status?.free ?? null;
   const [open, setOpen] = useState(SEEDED);
   const [center, setCenter] = useState<KnowledgeCenter | null>(null);
@@ -97,11 +98,10 @@ export function ModelPicker({
     const settings = useSettings.getState();
     if (!settings.loaded) await settings.load();
     const entry = freeList?.find((m) => m.id === id);
-    // A row answers through the gateway when its upstream id is known, and through the OpenCode app
-    // whenever that service is answering. A row with neither is listed and not pickable: the host
-    // would refuse the turn anyway, and a row that looks pickable but can only fail is the bug a
-    // silent no-op would hide.
-    if (!entry || !(entry.routable || entry.local)) return;
+    // A row answers when the free-model service on this Mac is answering, which is the only route the
+    // registry has. A row without it is listed and not pickable: the host would refuse the turn
+    // anyway, and a row that looks pickable but can only fail is the bug a silent no-op would hide.
+    if (!entry || !entry.local) return;
     setOpen(false);
     if (id === status?.free?.id) return;
     await useSettings.getState().update((doc) => {
@@ -159,9 +159,14 @@ export function ModelPicker({
             <p className="section-label px-[var(--space-3)] pt-[var(--space-2)]">{t("title")}</p>
             {remote && (
               <>
-                <div className="flex items-start gap-[var(--space-3)] px-[var(--space-3)] py-[var(--space-2)]">
+                <div className="flex items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)]">
+                  {/* No maker mark here: a remote provider's model id is free text the app cannot
+                      verify, so the row keeps the panel's own sign for "answered elsewhere". */}
+                  <span aria-hidden className="model-mark">
+                    <Icon name="globe" size={14} />
+                  </span>
                   <span className="row-copy min-w-0">
-                    <span className="row-title truncate">{remote.model || t("remote")}</span>
+                    <span className="model-name truncate">{remote.model || t("remote")}</span>
                     <span className="row-desc truncate">{providerHost}</span>
                   </span>
                   <span className="pill shrink-0">{t("remote")}</span>
@@ -191,8 +196,9 @@ export function ModelPicker({
                     className="picker-row"
                     onClick={() => void choose(model.id)}
                   >
+                    <ModelMark provider={model.repoId.split("/")[0] ?? ""} />
                     <span className="row-copy min-w-0">
-                      <span className="row-title truncate">{model.name}</span>
+                      <span className="model-name truncate">{model.name}</span>
                       <span className="row-desc truncate">
                         {`${t("packs", { held, total: model.packs.length })} · ${spanOf(model)}`}
                       </span>
@@ -206,10 +212,10 @@ export function ModelPicker({
                   </button>
                 );
               })}
-            {/* The free tier: the list OpenCode publishes, answered either by the gateway the key
-                reaches or by the OpenCode app on this Mac. A row is pickable when either route is
-                live; one with neither is listed and marked, and picking it is refused in the same
-                breath — the host would refuse the turn anyway. */}
+            {/* The free tier: the list the service publishes, answered by the FreeCode app on this
+                Mac. A row is pickable exactly when that service is answering; one with nothing behind
+                it is listed and marked, and picking it is refused in the same breath — the host would
+                refuse the turn anyway. */}
             {freeList !== null && freeList.length > 0 && (
               <>
                 <p className="section-label px-[var(--space-3)] pt-[var(--space-2)]">
@@ -217,24 +223,22 @@ export function ModelPicker({
                 </p>
                 {freeList.map((model) => {
                   const current = model.id === free?.id;
-                  const live = model.routable || model.local;
                   return (
                     <button
                       key={model.id}
                       type="button"
                       data-current={current || undefined}
-                      aria-disabled={!live || undefined}
+                      aria-disabled={!model.local || undefined}
                       className="picker-row"
                       onClick={() => void chooseFree(model.id)}
                     >
+                      <ModelMark provider={model.provider} />
                       <span className="row-copy min-w-0">
-                        <span className="row-title truncate">{model.label}</span>
+                        <span className="model-name truncate">{model.label}</span>
                         <span className="row-desc truncate">
-                          {model.routable
-                            ? model.provider
-                            : model.local
-                              ? `${model.provider} · ${t("freeViaApp")}`
-                              : `${model.provider} · ${t("freeOnlyInside")}`}
+                          {model.local
+                            ? `${model.provider} · ${t("freeViaApp")}`
+                            : `${model.provider} · ${t("freeOnlyInside")}`}
                         </span>
                       </span>
                       <span className="pill shrink-0">{t("freeBadge")}</span>

@@ -18,7 +18,7 @@ the service or the host actually measured.
 
 | Route | Who answers | What it needs |
 | --- | --- | --- |
-| **Free — OpenCode** (default) | The nine free models OpenCode publishes, Big Pickle first | The OpenCode app installed and running on this Mac |
+| **Free — OpenCode** (default) | The eleven free models OpenCode publishes, Big Pickle first | The OpenCode app installed and running on this Mac |
 | **Local — PrismML Bonsai** | Ternary Bonsai 1.7B, 4B and 27B | Apple Silicon; the engine and weights are downloaded in the app |
 | **Remote** (optional) | Any OpenAI-compatible endpoint | An HTTPS base URL and a key, both chosen in Settings |
 
@@ -33,8 +33,9 @@ not a way around it: the turn is relayed through the daemon the OpenCode app kee
 the handshake its gateway expects. Nothing is scraped, no credential is invented, and the app does not
 bundle OpenCode — it uses the copy already on the Mac.
 
-The list is exactly what `opencode models` prints under its own provider, verified against OpenCode
-2.1.3:
+The list is what `opencode models` prints under its own provider — read from the CLI the installed app
+ships (v2.1.3) on 2026-10-27. The service hands out the list, so it moves without an app update, and a
+release can add rows the pinned registry does not carry yet.
 
 | Model id | Label | Carrier |
 | --- | --- | --- |
@@ -47,16 +48,20 @@ The list is exactly what `opencode models` prints under its own provider, verifi
 | `nemotron-3-ultra-free` | Nemotron 3 Ultra | NVIDIA |
 | `nemotron-3.5-lightning-free` | Nemotron 3.5 Lightning | NVIDIA |
 | `nemotron-3.5-super-vl-free` | Nemotron 3.5 Super VL | NVIDIA |
+| `minimax-m3.1-flash-free` | MiniMax M3.1 Flash | MiniMax |
+| `longcat-2.5-preview-free` | LongCat 2.5 Preview | LongCat |
 
 **The default is free.** A settings document that never picked a model — and had not already chosen a
 remote provider — is migrated onto Big Pickle once; a new conversation opens on it, and a free turn
 needs neither the Privacy switch nor a key.
 
-**When the service is not running**, a free row that OpenRouter also carries can answer through the
-optional gateway key (stored in the macOS Keychain). Rows that exist only inside OpenCode — Big Pickle,
-Beam, Flint 40B — carry no upstream id on purpose; they are refused with that reason instead of being
-sent to a model that is not there. A failed free turn walks the gateway list by priority and never
-walks back.
+**One route, and no key.** That service is the only thing that answers a free row. Earlier builds also
+carried an optional OpenRouter key as a fallback and walked a failed turn down its own list; that route
+is gone, because its ids were this app's guess at a mirror of OpenCode's list rather than a route
+OpenCode publishes, and a row naming DeepSeek or NVIDIA while asking a third party for it said
+something about those makers that was not true. So **when the service is not running**, every free row
+is listed and not pickable, and a turn sent anyway is refused with that reason — never moved to a model
+nobody chose.
 
 **Free means cloud.** A free-model prompt leaves this Mac and is answered by OpenCode's provider,
 under their terms. Choose the local route for work that must not leave the machine.
@@ -170,7 +175,7 @@ composer's model pill. To build the app bundle: `pnpm app:build`.
 | What | Where |
 | --- | --- |
 | Settings | `~/Library/Application Support/freecode/settings.json` (platform standard elsewhere) |
-| Gateway / remote keys | macOS Keychain, services `studio.freecode.desktop.free-models` and `studio.freecode.desktop.remote-provider` |
+| Remote provider key | macOS Keychain, service `studio.freecode.desktop.remote-provider` — the only key this app reads |
 | Filed conversations | `sessions/` beside the settings file, one JSON file each |
 | Deleted conversations | `sessions/trash/`, until Settings → Storage erases one for good |
 | Server pid registry | `servers.pid` beside it |
@@ -253,8 +258,9 @@ docs/KNOWN_ISSUES.md      every model limit the code defends against, and where 
   not bundled in this repository and stays under its own license.
 - **Model weights** from [`prism-ml` on Hugging Face](https://huggingface.co/prism-ml), downloaded by the
   user, sized and digest-pinned in `catalog/models.toml`.
-- **Simple Icons (CC0)** — the path data behind three site marks in the inspector (Hugging Face, GitHub,
-  Wikipedia). The signs remain their owners' trademarks; only the icon geometry is shared.
+- **Simple Icons (CC0)** — the path data behind the seven marks the app wears: three site signs in the
+  inspector (Hugging Face, GitHub, Wikipedia) and four maker signs on the model rows (DeepSeek, NVIDIA,
+  Xiaomi, MiniMax). The signs remain their owners' trademarks; only the icon geometry is shared.
 - **KaTeX** fonts and stylesheet, bundled with the frontend build.
 
 FreeCode is MIT licensed; see [`LICENSE`](LICENSE). The engine, the weights and the free-model service

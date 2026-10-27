@@ -52,9 +52,9 @@ export function StatusBar({ locale }: { locale: Locale }) {
         ? translate(locale, "model.badge.notSetUp")
         : translate(locale, "model.badge.remote")
     : free
-      ? !free.routable && !status?.opencode.available
-        ? translate(locale, "model.badge.notRoutable")
-        : translate(locale, "model.badge.free")
+      ? status?.opencode.available
+        ? translate(locale, "model.badge.free")
+        : translate(locale, "model.badge.noService")
       : status?.blocked
         ? translate(locale, "model.badge.notRunning")
         : status?.local

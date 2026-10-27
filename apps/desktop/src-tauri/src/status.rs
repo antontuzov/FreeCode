@@ -125,7 +125,6 @@ impl Assembly {
                 id: model.id.to_string(),
                 label: model.label.to_string(),
                 provider: model.provider.to_string(),
-                routable: model.upstream.is_some(),
             });
 
         ModelStatusView {
@@ -351,18 +350,14 @@ pub struct RemoteView {
 
 /// The free model the card shows when the picker's free tier is the selected source.
 ///
-/// No secret is here, and no list of providers is: the registry is the host's, the page asks the
-/// Keychain separately whether a gateway key is saved, and the one fact the page cannot know without
-/// asking — whether this entry is one the gateway can actually be reached with — is said here.
+/// No secret is here, and no list of providers is: the registry is the host's, and a row is answered
+/// by the local service or not at all — which the page reads from [`OpenCodeView`], not from here.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FreeView {
     pub id: String,
     pub label: String,
     pub provider: String,
-    /// False for the promotion rows: listed for parity with the page that inspired the list, but
-    /// not routable from this app, and a turn with one selected is refused rather than guessed.
-    pub routable: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -393,8 +388,8 @@ pub struct ModelStatusView {
     /// The free model this turn goes to instead of the local engine, when the picker's free tier is
     /// the selected source. Same no-secret rule as `remote`.
     pub free: Option<FreeView>,
-    /// The OpenCode app on this Mac, when it is running. A free pick answers through it without a
-    /// gateway key, so the card has to be able to name the route that is actually going to be used.
+    /// The OpenCode app on this Mac, when it is running. It is the only thing that can answer a free
+    /// pick, so the card has to be able to say whether the route the user is about to take exists.
     #[serde(default)]
     pub opencode: OpenCodeView,
     pub packing: String,

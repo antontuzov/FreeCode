@@ -233,9 +233,9 @@ async fn clear_remote_key() -> Result<bool, String> {
     Ok(false)
 }
 
-/// The free-model registry as the picker draws it. No secret rides along: the page asks the Keychain
-/// separately whether a gateway key is saved, and this list carries ids, labels, routability and
-/// whether the OpenCode app on this Mac is answering — which is the route that needs no key at all.
+/// The free-model registry as the picker draws it. No secret rides along, because no route here uses
+/// one: the list carries ids, labels and whether the FreeCode app on this Mac is answering, which is
+/// the only way any of these models can be asked.
 #[tauri::command]
 async fn free_models_list() -> Result<Vec<free_models::FreeModelInfo>, String> {
     let local = opencode::status().await.available;
@@ -243,38 +243,10 @@ async fn free_models_list() -> Result<Vec<free_models::FreeModelInfo>, String> {
 }
 
 /// Whether the OpenCode app's local service answers, and which version. The status card and the
-/// picker both name it, because a free model that answers without a key does so through this service.
+/// picker both name it, because a free model answers through this service.
 #[tauri::command]
 async fn opencode_status() -> Result<opencode::Status, String> {
     Ok(opencode::status().await)
-}
-
-/// Whether the Keychain holds the free gateway key. The key itself never crosses this boundary.
-#[tauri::command]
-async fn free_key_present() -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(free_models::key_saved)
-        .await
-        .map_err(|e| format!("the keychain check stopped: {e}"))
-}
-
-/// Store a pasted gateway key in the login Keychain. The answer is the new "a key is saved" state;
-/// the value that was handed over is not echoed back and is not written to the settings document.
-#[tauri::command]
-async fn save_free_key(key: String) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || free_models::save_key(&key))
-        .await
-        .map_err(|e| format!("the keychain write stopped: {e}"))??;
-    Ok(true)
-}
-
-/// Remove the saved gateway key. Answering `false` is the state the UI draws, not an error: there
-/// was nothing to remove, or the credential is gone now either way.
-#[tauri::command]
-async fn clear_free_key() -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(free_models::clear_key)
-        .await
-        .map_err(|e| format!("the keychain write stopped: {e}"))??;
-    Ok(false)
 }
 
 /// Move the app's face to the tile the document names. The pin is host state because the Dock is
@@ -405,14 +377,11 @@ pub fn run() {
             remote_key_present,
             save_remote_key,
             clear_remote_key,
-            // The free tier's registry and its one gateway key, under the same no-readback rule as
-            // the provider's. The registry itself carries no secret, only ids and routability.
+            // The free tier's registry. It carries no secret and asks for none: the rows are answered
+            // by the local service below, and nothing here reads a keychain.
             free_models_list,
-            free_key_present,
-            save_free_key,
-            clear_free_key,
             // The OpenCode app's local service: whether it is running, so the picker can say which
-            // free models answer without a key. The password in its state file never leaves the host.
+            // free models can answer. The password in its state file never leaves the host.
             opencode_status,
             // The one write the UI may make to the machine it runs on: the text of a code fence, onto
             // the pasteboard. See `clipboard`.

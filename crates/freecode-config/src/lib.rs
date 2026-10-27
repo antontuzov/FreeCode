@@ -42,10 +42,10 @@ pub const SETTINGS_SCHEMA_VERSION: u32 = 3;
 
 /// The model a run answers on when the user has not picked one.
 ///
-/// It is OpenCode's own promotion, the one their app serves from the service already running on this
-/// Mac with no gateway key: picking a routable row instead would make the default depend on a key
-/// nobody saved. The picker still decides — an explicit local or remote model clears `free_model` —
-/// but a fresh install starts on a free model rather than on weights it has to download first.
+/// It is the app's own promotion, served by the FreeCode app already running on this Mac, so the
+/// default needs no account and no key. The picker still decides — an explicit local or remote model
+/// clears `free_model` — but a fresh install starts on a free model rather than on weights it has to
+/// download first.
 pub const DEFAULT_FREE_MODEL_ID: &str = "big-pickle";
 
 /// The system turn every conversation starts with unless the user has written their own.

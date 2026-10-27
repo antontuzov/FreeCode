@@ -864,10 +864,12 @@ select.field-input {
   animation: surface-enter var(--dur-quick) var(--ease-standard);
 }
 /* A model is chosen the way a nav row is — hover, and the accent's soft fill on the one in use — so
- * the panel has no third selection idiom in it. */
+ * the panel has no third selection idiom in it. The row centres its own column rather than top-aligning
+ * it, because a two-line row now carries a mark on one side and a chip on the other, and both read as
+ * belonging to the name between them only when they sit level with it. */
 .picker-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-3);
   width: 100%;
   padding: var(--space-2) var(--space-3);
@@ -884,6 +886,37 @@ select.field-input {
 .picker-row[data-current] {
   background: var(--accent-soft);
   border-color: var(--accent-line);
+}
+/* ---- the model's own row ----
+ * Two surfaces let a model be picked — the composer's picker and the first-run sheet — and they share
+ * these rules so a model looks like the same thing on both. */
+
+/* The maker in a tile at the head of the row. A list of models is otherwise a list of names, and a
+ * name does not say who trained the weights; the tile carries the sign, the letter, or the app's own
+ * mark at the ink of the description beside it, so the name stays the loudest thing on the row. */
+.model-mark {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+.model-mark-initial {
+  font-size: var(--size-fine);
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+}
+/* Bolder than a Settings row's title, which the captures set at medium: there the line labels the
+ * control beside it, here it is the model, which is the whole thing a press on the row chooses. */
+.model-name {
+  color: var(--text-strong);
+  font-size: var(--size-ui);
+  font-weight: 600;
 }
 
 /* ---- the run's plan ----

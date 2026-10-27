@@ -1,11 +1,11 @@
-//! The OpenCode app on this Mac, as a second route for the free-model tier.
+//! The OpenCode app on this Mac, the only route the free-model tier has.
 //!
 //! OpenCode's free models are served only to OpenCode's own runtime: a request from anywhere else is
 //! refused by their gateway. The desktop app this module talks to is that runtime — it keeps a
 //! daemon on loopback, writes its address and password to a state file under the user's home, and
 //! relays the turn with the handshake the gateway expects. Using it is using the copy the user
-//! already installed, not a way around it: the page says the free-model service has to be running, and a
-//! turn without it takes the gateway route instead.
+//! already installed, not a way around it: the page says the free-model service has to be running, and
+//! a turn without it is refused.
 //!
 //! The password in that file is a local secret. It is read when a request needs it, lives in
 //! [`Service`] for the life of that turn, and is never logged, filed, returned over IPC, or written

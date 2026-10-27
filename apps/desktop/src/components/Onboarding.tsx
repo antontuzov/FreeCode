@@ -1,6 +1,6 @@
 // The first-run setup flow: the reference's three steps, bound to this app's truth.
 //
-// There is no gateway to detect and no account to connect, so the flow asks the two questions this
+// There is no key to paste and no account to connect, so the flow asks the two questions this
 // build can answer — where a run works, and which free model answers it — and hands the rest to the
 // Settings page that already owns those controls. The third step lists the free tier itself rather
 // than a menu of routes: the local engine is not what this app is for, and a user who finishes setup
@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { MascotMark } from "./BrandMark";
+import { ModelMark } from "./ModelMark";
 import { Icon, type IconName } from "./icons";
 import { translate, type Locale } from "../i18n";
 import { ipc, type FreeModelInfo, type OnboardingPlace } from "../lib/ipc";
@@ -65,9 +66,9 @@ export function Onboarding({
   }, [doc]);
 
   // The free tier is the host's registry, so it is read when the third step opens: a small fixed
-  // list, and the first visit is the one that has to offer the one live choice. The saved pick wins
-  // on a second visit; otherwise the first row with a live route is preselected, and a row with no
-  // route is shown but not pickable — the host would refuse the turn anyway.
+  // list, and the first visit is the one that has to offer a choice that works. The saved pick wins
+  // on a second visit; otherwise the first row the service on this Mac answers is preselected, and a
+  // row with nothing behind it is shown but not pickable — the host would refuse the turn anyway.
   useEffect(() => {
     if (step !== 2 || freeList) return;
     void ipc
@@ -75,7 +76,7 @@ export function Onboarding({
       .then((rows) => {
         setFreeList(rows);
         const saved = doc?.freeModel ?? null;
-        const live = rows.find((r) => r.routable || r.local);
+        const live = rows.find((r) => r.local);
         setPicked(rows.some((r) => r.id === saved) ? saved : ((live ?? rows[0])?.id ?? null));
       })
       .catch(() => setFreeFailed(true));
@@ -321,30 +322,22 @@ export function Onboarding({
                     ))}
                   {freeList?.map((option) => {
                     const selected = picked === option.id;
-                    const live = option.routable || option.local;
                     return (
                       <button
                         key={option.id}
                         type="button"
                         role="radio"
                         aria-checked={selected}
-                        aria-disabled={!live || undefined}
                         data-selected={selected || undefined}
-                        className="card-row items-start text-left disabled:opacity-50"
-                        disabled={!live}
+                        className="card-row text-left disabled:opacity-50"
+                        disabled={!option.local}
                         onClick={() => setPicked(option.id)}
                       >
-                        <span className={`mt-0.5 ${selected ? "text-accent-ink" : "text-muted"}`}>
-                          <Icon name={option.local ? "bolt" : "globe"} size={18} />
-                        </span>
+                        <ModelMark provider={option.provider} />
                         <span className="row-copy">
-                          <span className="row-title">{option.label}</span>
+                          <span className="model-name">{option.label}</span>
                           <span className="row-desc">
-                            {option.local
-                              ? `${option.provider} · ${t("model.routeApp")}`
-                              : option.routable
-                                ? `${option.provider} · ${t("model.routeGateway")}`
-                                : `${option.provider} · ${t("model.routeNone")}`}
+                            {`${option.provider} · ${t(option.local ? "model.routeApp" : "model.routeNone")}`}
                           </span>
                         </span>
                         <span
@@ -359,7 +352,7 @@ export function Onboarding({
                     );
                   })}
                 </div>
-                {freeList !== null && !freeList.some((r) => r.routable || r.local) && (
+                {freeList !== null && !freeList.some((r) => r.local) && (
                   <p className="mt-[var(--space-3)] text-quiet text-muted">{t("model.noneLive")}</p>
                 )}
                 <button

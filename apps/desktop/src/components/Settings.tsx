@@ -153,7 +153,6 @@ const CONTROLS: Record<Page, string[]> = {
     "remoteModel",
     "remoteContext",
     "remoteKey",
-    "freeKey",
     "packing",
     "modelDir",
     "hfTokenEnv",
@@ -1337,8 +1336,8 @@ function Shortcuts({ t }: { t: T }) {
  * The value in the box goes to the host once and is then cleared; nothing here puts the key into the
  * settings document or keeps it in the store, and the host never sends it back. "Saved in the macOS
  * Keychain" is the only thing this control can learn, which is also all it needs to draw. `prefix`
- * names the i18n keys, and the three calls are the row's whole IPC surface — the remote provider's
- * row and the free gateway's row are the same control with different names.
+ * names the i18n keys, and the three calls are the row's whole IPC surface. The remote provider's row
+ * is the only one this build draws: no route in the app asks for another key.
  */
 function KeyRow({
   t,
@@ -1521,20 +1520,6 @@ function Model({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
           </>
         )}
       </Section>
-
-      {remote.source === "local" && (
-        <Section label={t("section.free")} description={t("section.free.desc")}>
-          <Row title={t("row.freeKey")} description={t("row.freeKey.desc")}>
-            <KeyRow
-              t={t}
-              prefix="row.freeKey"
-              present={ipc.freeKeyPresent}
-              save={ipc.saveFreeKey}
-              clear={ipc.clearFreeKey}
-            />
-          </Row>
-        </Section>
-      )}
 
       <Section label={t("section.packing")}>
         <Row title={t("row.packing")} description={t("row.packing.desc")}>

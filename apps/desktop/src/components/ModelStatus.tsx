@@ -148,8 +148,6 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   // The card cannot say whether a remote turn is possible without this bit, and it is the only thing
   // the Keychain will tell anyone. Read once per status answer; `null` while the answer is in flight.
   const [keySaved, setKeySaved] = useState<boolean | null>(null);
-  // The free gateway's key, under the same rule: presence only, never the value.
-  const [freeKeySaved, setFreeKeySaved] = useState<boolean | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -173,25 +171,6 @@ export function ModelStatus({ locale }: { locale: Locale }) {
       live = false;
     };
   }, [remote]);
-
-  useEffect(() => {
-    if (!free) {
-      setFreeKeySaved(null);
-      return;
-    }
-    let live = true;
-    void ipc
-      .freeKeyPresent()
-      .then((present) => {
-        if (live) setFreeKeySaved(present);
-      })
-      .catch(() => {
-        if (live) setFreeKeySaved(null);
-      });
-    return () => {
-      live = false;
-    };
-  }, [free]);
 
   // `?install-engine=1` runs the Install action and `?download-weights=1` the Download one on mount.
   // `?start-server=1` presses the card's own Start. The native window takes no injected clicks, so
@@ -224,30 +203,20 @@ export function ModelStatus({ locale }: { locale: Locale }) {
   }
   if (!status) return null;
 
-  // A free pick answers without the local engine, like the remote source: the card shows the pick
-  // and its route instead of packing, engine and server rows that describe a run this one will never
-  // make. The OpenCode app on this Mac comes first — no key, and every registry row is answerable —
-  // and the gateway key is the fallback. The consent switch is not part of this order: it governs the
-  // address the user typed for Remote, and a free pick sends without it.
+  // A free pick answers without the local engine, like the remote source: the card shows the pick and
+  // its route instead of packing, engine and server rows that describe a run this one will never
+  // make. There is one route, so the whole card turns on whether that service is answering. The
+  // consent switch is not part of it: it governs the address the user typed for Remote, and a free
+  // pick sends without it.
   if (free) {
     const app = status.opencode;
-    const ready = app.available || (free.routable && freeKeySaved === true);
+    const ready = app.available;
     const badge = app.available
       ? translate(locale, "model.badge.free")
-      : !free.routable
-        ? translate(locale, "model.badge.notRoutable")
-        : freeKeySaved === false
-          ? translate(locale, "model.badge.noKey")
-          : translate(locale, "model.badge.free");
+      : translate(locale, "model.badge.noService");
     const note = app.available
       ? translate(locale, "model.free.appReady")
-      : !free.routable
-        ? translate(locale, "model.free.notRoutable")
-        : freeKeySaved === false
-          ? translate(locale, "model.free.noKey")
-          : freeKeySaved === null
-            ? translate(locale, "model.free.keyChecking")
-            : translate(locale, "model.free.ready");
+      : translate(locale, "model.free.noService");
     return (
       <section
         aria-label={translate(locale, "model.free.title")}
@@ -270,19 +239,9 @@ export function ModelStatus({ locale }: { locale: Locale }) {
             <dd className="truncate text-fg">{free.provider}</dd>
           </div>
           <div className="flex items-baseline justify-between gap-3">
-            <dt className="shrink-0">
-              {translate(locale, app.available ? "model.free.route" : "model.remote.key")}
-            </dt>
+            <dt className="shrink-0">{translate(locale, "model.free.route")}</dt>
             <dd className="truncate text-fg">
-              {app.available
-                ? `${translate(locale, "model.free.appRoute")}${
-                    app.version ? ` · ${app.version}` : ""
-                  }`
-                : freeKeySaved === null
-                  ? translate(locale, "model.remote.keyCheckingShort")
-                  : freeKeySaved
-                    ? translate(locale, "model.remote.keySaved")
-                    : translate(locale, "model.remote.keyAbsent")}
+              {`${translate(locale, "model.free.appRoute")}${app.version ? ` · ${app.version}` : ""}`}
             </dd>
           </div>
         </dl>

@@ -17,7 +17,6 @@ import {
   type Turn,
 } from "../state/transcript";
 import { Answer } from "./Answer";
-import { BrandMark, MascotMark } from "./BrandMark";
 import { Composer } from "./Composer";
 import { ExternalLink } from "./ExternalLink";
 import { Icon } from "./icons";
@@ -800,16 +799,12 @@ export function Transcript({
           className="min-h-0 min-w-0 flex-1 overflow-y-auto px-[var(--space-6)] py-[var(--space-4)]"
         >
           {rows.length === 0 ? (
-            // The one screen in the app with nothing on it, so it is the one carrying the name — and
-            // the mascot, one of the drawn tiles picked once per run. A tile is a raster and
-            // takes no accent, which is why it is the picture above the name rather than the mark
-            // beside it: that one is still drawn, so the name reads in all eight theme combinations.
+            // The one screen in the app with nothing on it, so it carries the name in words only: the
+            // art this row used to lead with was a raster tile that takes no accent, and a picture
+            // that cannot follow the interface style is a second palette inside a design system that
+            // says there is only one.
             <div className="app-empty flex flex-col items-center gap-2 pt-[var(--space-6)] text-accent-ink">
-              <MascotMark />
-              <p className="flex items-center gap-2 text-ui font-medium text-fg-strong">
-                <BrandMark size={18} />
-                {translate(locale, "app.name")}
-              </p>
+              <p className="text-ui font-medium text-fg-strong">{translate(locale, "app.name")}</p>
               <p className="max-w-[360px] text-center text-quiet text-muted">
                 {translate(locale, "transcript.empty")}
               </p>

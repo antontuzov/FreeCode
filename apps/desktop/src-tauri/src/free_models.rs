@@ -1,27 +1,18 @@
-//! The free cloud models the picker offers, and the one gateway that serves them.
+//! The free cloud models the picker offers, and the one service that answers them.
 //!
-//! The list is exactly what `opencode models` in OpenCode 2.1.3 prints under the `opencode/`
-//! provider, verified 2026-10-25 against the service running on this Mac. A row is routable through
-//! the gateway only when the same model has a verified OpenRouter id, because the relay sends through
-//! that one gateway and a guessed id is a request to a model that is not there. The promo models
-//! OpenCode serves only inside their own product therefore carry no upstream id: the picker shows them
-//! as not routable through the key rather than pretending a route exists. They are still answerable
-//! through the OpenCode app on this Mac, which is the runtime those models are reserved for — see
-//! [`crate::opencode`].
+//! The list is what `opencode models` prints under the `opencode/` provider, rechecked 2026-10-27
+//! against the CLI the OpenCode app ships. These are that service's own free models: every row is
+//! answered by the OpenCode app running on this Mac, which is the runtime they are reserved for, and
+//! the relay talks to it over loopback — see [`crate::opencode`].
 //!
-//! The gateway key follows the same rule as the remote provider's: it lives in the platform
-//! keychain, the UI only ever learns whether one is saved, and it is loaded at request time for the
-//! one request that uses it.
+//! There is deliberately no second route here. This build once carried an OpenRouter key and sent a
+//! free turn there when the service was down; those ids were this app's guess at a mirror of
+//! OpenCode's list rather than a route OpenCode publishes, and a row that named DeepSeek or NVIDIA
+//! while asking a third party for it said something about those makers that was not true. So a free
+//! model is pickable exactly when the service that serves it is answering, and a turn sent without it
+//! is refused with the reason.
 
 use serde::Serialize;
-
-#[cfg(target_os = "macos")]
-const SERVICE: &str = "studio.freecode.desktop.free-models";
-#[cfg(target_os = "macos")]
-const ACCOUNT: &str = "openrouter-key";
-
-/// The one gateway this build routes free turns through. One key slot is the whole secret surface.
-pub const GATEWAY_BASE: &str = "https://openrouter.ai/api/v1";
 
 /// One free model, as the picker and the relay see it.
 #[derive(Debug)]
@@ -29,19 +20,13 @@ pub struct FreeModel {
     pub id: &'static str,
     pub label: &'static str,
     pub provider: &'static str,
-    /// The OpenRouter model id, present only when a page for it was verified there.
-    pub upstream: Option<&'static str>,
-    /// Fallback order: a failed turn moves to the next higher priority, never back.
-    pub priority: u8,
 }
 
 /// What the frontend needs to draw a row. `is_free` is constant here — this is the free list — but
 /// the field keeps the row's shape explicit rather than implied by the group it renders in.
 ///
-/// `routable` is about the gateway key: a row whose model OpenRouter does not list has no upstream
-/// id to send to. `local` is the other route, the OpenCode app on this Mac, which serves the whole
-/// list — so a row can be unpickable for the key and pickable for the app in the same breath, and the
-/// picker says which.
+/// `local` is whether the OpenCode app's service is answering, which is the only way any of these
+/// models can be asked. A row that is not `local` is listed and not pickable.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FreeModelInfo {
@@ -49,8 +34,7 @@ pub struct FreeModelInfo {
     pub label: String,
     pub provider: String,
     pub is_free: bool,
-    pub routable: bool,
-    /// Whether the OpenCode app's local service is answering, which makes every row answerable.
+    /// Whether the OpenCode app's local service is answering, which is what makes a row pickable.
     pub local: bool,
 }
 
@@ -61,64 +45,56 @@ pub fn models() -> &'static [FreeModel] {
             id: "big-pickle",
             label: "Big Pickle",
             provider: "FreeCode",
-            upstream: None,
-            priority: 1,
         },
         FreeModel {
             id: "glm-5.3-flash-free",
             label: "GLM-5.3-Flash",
             provider: "GLM",
-            upstream: Some("z-ai/glm-5.3-flash-free"),
-            priority: 2,
         },
         FreeModel {
             id: "deepseek-v4.1-flash-free",
             label: "DeepSeek V4.1 Flash",
             provider: "DeepSeek",
-            upstream: Some("deepseek/deepseek-v4.1-flash"),
-            priority: 3,
         },
         FreeModel {
             id: "beam-free",
             label: "Beam",
             provider: "Beam",
-            upstream: None,
-            priority: 4,
         },
         FreeModel {
             id: "flint-40b-free",
             label: "Flint 40B",
             provider: "Flint",
-            upstream: None,
-            priority: 5,
         },
         FreeModel {
             id: "mimo-v2.6-flash-free",
             label: "MiMo-V2.6-Flash",
             provider: "MiMo",
-            upstream: Some("xiaomi/mimo-v2.6-flash"),
-            priority: 6,
         },
         FreeModel {
             id: "nemotron-3-ultra-free",
             label: "Nemotron 3 Ultra",
             provider: "NVIDIA",
-            upstream: Some("nvidia/nemotron-3-ultra-550b-a55b:free"),
-            priority: 7,
         },
         FreeModel {
             id: "nemotron-3.5-lightning-free",
             label: "Nemotron 3.5 Lightning",
             provider: "NVIDIA",
-            upstream: Some("nvidia/nemotron-3.5-lightning:free"),
-            priority: 8,
         },
         FreeModel {
             id: "nemotron-3.5-super-vl-free",
             label: "Nemotron 3.5 Super VL",
             provider: "NVIDIA",
-            upstream: Some("nvidia/nemotron-3.5-super-vl"),
-            priority: 9,
+        },
+        FreeModel {
+            id: "minimax-m3.1-flash-free",
+            label: "MiniMax M3.1 Flash",
+            provider: "MiniMax",
+        },
+        FreeModel {
+            id: "longcat-2.5-preview-free",
+            label: "LongCat 2.5 Preview",
+            provider: "LongCat",
         },
     ]
 }
@@ -135,99 +111,9 @@ pub fn infos(local: bool) -> Vec<FreeModelInfo> {
             label: model.label.to_string(),
             provider: model.provider.to_string(),
             is_free: true,
-            routable: model.upstream.is_some(),
             local,
         })
         .collect()
-}
-
-/// The routable models the relay may try for a turn, starting at the chosen one and moving to the
-/// next priority only after a failure. A model with no upstream id never appears: there is nothing
-/// to send its request to, and the refusal says so before any bytes leave the machine. An id the
-/// registry does not hold has no order at all rather than the whole routable list: only a pick the
-/// host resolved is ever sent.
-pub fn attempt_order(id: &str) -> Vec<&'static FreeModel> {
-    let Some(start) = models()
-        .iter()
-        .find(|model| model.id == id)
-        .map(|model| model.priority)
-    else {
-        return Vec::new();
-    };
-    models()
-        .iter()
-        .filter(|model| model.priority >= start && model.upstream.is_some())
-        .collect()
-}
-
-#[cfg(target_os = "macos")]
-fn entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, ACCOUNT)
-        .map_err(|e| format!("the macOS Keychain is not available: {e}"))
-}
-
-#[cfg(target_os = "macos")]
-pub fn save_key(raw: &str) -> Result<(), String> {
-    let key = raw.trim();
-    if key.is_empty() {
-        return Err("the key is empty".into());
-    }
-    if key.chars().any(char::is_control) {
-        return Err(
-            "the key contains a control character; paste it again without line breaks".into(),
-        );
-    }
-    entry()?
-        .set_password(key)
-        .map_err(|e| format!("the macOS Keychain refused the key: {e}"))
-}
-
-#[cfg(target_os = "macos")]
-pub fn load_key() -> Result<String, String> {
-    match entry()?.get_password() {
-        Ok(key) if !key.is_empty() => Ok(key),
-        Ok(_) => Err("the saved gateway key is empty; paste it again".into()),
-        Err(keyring::Error::NoEntry) => {
-            Err("no OpenRouter key is saved; paste one under Settings → Model → Free models".into())
-        }
-        Err(e) => Err(format!("the macOS Keychain would not return the key: {e}")),
-    }
-}
-
-#[cfg(target_os = "macos")]
-pub fn key_saved() -> bool {
-    matches!(
-        entry().and_then(|e| e.get_password().map_err(|e| e.to_string())),
-        Ok(key) if !key.is_empty()
-    )
-}
-
-#[cfg(target_os = "macos")]
-pub fn clear_key() -> Result<(), String> {
-    match entry()?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("the macOS Keychain would not remove the key: {e}")),
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn save_key(_raw: &str) -> Result<(), String> {
-    Err("this build has no secure key store; a gateway key is macOS-only for now".into())
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn load_key() -> Result<String, String> {
-    Err("this build has no secure key store; a gateway key is macOS-only for now".into())
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn key_saved() -> bool {
-    false
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn clear_key() -> Result<(), String> {
-    Ok(())
 }
 
 #[cfg(test)]
@@ -253,9 +139,10 @@ mod tests {
                 "{label} twice"
             );
         }
-        // What `opencode models` prints under the opencode/ provider in 2.1.3, and nothing else:
-        // four rows the registry used to carry (LongCat, Exo, MiMo 2.5, JEV) are not offered by the
-        // service and would have been rows that can only fail.
+        // What `opencode models` prints under the opencode/ provider, and nothing else: three rows
+        // the registry used to carry (Exo, MiMo 2.5, JEV) are not offered by the service and would
+        // have been rows that can only fail. LongCat left with them and came back, which is why the
+        // list is checked against the running service rather than kept from memory.
         assert_eq!(
             ids,
             [
@@ -268,55 +155,42 @@ mod tests {
                 "nemotron-3-ultra-free",
                 "nemotron-3.5-lightning-free",
                 "nemotron-3.5-super-vl-free",
+                "minimax-m3.1-flash-free",
+                "longcat-2.5-preview-free",
             ]
         );
     }
 
     #[test]
-    fn a_routable_model_names_a_gateway_id_with_a_provider() {
+    fn every_row_names_the_maker_it_is_asked_of() {
         for model in models() {
-            if let Some(upstream) = model.upstream {
-                assert!(
-                    upstream.contains('/'),
-                    "{} upstream id lacks a provider prefix",
-                    model.id
-                );
-            }
+            assert!(
+                !model.provider.trim().is_empty(),
+                "{} names no provider",
+                model.id
+            );
+            // A row's id is what the service is switched to, so it has to be the bare model id
+            // rather than a carrier-prefixed upstream id from some other gateway.
+            assert!(
+                !model.id.contains('/'),
+                "{} carries a provider prefix, which is an upstream id, not a service one",
+                model.id
+            );
         }
     }
 
     #[test]
-    fn the_attempt_order_moves_forward_only() {
-        let order = attempt_order("deepseek-v4.1-flash-free");
-        assert_eq!(order[0].id, "deepseek-v4.1-flash-free");
-        assert!(order.iter().all(|model| model.upstream.is_some()));
-        let priorities: Vec<_> = order.iter().map(|model| model.priority).collect();
-        let mut sorted = priorities.clone();
-        sorted.sort_unstable();
-        assert_eq!(priorities, sorted);
-        // An unknown id has no attempt order: nothing can be sent.
-        assert!(attempt_order("not-a-model").is_empty());
-    }
-
-    #[test]
     fn the_settings_default_names_a_model_this_build_carries() {
-        let default = find(freecode_config::DEFAULT_FREE_MODEL_ID)
+        find(freecode_config::DEFAULT_FREE_MODEL_ID)
             .expect("the settings default must be a registry id");
-        // It is a promotion row, which is what makes the default answerable through the OpenCode app
-        // on this Mac rather than through a gateway key nobody saved.
-        assert_eq!(default.upstream, None);
     }
 
     #[test]
-    fn the_promo_models_stay_listed_but_unroutable() {
-        let big_pickle = find("big-pickle").unwrap();
-        assert_eq!(big_pickle.upstream, None);
-        assert!(infos(false)
-            .iter()
-            .find(|info| info.id == "big-pickle")
-            .is_some_and(|info| !info.routable && info.is_free));
-        // The OpenCode app on this Mac serves the promotion rows too, so the picker marks the whole
-        // list as answerable when the service is up.
+    fn the_service_is_the_only_thing_that_makes_a_row_pickable() {
+        // With the OpenCode app not answering, no row can be asked — there is no gateway behind it.
+        assert!(infos(false).iter().all(|info| !info.local));
         assert!(infos(true).iter().all(|info| info.local));
+        // Every row is free, and none of them ever advertised a route of their own.
+        assert!(infos(false).iter().all(|info| info.is_free));
     }
 }
