@@ -38,6 +38,7 @@ use serde_json::{json, Value};
 use walkdir::WalkDir;
 
 use crate::page::{page_op, PageHost, PageOp, MAX_CONSOLE_LINES, MAX_PAGE_TEXT};
+use crate::pixels::Expect;
 use crate::{authorize, registry::is_executable, web, Access, SandboxPolicy, ToolsError};
 
 /// The longest plan the model may keep: enough for a real task, short enough that the list is
@@ -330,12 +331,16 @@ pub enum SummaryKey {
     BrowserProblems,
     /// The page saved as a PNG of `{{size}}` pixels, kept at the `{{file}}` the content names.
     BrowserCaptured,
+    /// A `{{check}}` of the page's picture held, measured on a PNG of `{{size}}` pixels.
+    BrowserChecked,
+    /// A `{{check}}` of the page's picture did not hold, measured on a PNG of `{{size}}` pixels.
+    BrowserCheckFailed,
 }
 
 impl SummaryKey {
     /// Every key the executors can answer with, so a catalog entry no executor reaches is named as the
     /// dead copy it is.
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 49] = [
         Self::Empty,
         Self::Lines,
         Self::NoRange,
@@ -383,6 +388,8 @@ impl SummaryKey {
         Self::BrowserClean,
         Self::BrowserProblems,
         Self::BrowserCaptured,
+        Self::BrowserChecked,
+        Self::BrowserCheckFailed,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -436,6 +443,8 @@ impl SummaryKey {
             Self::BrowserClean => "transcript.summary.browserClean",
             Self::BrowserProblems => "transcript.summary.browserProblems",
             Self::BrowserCaptured => "transcript.summary.browserCaptured",
+            Self::BrowserChecked => "transcript.summary.browserChecked",
+            Self::BrowserCheckFailed => "transcript.summary.browserCheckFailed",
         }
     }
 
@@ -474,6 +483,7 @@ impl SummaryKey {
             | Self::BrowserNotFound => &["target"],
             Self::BrowserPressed => &["key"],
             Self::BrowserCaptured => &["size"],
+            Self::BrowserChecked | Self::BrowserCheckFailed => &["check", "size"],
             Self::GitDiffFile => &["added", "removed"],
             Self::GitDiff => &["files", "added", "removed"],
             Self::Empty
@@ -538,9 +548,9 @@ impl Summary {
         }
     }
 
-    /// Whether the work this line reports did not succeed. Only the three command endings and a wait
-    /// that ran out can say so: every other summary describes a read or a write that returned without
-    /// failing.
+    /// Whether the work this line reports did not succeed. Only the three command endings, a wait
+    /// that ran out and a picture check that did not hold can say so: every other summary describes a
+    /// read or a write that returned without failing.
     pub fn failed(&self) -> bool {
         match self.key {
             Some(SummaryKey::TerminalTimedOut | SummaryKey::TerminalStopped) => true,
@@ -550,6 +560,9 @@ impl Summary {
             // A wait that ran out is the one page result that did not find what it asked for: the row
             // says so instead of showing the wait as work that succeeded.
             Some(SummaryKey::BrowserNotFound) => true,
+            // A check that failed is the answer the run asked for, not an error — but it is a row that
+            // must not read as work that succeeded, because the page did not draw what was claimed.
+            Some(SummaryKey::BrowserCheckFailed) => true,
             _ => false,
         }
     }
@@ -625,11 +638,11 @@ pub fn execute_watched(
         // them without the Privacy switch, and a URL is not a path the sandbox can resolve.
         "web_search" => web_search(tool.id, arguments),
         "fetch_url" => fetch_url(tool.id, arguments),
-        // Eight calls that act inside the document the window's browser panel is showing rather than
+        // Nine calls that act inside the document the window's browser panel is showing rather than
         // on disk or the network. The page itself is reached through [`PageHost`], which only the
         // window can answer; a run with no panel — a subagent's — is told so rather than failing mute.
         "browser_open" | "browser_read" | "browser_click" | "browser_type" | "browser_press"
-        | "browser_wait" | "browser_console" | "browser_capture" => {
+        | "browser_wait" | "browser_console" | "browser_capture" | "browser_check" => {
             page_tool(tool.id, arguments, policy, page)
         }
         // Unreachable while [`registry::EXECUTABLE`](crate::registry::EXECUTABLE) and this match move
@@ -667,7 +680,7 @@ pub fn write_targets(tool_id: &str, arguments: &Value, policy: &SandboxPolicy) -
 /// the rest.
 const PAGE_PEEK_TEXT: usize = 1200;
 
-/// The eight calls that act on the page in the window's browser panel.
+/// The nine calls that act on the page in the window's browser panel.
 ///
 /// Only `browser_open` names a file, and that path goes through the same sandbox as a read: it must
 /// resolve inside the workspace, exist, and be a page. The rest act on the document the panel is
@@ -1001,7 +1014,88 @@ fn page_tool(
                 edits: Vec::new(),
             })
         }
+        PageOp::Check => {
+            let expect = check_expect(tool, arguments)?;
+            let fields =
+                serde_json::to_value(&expect).map_err(|why| ToolsError::InvalidArguments {
+                    tool: tool.to_string(),
+                    reason: format!("the check cannot be written down: {why}"),
+                })?;
+            let answer = ask(host, op, fields, patience)?;
+            let file = page_str(&answer, "path");
+            let width = answer.get("width").and_then(Value::as_u64).unwrap_or(0);
+            let height = answer.get("height").and_then(Value::as_u64).unwrap_or(0);
+            let bytes = answer.get("bytes").and_then(Value::as_u64).unwrap_or(0);
+            // A check with no picture behind it measured nothing: saying it passed would be the one
+            // lie a check exists to prevent, and saying it failed would blame the page for a panel
+            // that never drew it.
+            if file.is_empty() || width == 0 || height == 0 {
+                return Err(ToolsError::Page(
+                    "the panel answered the check without a picture to measure: it named no file, or \
+                     no size. The page may still be painting; browser_wait can hold the call until \
+                     something appears."
+                        .into(),
+                ));
+            }
+            let passed = answer
+                .get("passed")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| {
+                    ToolsError::Page(
+                        "the panel answered the check without a verdict, so nothing can be said \
+                         about the picture."
+                            .into(),
+                    )
+                })?;
+            let detail = page_str(&answer, "detail");
+            let size = format!("{width}×{height}");
+            let kb = (bytes as f64 / 1024.0).round().max(1.0);
+            let check = expect.name();
+            let (key, headline) = if passed {
+                (SummaryKey::BrowserChecked, "passed")
+            } else {
+                (SummaryKey::BrowserCheckFailed, "did not pass")
+            };
+            let mut content = format!(
+                "Checked the page's picture: {check} — {headline}.\n\n{detail}\n\nThe PNG this \
+                 check measured is {size} pixels, {kb} KB.\nFile: {file}\n\nThis is the page as it \
+                 is drawn — its pixels, not its markup and not its text.\n"
+            );
+            if !passed {
+                content.push_str(
+                    "\nThe picture is what the page is drawing now, so change the page and run \
+                     browser_check again to see whether it passes. browser_console answers why a \
+                     page drew nothing; browser_read answers what it says.\n",
+                );
+            }
+            let summary = format!("Picture check {headline}: {check} ({size})");
+            Ok(Executed {
+                summary: Summary::said(key, json!({ "check": check, "size": size }), summary),
+                content,
+                edits: Vec::new(),
+            })
+        }
     }
+}
+
+/// The assertion one check makes, validated before the panel is asked for a capture: a malformed
+/// check should cost a refusal, not a frame the run took for nothing.
+fn check_expect(tool: &str, arguments: &Value) -> Result<Expect, ToolsError> {
+    let expect: Expect =
+        serde_json::from_value(arguments.clone()).map_err(|why| ToolsError::InvalidArguments {
+            tool: tool.to_string(),
+            reason: format!(
+                "{why}. expect is \"not-blank\", or \"colour\" with x and y (fractions of the \
+                 picture, 0 to 1) and rgb (#rrggbb); tolerance is optional."
+            ),
+        })?;
+    expect
+        .validate()
+        .map_err(|why| ToolsError::InvalidArguments {
+            tool: tool.to_string(),
+            reason: why,
+        })?;
+    Ok(expect)
 }
 
 /// The default and ceiling for `browser_wait`. The registry schema states the same range; this is the
@@ -6335,6 +6429,165 @@ mod tests {
                 .expect_err("no picture means no capture");
             assert!(matches!(why, ToolsError::Page(_)), "{answer}");
             assert!(why.to_string().contains("without a picture"), "{why}");
+        }
+    }
+
+    #[test]
+    fn a_check_that_holds_names_the_assertion_and_the_file_it_measured() {
+        let (_d, p) = page_fixture();
+        let host = FakePage::saying(json!({
+            "passed": true,
+            "detail": "1024 sampled points hold 7 different colours, so the page drew something.",
+            "path": "/Users/someone/Library/Application Support/freecode/captures/page-2.png",
+            "width": 900,
+            "height": 600,
+            "bytes": 43008
+        }));
+        let got = page_tool(
+            "browser_check",
+            &json!({ "expect": "not-blank" }),
+            &p,
+            Some(&host),
+        )
+        .expect("a check runs");
+        assert_eq!(seen_ops(&host), vec![PageOp::Check]);
+        // The host is handed the assertion as the executor understood it, not the raw wording.
+        assert_eq!(host.seen()[0].1, json!({ "expect": "not-blank" }));
+        assert_eq!(got.summary.key, Some(SummaryKey::BrowserChecked));
+        assert_eq!(
+            got.summary.params,
+            json!({ "check": "not-blank", "size": "900×600" })
+        );
+        assert!(!got.summary.failed());
+        assert!(got.content.contains("passed"), "{}", got.content);
+        assert!(
+            got.content.contains("7 different colours"),
+            "{}",
+            got.content
+        );
+        assert!(got.content.contains("42 KB"), "{}", got.content);
+        assert!(got.content.contains("page-2.png"), "{}", got.content);
+    }
+
+    #[test]
+    fn a_colour_check_names_the_point_it_measured() {
+        let (_d, p) = page_fixture();
+        let host = FakePage::saying(json!({
+            "passed": true,
+            "detail": "The pixel at 50% × 50% (450, 300) is #2f6b3f, within 8 of #2f6b3f.",
+            "path": "/tmp/page-3.png",
+            "width": 900,
+            "height": 600,
+            "bytes": 43008
+        }));
+        let got = page_tool(
+            "browser_check",
+            &json!({
+                "expect": "colour",
+                "x": 0.5,
+                "y": 0.5,
+                "rgb": "#2f6b3f",
+                "tolerance": 8
+            }),
+            &p,
+            Some(&host),
+        )
+        .expect("a colour check runs");
+        assert_eq!(
+            host.seen()[0].1,
+            json!({ "expect": "colour", "x": 0.5, "y": 0.5, "rgb": "#2f6b3f", "tolerance": 8 })
+        );
+        // The row names the exact point, so two checks of one page read as different steps.
+        assert_eq!(
+            got.summary.params,
+            json!({ "check": "#2f6b3f at 50% × 50%", "size": "900×600" })
+        );
+        assert!(got.content.contains("(450, 300)"), "{}", got.content);
+    }
+
+    #[test]
+    fn a_check_that_does_not_hold_is_a_failed_row_that_quotes_the_pixel() {
+        let (_d, p) = page_fixture();
+        let host = FakePage::saying(json!({
+            "passed": false,
+            "detail": "The pixel at 50% × 50% (450, 300) is #ffffff, not #2f6b3f: it is off by 47 \
+                       in green, more than the 8 allowed.",
+            "path": "/tmp/page-4.png",
+            "width": 900,
+            "height": 600,
+            "bytes": 43008
+        }));
+        let got = page_tool(
+            "browser_check",
+            &json!({
+                "expect": "colour",
+                "x": 0.5,
+                "y": 0.5,
+                "rgb": "#2f6b3f",
+                "tolerance": 8
+            }),
+            &p,
+            Some(&host),
+        )
+        .expect("a failed check is an answer, not an error");
+        assert_eq!(got.summary.key, Some(SummaryKey::BrowserCheckFailed));
+        assert!(
+            got.summary.failed(),
+            "a check that did not hold is not done"
+        );
+        assert!(got.content.contains("did not pass"), "{}", got.content);
+        assert!(got.content.contains("#ffffff"), "{}", got.content);
+        assert!(
+            got.content.contains("run browser_check again"),
+            "{}",
+            got.content
+        );
+    }
+
+    #[test]
+    fn a_malformed_check_is_refused_before_the_panel_takes_a_picture() {
+        let (_d, p) = page_fixture();
+        let host = FakePage::saying(json!({}));
+        for (arguments, says) in [
+            (json!({ "expect": "bright" }), "expect is"),
+            (
+                json!({ "expect": "colour", "x": 1.5, "y": 0.5, "rgb": "#ffffff" }),
+                "between 0 and 1",
+            ),
+            (
+                json!({ "expect": "colour", "x": 0.5, "y": 0.5, "rgb": "green" }),
+                "#rrggbb",
+            ),
+            (
+                json!({ "expect": "colour", "x": 0.5, "y": 0.5 }),
+                "missing field",
+            ),
+        ] {
+            let why = page_tool("browser_check", &arguments, &p, Some(&host))
+                .expect_err("a malformed check is not a check");
+            assert!(matches!(why, ToolsError::InvalidArguments { .. }), "{why}");
+            assert!(why.to_string().contains(says), "{why}");
+        }
+        assert!(host.seen().is_empty(), "nothing reached the panel");
+    }
+
+    #[test]
+    fn a_check_that_came_back_without_a_picture_is_a_refusal_not_a_pass() {
+        let (_d, p) = page_fixture();
+        for answer in [
+            json!({ "passed": true }),
+            json!({ "passed": true, "path": "/tmp/page.png", "width": 0, "height": 600 }),
+            json!({ "path": "/tmp/page.png", "width": 900, "height": 600 }),
+        ] {
+            let host = FakePage::saying(answer.clone());
+            let why = page_tool(
+                "browser_check",
+                &json!({ "expect": "not-blank" }),
+                &p,
+                Some(&host),
+            )
+            .expect_err("no picture means no verdict");
+            assert!(matches!(why, ToolsError::Page(_)), "{answer}");
         }
     }
 

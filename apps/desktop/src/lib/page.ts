@@ -8,7 +8,7 @@
 import { listen } from "@tauri-apps/api/event";
 
 import { useNav } from "../state/nav";
-import { ipc, PAGE_EVENT, type PageRequest } from "./ipc";
+import { ipc, PAGE_EVENT, type PageExpect, type PageRequest } from "./ipc";
 
 /** The frame the panel is showing, the address it was given, and — once the page's script can
  * answer — whether it is loaded far enough to speak. */
@@ -135,6 +135,22 @@ async function capture(target: Shown): Promise<Record<string, unknown>> {
   });
 }
 
+/**
+ * Take the same picture a capture takes and let the host assert on it. The page's own script is not
+ * asked: the verdict is measured on the frame the webview drew, so a run can check what a page shows
+ * without a model looking at it — and a failed check comes back as a verdict, not as an error.
+ */
+async function check(
+  target: Shown,
+  fields: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const box = target.frame.getBoundingClientRect();
+  return ipc.checkPage(
+    { x: box.left, y: box.top, width: box.width, height: box.height },
+    fields as PageExpect,
+  );
+}
+
 async function perform(op: string, fields: Record<string, unknown>): Promise<unknown> {
   if (op === "open") return open(fields);
   if (!shown) {
@@ -144,6 +160,7 @@ async function perform(op: string, fields: Record<string, unknown>): Promise<unk
     );
   }
   if (op === "capture") return capture(shown);
+  if (op === "check") return check(shown, fields);
   const waited = typeof fields.timeout_ms === "number" ? fields.timeout_ms : 0;
   const deadline = Date.now() + (op === "wait" ? waited + WAIT_SLACK_MS : REPLY_MS);
   return ask(shown, op, fields, deadline);

@@ -1277,6 +1277,7 @@ dependencies = [
  "freecode-config",
  "glob",
  "libc",
+ "png 0.17.16",
  "regex",
  "reqwest 0.12.28",
  "serde",

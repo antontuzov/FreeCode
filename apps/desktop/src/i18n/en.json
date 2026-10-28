@@ -671,6 +671,8 @@
   "transcript.summary.browserClean": "no errors in the console",
   "transcript.summary.browserProblems": "{{count}} console problems",
   "transcript.summary.browserCaptured": "Captured the page ({{size}})",
+  "transcript.summary.browserChecked": "Picture check passed: {{check}} ({{size}})",
+  "transcript.summary.browserCheckFailed": "Picture check failed: {{check}} ({{size}})",
   "transcript.summary.terminalExit": "exit {{code}}",
   "transcript.summary.terminalTimedOut": "stopped after {{seconds}} s",
   "transcript.summary.terminalStopped": "stopped by a signal",

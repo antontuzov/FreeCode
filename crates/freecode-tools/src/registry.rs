@@ -506,6 +506,34 @@ pub fn registry() -> Vec<ToolDescriptor> {
             input_schema: s(json!({}), &[]),
         },
         ToolDescriptor {
+            id: "browser_check",
+            title: "Check the page's picture",
+            description: "Capture the page and assert on its pixels without a model looking at them: \
+                that the page drew anything at all (expect \"not-blank\"), or that one point of it is \
+                the colour it should be (expect \"colour\" with x, y and rgb). Answers whether the \
+                check passed and keeps the PNG, so a run can prove a game rendered or that a layout \
+                put something where it belongs, and check again after a fix. x and y are fractions of \
+                the picture: 0 is the left or top edge, 1 the right or bottom, so 0.5, 0.5 is the \
+                middle.",
+            permission: WorkspaceWrite,
+            requires_network: false,
+            input_schema: s(
+                json!({
+                    "expect": { "type": "string", "enum": ["not-blank", "colour"] },
+                    "x": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "y": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "rgb": { "type": "string", "description": "#rrggbb" },
+                    "tolerance": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 255,
+                        "description": "How far each channel may be from rgb; 24 when omitted."
+                    }
+                }),
+                &["expect"],
+            ),
+        },
+        ToolDescriptor {
             id: "http_request",
             title: "HTTP request",
             description: "Issue an HTTP request to an allowed host with explicit method and body.",
@@ -621,7 +649,7 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
 }
 
 /// The tools this build can actually run: the four workspace reads, the plan the run keeps, the
-/// three writes, the eight browser calls, the shell and the three project runners, the three
+/// three writes, the nine browser calls, the shell and the three project runners, the three
 /// read-only git calls, and the two calls that reach the internet, whose executors live in
 /// [`crate::exec`] and [`crate::web`].
 ///
@@ -660,6 +688,7 @@ pub const EXECUTABLE: &[&str] = &[
     "browser_wait",
     "browser_console",
     "browser_capture",
+    "browser_check",
 ];
 
 pub fn is_executable(tool_id: &str) -> bool {
@@ -819,6 +848,7 @@ pub fn summary(tool_id: &str, arguments: &Value) -> String {
         ),
         "browser_read" => "Read the page".to_string(),
         "browser_console" => "Read the page's console".to_string(),
+        "browser_check" => "Check the page's picture".to_string(),
         // A write is named by its path alone: the whole contents of a new file, both sides of an
         // edit, or every line of a patch would be quoted back at the person being asked to approve
         // it.
@@ -1083,11 +1113,13 @@ mod tests {
                 // A capture writes one file the run keeps, but it writes it where the app keeps its
                 // own data rather than into the project — the row is a write because a row that wrote
                 // a file and said "read" would be the one place the list lied about what a call does.
-                "browser_capture"
+                // A check takes the same picture, so it writes the same kind of file.
+                "browser_capture",
+                "browser_check"
             ],
             "the offered writes are a create that cannot overwrite, an edit that has to match, a patch \
-             whose every old line has to match, and the three page actions that change only the \
-             panel's document"
+             whose every old line has to match, the three page actions that change only the panel's \
+             document, and the two pictures of it kept beside the app's data"
         );
         assert!(
             !is_executable("delete_path"),

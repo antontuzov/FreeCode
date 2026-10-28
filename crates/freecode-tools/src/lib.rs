@@ -18,6 +18,7 @@
 
 pub mod exec;
 pub mod page;
+pub mod pixels;
 pub mod registry;
 pub mod sandbox;
 pub mod web;

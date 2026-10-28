@@ -411,6 +411,9 @@ pub fn run() {
             // What the page draws, as a PNG kept in the app's own folder. The window sends the panel's
             // rectangle because only the layout knows where the frame ended up.
             preview::page_capture,
+            // The same picture, measured against one assertion instead of only kept: the answer a
+            // run checks a page with when no model is looking at it.
+            preview::page_check,
             // The development check behind `?pagecheck=1`; it refuses outside a probe launch.
             preview::agent_page_probe,
             chat::start_engine,

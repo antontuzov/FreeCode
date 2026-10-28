@@ -773,7 +773,7 @@ mod tests {
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(freecode_tools::EXECUTABLE.len(), 25);
+        assert_eq!(freecode_tools::EXECUTABLE.len(), 26);
         // The writes are the rows the pill is built from, so none can silently degrade to a generic
         // tool — and a create says create, because a row that reads "Edit file" over a file the run
         // invented would be the transcript contradicting the review under it.
@@ -815,6 +815,7 @@ mod tests {
             "browser_wait",
             "browser_console",
             "browser_capture",
+            "browser_check",
         ] {
             assert_eq!(started_row(id, &json!({})).kind, StepKind::Browser, "{id}");
         }

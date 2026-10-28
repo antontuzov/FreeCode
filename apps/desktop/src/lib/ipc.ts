@@ -521,6 +521,21 @@ export type CaptureRect = { x: number; y: number; width: number; height: number 
 /** Mirrors `preview::Capture`: where the PNG went and the pixels it holds. */
 export type Capture = { path: string; width: number; height: number; bytes: number };
 
+/** One assertion a check makes about the page's picture. Mirrors `freecode_tools::pixels::Expect`. */
+export type PageExpect =
+  | { expect: "not-blank" }
+  | { expect: "colour"; x: number; y: number; rgb: string; tolerance?: number };
+
+/** Mirrors `preview::Checked`: the verdict on the picture and the PNG it measured. */
+export type PageCheck = {
+  passed: boolean;
+  detail: string;
+  path: string;
+  width: number;
+  height: number;
+  bytes: number;
+};
+
 /** Mirrors the JSON `preview::probe` answers with. */
 export type PageProbeReport = { ok: boolean; url: string; steps: PageProbeStep[] };
 
@@ -986,6 +1001,14 @@ export const ipc = {
    * on the display. Rejects with the host's reason — the run shows it rather than inventing a file.
    */
   capturePage: (rect: CaptureRect) => invoke<Capture>("page_capture", { rect }),
+  /**
+   * Take the same picture a capture takes and assert on its pixels: the host measures the frame and
+   * answers whether the assertion held, so a run can check what a page drew without a model looking
+   * at the PNG. The frame is kept either way, and a failed assertion is a verdict rather than a
+   * rejected call — only a panel that never painted one is an error.
+   */
+  checkPage: (rect: CaptureRect, expect: PageExpect) =>
+    invoke<PageCheck>("page_check", { rect, expect }),
   /**
    * Run the development page check: drive a page written into the project folder with the real
    * browser calls. Refused unless the host was started with `FREECODE_PAGE_PROBE=1`, so a released

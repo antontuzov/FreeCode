@@ -451,23 +451,28 @@ pub struct Capture {
     pub bytes: u64,
 }
 
+/// What a check answers: the verdict on the picture, and the PNG it measured. Mirrors
+/// `freecode_tools::pixels::Verdict` plus the file the frame was kept in.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Checked {
+    pub passed: bool,
+    pub detail: String,
+    pub path: String,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: u64,
+}
+
 /// How long the webview gets to paint the frame a capture asked for.
 const CAPTURE_PATIENCE: Duration = Duration::from_secs(10);
 
 /// What the webview's snapshot answers with: the PNG bytes and the pixel size they hold.
 type Snapshot = Result<(Vec<u8>, u32, u32), String>;
 
-/// Capture the part of the window's page named by `rect`, save it as a PNG and answer where it went.
-///
-/// The snapshot is the webview's own rendering, not a screen recording: it needs no permission and
-/// cannot pick up whatever else is on the display. What it does capture is the window's page, so the
-/// rectangle has to be the panel's frame — which is why the window measures it rather than the host.
-///
-/// The file lands in the app's own data folder rather than the project: a capture is evidence about a
-/// run, not a file the run edits, and a project that filled up with PNGs after every check would be
-/// a workspace the user did not ask for.
-#[tauri::command]
-pub async fn page_capture(app: AppHandle, rect: CaptureRect) -> Result<Capture, String> {
+/// The webview's rendering of one rectangle, as PNG bytes and their pixel size. Both the capture
+/// and the check start here; only what they do with the picture differs.
+async fn snapshot_rect(app: &AppHandle, rect: CaptureRect) -> Snapshot {
     if !(rect.width >= 2.0
         && rect.height >= 2.0
         && rect.width.is_finite()
@@ -488,24 +493,66 @@ pub async fn page_capture(app: AppHandle, rect: CaptureRect) -> Result<Capture, 
         .map_err(|why| format!("the window could not be asked for a capture: {why}"))?;
     // The completion block fires on the main thread, so the wait happens on the blocking pool: a
     // capture that blocked the main thread would wait for the frame it is blocking.
-    let (png, width, height) =
-        tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(CAPTURE_PATIENCE))
-            .await
-            .map_err(|why| format!("the capture stopped: {why}"))?
-            .map_err(|_| {
-                format!(
-                    "the page did not paint a frame within {} s to capture",
-                    CAPTURE_PATIENCE.as_secs()
-                )
-            })??;
+    tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(CAPTURE_PATIENCE))
+        .await
+        .map_err(|why| format!("the capture stopped: {why}"))?
+        .map_err(|_| {
+            format!(
+                "the page did not paint a frame within {} s to capture",
+                CAPTURE_PATIENCE.as_secs()
+            )
+        })?
+}
+
+/// Keep one PNG beside the app's own data rather than in the project: a capture is evidence about a
+/// run, not a file the run edits, and a project that filled up with PNGs after every check would be
+/// a workspace the user did not ask for.
+fn keep_capture(png: &[u8]) -> Result<std::path::PathBuf, String> {
     let dir = capture_dir()?;
     let file = unique_capture(&dir)?;
-    std::fs::write(&file, &png)
+    std::fs::write(&file, png)
         .map_err(|why| format!("{} cannot be written: {why}", file.display()))?;
+    Ok(file)
+}
+
+/// Capture the part of the window's page named by `rect`, save it as a PNG and answer where it went.
+///
+/// The snapshot is the webview's own rendering, not a screen recording: it needs no permission and
+/// cannot pick up whatever else is on the display. What it does capture is the window's page, so the
+/// rectangle has to be the panel's frame — which is why the window measures it rather than the host.
+#[tauri::command]
+pub async fn page_capture(app: AppHandle, rect: CaptureRect) -> Result<Capture, String> {
+    let (png, width, height) = snapshot_rect(&app, rect).await?;
+    let file = keep_capture(&png)?;
     Ok(Capture {
         path: file.display().to_string(),
         width,
         height,
+        bytes: png.len() as u64,
+    })
+}
+
+/// Capture the part of the window's page named by `rect`, measure it against `expect`, and answer
+/// whether the assertion held — the call that lets a run judge the picture without a model looking at
+/// it. The frame is kept either way, so a failed check leaves the picture that failed.
+///
+/// The measurement is [`freecode_tools::pixels::evaluate`], the same function the executors are
+/// tested against, so the answer cannot differ from the one the model's result describes.
+#[tauri::command]
+pub async fn page_check(
+    app: AppHandle,
+    rect: CaptureRect,
+    expect: freecode_tools::pixels::Expect,
+) -> Result<Checked, String> {
+    let (png, _, _) = snapshot_rect(&app, rect).await?;
+    let verdict = freecode_tools::pixels::evaluate(&png, &expect)?;
+    let file = keep_capture(&png)?;
+    Ok(Checked {
+        passed: verdict.passed,
+        detail: verdict.detail,
+        path: file.display().to_string(),
+        width: verdict.width,
+        height: verdict.height,
         bytes: png.len() as u64,
     })
 }
@@ -791,6 +838,43 @@ fn probe(app: &AppHandle) -> Result<Value, String> {
     // one.
     let shot = run_page(&mut steps, "browser_capture", json!({}), &policy, &host)?;
     capture_file(&shot)?;
+    // A check is the call that lets a run judge the picture without a model seeing it, so the probe
+    // proves both answers: a passing assertion on this page, and a failing one that must not pass.
+    let drawn = run_page(
+        &mut steps,
+        "browser_check",
+        json!({ "expect": "not-blank" }),
+        &policy,
+        &host,
+    )?;
+    if !drawn.contains("passed") {
+        return Err(format!("the page did not register as drawn: {drawn:?}"));
+    }
+    // The page draws dark text on white with a 28 px margin, so its top-left corner is the
+    // background: a check for white passes there and a check for red cannot.
+    let white = run_page(
+        &mut steps,
+        "browser_check",
+        json!({ "expect": "colour", "x": 0.02, "y": 0.02, "rgb": "#ffffff", "tolerance": 8 }),
+        &policy,
+        &host,
+    )?;
+    if !white.contains("within 8 of") {
+        return Err(format!("the page's margin was not white: {white:?}"));
+    }
+    let wrong = run_page(
+        &mut steps,
+        "browser_check",
+        json!({ "expect": "colour", "x": 0.02, "y": 0.02, "rgb": "#ff0000", "tolerance": 8 }),
+        &policy,
+        &host,
+    )?;
+    if !wrong.contains("did not pass") {
+        return Err(format!("a check for the wrong colour passed: {wrong:?}"));
+    }
+    // The failing check kept its picture too, and the probe reads it back: a verdict with no file
+    // behind it would be a measurement nothing could look at afterwards.
+    capture_file(&wrong)?;
     let summary = format!("{} checks passed on this page", steps.len());
     host.ask(
         PageOp::Type,
