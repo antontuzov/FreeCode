@@ -27,6 +27,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+        with:
+          # The repository has never published a site, and the switch lives in Settings only. This
+          # input turns Pages on with the job's token instead of waiting for a human to flip it.
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
