@@ -77,6 +77,11 @@ const PATHS = {
   artifact: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6",
   webReading:
     "M2 12a10 10 0 1 0 20 0 10 10 0 1 0-20 0M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20",
+  // The panel's page with a pointer on it. `monitor` is the machine and `globe` is the network; this
+  // is the document the run is driving, and the cursor is what separates it from the other two at the
+  // 13px an inspector chip draws.
+  browser:
+    "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM3 9h18M8 13l4.6 1.6-1.8 1.4-.9 2.6z",
   // Two sheets, the lower one only a line under the first: this group lists what the answer was
   // assembled from. It used to carry `download`'s arrow verbatim, which is a thing you do to a file
   // rather than a thing a file can be.

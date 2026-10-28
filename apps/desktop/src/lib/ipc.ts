@@ -301,6 +301,7 @@ export type HostStepKind =
   | "artifact"
   | "webSearch"
   | "webReading"
+  | "browser"
   | "source"
   | "blocked";
 
@@ -489,6 +490,30 @@ export type ShellRefusal =
 
 /** Host event carrying `ShellEvent`; must match the channel `shell.rs` emits on. */
 export const SHELL_EVENT = "shell-event";
+
+/* ---- the agent's page calls, relayed to the preview panel ---- */
+
+/**
+ * One page operation the host's tool thread is waiting for. `op` is a `freecode_tools::PageOp` in its
+ * snake_case wire spelling, and the window answers it by relaying the request to the framed page's
+ * own script and handing the script's answer back through `pageReply` — the frame is cross-origin, so
+ * the page cannot be reached any other way.
+ */
+export type PageRequest = { id: number; op: string; arguments: Record<string, unknown> };
+
+/** Host event carrying `PageRequest`; must match `preview::PAGE_EVENT` in Rust. */
+export const PAGE_EVENT = "page-request";
+
+/** One step the development page check recorded, for the report rather than for a model. */
+export type PageProbeStep = {
+  tool: string;
+  summary: string;
+  key: string | null;
+  failed: boolean;
+};
+
+/** Mirrors the JSON `preview::probe` answers with. */
+export type PageProbeReport = { ok: boolean; url: string; steps: PageProbeStep[] };
 
 /* ---- the whole settings document, as the Settings surface edits it ----
  * Field-for-field the Rust schema in `crates/freecode-config`. The surface mutates the loaded object
@@ -940,6 +965,18 @@ export const ipc = {
    * of a frame that was never going to load.
    */
   previewEntry: () => invoke<string>("preview_entry"),
+  /**
+   * The answer to one `page-request`, or why the window could not get one. The host's tool thread is
+   * waiting on exactly one of these per id; a reply for an id it has already timed out on is dropped.
+   */
+  pageReply: (id: number, reply: { value: unknown } | { error: string }) =>
+    invoke<void>("page_reply", { id, reply }),
+  /**
+   * Run the development page check: drive a page written into the project folder with the real
+   * browser calls. Refused unless the host was started with `FREECODE_PAGE_PROBE=1`, so a released
+   * build never writes the fixture or runs the check.
+   */
+  agentPageProbe: () => invoke<PageProbeReport>("agent_page_probe"),
   /**
    * Put files a run wrote back to the text they held before it touched them.
    *

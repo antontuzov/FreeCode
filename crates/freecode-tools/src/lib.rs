@@ -17,6 +17,7 @@
 //! as `"{}"`, because the fork answers HTTP 500 otherwise (llama.cpp#112).
 
 pub mod exec;
+pub mod page;
 pub mod registry;
 pub mod sandbox;
 pub mod web;
@@ -28,6 +29,9 @@ use freecode_config::agent::shell_governed;
 pub use exec::{
     declared_checks, execute, execute_watched, plan, write_targets, Edit, Executed, PlanItem,
     PlanStatus, Summary, SummaryKey, Watcher, MAX_PLAN_ITEMS, MAX_RESULT_BYTES,
+};
+pub use page::{
+    is_page_tool, page_op, PageHost, PageOp, MAX_CONSOLE_LINES, MAX_PAGE_TEXT, PAGE_TOOLS,
 };
 pub use registry::{
     executable_specs, find, is_delegated, is_executable, is_runnable, patch_target,
@@ -67,6 +71,8 @@ pub enum ToolsError {
     Web(#[from] WebError),
     #[error("invalid arguments for {tool}: {reason}")]
     InvalidArguments { tool: String, reason: String },
+    #[error("{0}")]
+    Page(String),
 }
 
 /// The keys whose values are filesystem paths, in the registry's schemas.

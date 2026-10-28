@@ -96,6 +96,12 @@ export default function App() {
   const forgetBetween = query("new_task_between") === "1";
   const stopAfter = Math.max(0, Number(query("stop_after")) || 0);
   const reopen = query("reopen") === "1";
+  // `?pagecheck=1` runs the page bridge's development probe: the host writes a small page into the
+  // project folder and drives it with the real browser calls, leaving a receipt for each one on the
+  // page itself. The window takes no synthetic input, so this is how the bridge is proved end to
+  // end; the command refuses unless the host was started with FREECODE_PAGE_PROBE=1, and the panel it
+  // opens is where a capture of it lands.
+  const pagecheck = query("pagecheck") === "1";
   const filed = useSessions((s) => s.items);
   const openFiled = useSessions((s) => s.open);
   const refreshFiled = useSessions((s) => s.refresh);
@@ -119,6 +125,11 @@ export default function App() {
   }, [load]);
 
   useEffect(() => {
+    if (!pagecheck) return;
+    void ipc.agentPageProbe().catch((why) => console.error("page check:", why));
+  }, [pagecheck]);
+
+  useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
 
@@ -138,7 +149,8 @@ export default function App() {
       query("knowledge") !== null ||
       query("extensions") !== null ||
       query("ask") !== null ||
-      query("preview") !== null
+      query("preview") !== null ||
+      query("pagecheck") !== null
     )
       return;
     if (!settingsDoc || settingsDoc.onboarding.completed) return;

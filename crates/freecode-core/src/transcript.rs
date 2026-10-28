@@ -58,6 +58,8 @@ pub enum StepKind {
     WebSearch,
     /// "Web reading" — a fetched page the run consulted.
     WebReading,
+    /// "Browser" — a call that acted on the page in the window's preview panel.
+    Browser,
     /// A citation/source row.
     Source,
     /// A blocker rendered inline, e.g. the load-guard refusing stock llama.cpp.
@@ -88,6 +90,7 @@ impl StepKind {
             StepKind::Artifact => "transcript.step.artifact",
             StepKind::WebSearch => "transcript.step.webSearch",
             StepKind::WebReading => "transcript.step.webReading",
+            StepKind::Browser => "transcript.step.browser",
             StepKind::Source => "transcript.step.source",
             StepKind::Blocked => "transcript.step.blocked",
         }
@@ -128,6 +131,7 @@ pub fn all_i18n_keys() -> Vec<&'static str> {
         Artifact,
         WebSearch,
         WebReading,
+        Browser,
         Source,
         Blocked,
     ]

@@ -40,6 +40,7 @@ export type StepKind =
   | "artifact"
   | "webSearch"
   | "webReading"
+  | "browser"
   | "source"
   | "blocked";
 
@@ -64,6 +65,7 @@ const I18N_KEYS: Record<StepKind, string> = {
   artifact: "transcript.step.artifact",
   webSearch: "transcript.step.webSearch",
   webReading: "transcript.step.webReading",
+  browser: "transcript.step.browser",
   source: "transcript.step.source",
   blocked: "transcript.step.blocked",
 };
@@ -676,6 +678,7 @@ const CAPABILITIES = new Set<StepKind>([
   "createFile",
   "webSearch",
   "webReading",
+  "browser",
   "tool",
 ]);
 

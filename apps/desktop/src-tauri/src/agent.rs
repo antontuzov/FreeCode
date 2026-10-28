@@ -136,12 +136,13 @@ pub(crate) fn run_one(
             call_id: call.id.clone(),
             result: format!(
                 "{name} is not available in this build: it has no executor. The calls it can make \
-                 are read_file, list_dir, glob, grep_search, write_file, edit_file and apply_patch, \
+                  are read_file, list_dir, glob, grep_search, write_file, edit_file and apply_patch, \
                  which reach nothing outside this workspace; git_status, git_diff and git_log, which \
                  only read the repository; web_search and fetch_url, which reach the internet only \
                  while the Privacy switch is on; terminal, run_tests, run_build and run_linter, which \
-                 run only while Terminal access is on; and spawn_subagent, which delegates only while \
-                 Subagents is on."
+                 run only while Terminal access is on; the browser calls, which act on the page open \
+                 in the preview panel; and spawn_subagent, which delegates only while Subagents is \
+                 on."
             ),
         };
     }
@@ -155,7 +156,10 @@ pub(crate) fn run_one(
             // them here is what lets the pair of the old and the new state be recorded together.
             let captured = crate::undo::capture(name, &arguments, policy);
             let watcher = watches(name).then(|| watcher_for(app, &row.id));
-            match execute_watched(name, &arguments, policy, watcher.as_ref()) {
+            // The page calls reach the window's preview panel through the bridge in `preview`: a host
+            // that is built per call so it borrows this run's own app handle.
+            let page = crate::preview::Page::new(app);
+            match execute_watched(name, &arguments, policy, watcher.as_ref(), Some(&page)) {
                 Ok(done) => {
                     // The executor's own report of what it wrote. Its paths are workspace-relative by
                     // construction, which is what makes two calls that named one file — one by its
@@ -336,7 +340,8 @@ fn run_check(app: &AppHandle, tool: &str, policy: &SandboxPolicy) {
     emit(app, AgentEvent::ToolStarted { step: row.clone() });
     // A check is a command the user waits through, so it reports into the same panel a call does.
     let watcher = watcher_for(app, &row.id);
-    match execute_watched(tool, &arguments, policy, Some(&watcher)) {
+    // A host-initiated check has no preview panel of its own: the browser calls are never checks.
+    match execute_watched(tool, &arguments, policy, Some(&watcher), None) {
         Ok(done) => {
             let failed = done.summary.failed();
             let code = done.summary.params.get("code").and_then(Value::as_i64);
@@ -533,6 +538,39 @@ fn subject(name: &str, arguments: &Value) -> String {
                 .unwrap_or_default()
                 .to_string()
         }
+        // A page call is named by what it acted on: the selector it reached for, the key it pressed.
+        // A whole-page read and a console look have no single subject — their summaries carry the
+        // counts — and a click's coordinates name nothing, so a selector is the only label.
+        "browser_read" | "browser_click" | "browser_wait" => {
+            return arguments
+                .get("selector")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        }
+        "browser_type" => {
+            let selector = arguments
+                .get("selector")
+                .and_then(Value::as_str)
+                .filter(|selector| !selector.is_empty());
+            return match selector {
+                Some(selector) => selector.to_string(),
+                None => task_subject(
+                    arguments
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                ),
+            };
+        }
+        "browser_press" => {
+            return arguments
+                .get("key")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        }
+        "browser_console" => return String::new(),
         _ => {}
     }
     ["path", "pattern", "file", "query", "url", "command"]
@@ -557,6 +595,7 @@ pub(crate) fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
         "git_status" | "git_diff" | "git_log" => StepKind::Git,
         "web_search" => StepKind::WebSearch,
         "fetch_url" => StepKind::WebReading,
+        _ if name.starts_with("browser_") => StepKind::Browser,
         "spawn_subagent" => StepKind::Subagent,
         _ => StepKind::Tool,
     };
@@ -646,6 +685,37 @@ mod tests {
     }
 
     #[test]
+    fn a_browser_call_is_named_by_the_element_it_reached_for() {
+        // The chip says which control the call acted on; "browser_click" alone would say what kind of
+        // row it is and nothing about the page. A whole-page read and a console look have no one
+        // element, so their rows are labelled by the summary's count instead.
+        let row = started_row("browser_click", &json!({ "selector": "#play" }));
+        assert_eq!(row.kind, StepKind::Browser);
+        assert_eq!(row.detail, "#play");
+        assert_eq!(
+            started_row("browser_wait", &json!({ "selector": "#score" })).detail,
+            "#score"
+        );
+        assert_eq!(
+            started_row("browser_press", &json!({ "key": "Enter" })).detail,
+            "Enter"
+        );
+        // A typing call without a selector writes into the focused field, and the text is the only
+        // thing that says which field that was.
+        assert_eq!(
+            started_row("browser_type", &json!({ "text": "Ada" })).detail,
+            "Ada"
+        );
+        assert!(started_row("browser_read", &json!({})).detail.is_empty());
+        assert!(started_row("browser_console", &json!({})).detail.is_empty());
+        // Opening a page is named by the file it framed, which is the path argument like any read.
+        assert_eq!(
+            started_row("browser_open", &json!({ "path": "game.html" })).detail,
+            "game.html"
+        );
+    }
+
+    #[test]
     fn a_write_that_spanned_two_files_is_reported_per_file() {
         use freecode_tools::exec::EditHunk;
         let edits = vec![
@@ -703,7 +773,7 @@ mod tests {
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(freecode_tools::EXECUTABLE.len(), 17);
+        assert_eq!(freecode_tools::EXECUTABLE.len(), 24);
         // The writes are the rows the pill is built from, so none can silently degrade to a generic
         // tool — and a create says create, because a row that reads "Edit file" over a file the run
         // invented would be the transcript contradicting the review under it.
@@ -734,6 +804,19 @@ mod tests {
             started_row("fetch_url", &json!({ "url": "https://example.com" })).kind,
             StepKind::WebReading
         );
+        // The browser calls act on the page in the panel, so they read as that and not as a lookup:
+        // the two web calls left the machine, and these stayed inside the window.
+        for id in [
+            "browser_open",
+            "browser_read",
+            "browser_click",
+            "browser_type",
+            "browser_press",
+            "browser_wait",
+            "browser_console",
+        ] {
+            assert_eq!(started_row(id, &json!({})).kind, StepKind::Browser, "{id}");
+        }
         // A command reads as a command: a row that said "Ran tool" over `rm -rf target` would hide the
         // one call whose subject is the exact words that ran.
         assert_eq!(

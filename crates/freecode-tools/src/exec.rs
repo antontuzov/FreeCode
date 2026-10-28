@@ -37,6 +37,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use walkdir::WalkDir;
 
+use crate::page::{page_op, PageHost, PageOp, MAX_CONSOLE_LINES, MAX_PAGE_TEXT};
 use crate::{authorize, registry::is_executable, web, Access, SandboxPolicy, ToolsError};
 
 /// The longest plan the model may keep: enough for a real task, short enough that the list is
@@ -309,12 +310,30 @@ pub enum SummaryKey {
     GitCommit,
     /// `{{count}}` commits in the log.
     GitCommits,
+    /// A page put into the window's browser panel, named by `{{file}}`.
+    BrowserOpened,
+    /// The visible text one read of the page took back, `{{count}}` characters of it.
+    BrowserText,
+    /// A click that landed on `{{target}}`, the element the selector matched.
+    BrowserClicked,
+    /// Text put into `{{target}}`, the field the selector matched.
+    BrowserTyped,
+    /// `{{key}}` pressed on the page.
+    BrowserPressed,
+    /// `{{target}}` appeared on the page before the wait ran out.
+    BrowserFound,
+    /// `{{target}}` never appeared on the page; the content says what the page showed instead.
+    BrowserNotFound,
+    /// The page has logged nothing to its console since it loaded.
+    BrowserClean,
+    /// `{{count}}` console lines the page has logged since it loaded.
+    BrowserProblems,
 }
 
 impl SummaryKey {
     /// Every key the executors can answer with, so a catalog entry no executor reaches is named as the
     /// dead copy it is.
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 46] = [
         Self::Empty,
         Self::Lines,
         Self::NoRange,
@@ -352,6 +371,15 @@ impl SummaryKey {
         Self::GitDiff,
         Self::GitCommit,
         Self::GitCommits,
+        Self::BrowserOpened,
+        Self::BrowserText,
+        Self::BrowserClicked,
+        Self::BrowserTyped,
+        Self::BrowserPressed,
+        Self::BrowserFound,
+        Self::BrowserNotFound,
+        Self::BrowserClean,
+        Self::BrowserProblems,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -395,6 +423,15 @@ impl SummaryKey {
             Self::GitDiff => "transcript.summary.gitDiff",
             Self::GitCommit => "transcript.summary.gitCommit",
             Self::GitCommits => "transcript.summary.gitCommits",
+            Self::BrowserOpened => "transcript.summary.browserOpened",
+            Self::BrowserText => "transcript.summary.browserText",
+            Self::BrowserClicked => "transcript.summary.browserClicked",
+            Self::BrowserTyped => "transcript.summary.browserTyped",
+            Self::BrowserPressed => "transcript.summary.browserPressed",
+            Self::BrowserFound => "transcript.summary.browserFound",
+            Self::BrowserNotFound => "transcript.summary.browserNotFound",
+            Self::BrowserClean => "transcript.summary.browserClean",
+            Self::BrowserProblems => "transcript.summary.browserProblems",
         }
     }
 
@@ -409,7 +446,9 @@ impl SummaryKey {
             | Self::FilesPatched
             | Self::ChangedFile
             | Self::ChangedFiles
-            | Self::GitCommits => &["count"],
+            | Self::GitCommits
+            | Self::BrowserText
+            | Self::BrowserProblems => &["count"],
             Self::NoRange => &["from", "to"],
             Self::LineTooLong => &["line"],
             Self::LineRange | Self::LineRangeCapped => &["from", "to", "total"],
@@ -424,6 +463,12 @@ impl SummaryKey {
             Self::TerminalTimedOut => &["seconds"],
             Self::SubagentReport => &["rounds", "reads"],
             Self::PlanSteps => &["done", "total"],
+            Self::BrowserOpened => &["file"],
+            Self::BrowserClicked
+            | Self::BrowserTyped
+            | Self::BrowserFound
+            | Self::BrowserNotFound => &["target"],
+            Self::BrowserPressed => &["key"],
             Self::GitDiffFile => &["added", "removed"],
             Self::GitDiff => &["files", "added", "removed"],
             Self::Empty
@@ -435,7 +480,8 @@ impl SummaryKey {
             | Self::TerminalStopped
             | Self::GitClean
             | Self::GitNotRepo
-            | Self::GitCommit => &[],
+            | Self::GitCommit
+            | Self::BrowserClean => &[],
         }
     }
 }
@@ -487,14 +533,18 @@ impl Summary {
         }
     }
 
-    /// Whether the command this line reports did not succeed. Only the three command endings can say
-    /// so: every other summary describes a read or a write that returned without failing.
+    /// Whether the work this line reports did not succeed. Only the three command endings and a wait
+    /// that ran out can say so: every other summary describes a read or a write that returned without
+    /// failing.
     pub fn failed(&self) -> bool {
         match self.key {
             Some(SummaryKey::TerminalTimedOut | SummaryKey::TerminalStopped) => true,
             Some(SummaryKey::TerminalExit) => {
                 self.params.get("code").and_then(Value::as_i64) != Some(0)
             }
+            // A wait that ran out is the one page result that did not find what it asked for: the row
+            // says so instead of showing the wait as work that succeeded.
+            Some(SummaryKey::BrowserNotFound) => true,
             _ => false,
         }
     }
@@ -532,7 +582,7 @@ pub fn execute(
     arguments: &Value,
     policy: &SandboxPolicy,
 ) -> Result<Executed, ToolsError> {
-    execute_watched(tool_id, arguments, policy, None)
+    execute_watched(tool_id, arguments, policy, None, None)
 }
 
 /// [`execute`] with a sink for a running command's output. The watcher sees the same bytes the
@@ -544,6 +594,7 @@ pub fn execute_watched(
     arguments: &Value,
     policy: &SandboxPolicy,
     watcher: Option<&Watcher>,
+    page: Option<&dyn PageHost>,
 ) -> Result<Executed, ToolsError> {
     let tool = authorize(tool_id, arguments, policy)?;
     if !is_executable(tool.id) {
@@ -569,6 +620,11 @@ pub fn execute_watched(
         // them without the Privacy switch, and a URL is not a path the sandbox can resolve.
         "web_search" => web_search(tool.id, arguments),
         "fetch_url" => fetch_url(tool.id, arguments),
+        // Seven calls that act inside the document the window's browser panel is showing rather than
+        // on disk or the network. The page itself is reached through [`PageHost`], which only the
+        // window can answer; a run with no panel — a subagent's — is told so rather than failing mute.
+        "browser_open" | "browser_read" | "browser_click" | "browser_type" | "browser_press"
+        | "browser_wait" | "browser_console" => page_tool(tool.id, arguments, policy, page),
         // Unreachable while [`registry::EXECUTABLE`](crate::registry::EXECUTABLE) and this match move
         // together, and a refusal rather than a panic if they ever do not.
         other => Err(ToolsError::NoExecutor(other.to_string())),
@@ -597,6 +653,370 @@ pub fn write_targets(tool_id: &str, arguments: &Value, policy: &SandboxPolicy) -
         .iter()
         .filter_map(|label| resolve(policy, label, Access::Write).ok())
         .collect()
+}
+
+/// How much of a page's text an `open` or a `wait` quotes. A read has the whole page and its own
+/// budget; these two show what the page looks like now, and the model asks for a read when it needs
+/// the rest.
+const PAGE_PEEK_TEXT: usize = 1200;
+
+/// The seven calls that act on the page in the window's browser panel.
+///
+/// Only `browser_open` names a file, and that path goes through the same sandbox as a read: it must
+/// resolve inside the workspace, exist, and be a page. The rest act on the document the panel is
+/// already showing, which is [`PageHost`]'s to answer — and a run with no panel (a subagent's, or the
+/// host's own post-run check) says so rather than pretending the call ran.
+///
+/// The page is the *rendered* document, not the file: its text is what its own script wrote, and a
+/// click is the event a person's mouse sends. That is the point of these calls — `read_file` already
+/// reads the source, and a page that only works after its script runs cannot be checked that way.
+fn page_tool(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+    page: Option<&dyn PageHost>,
+) -> Result<Executed, ToolsError> {
+    let op = page_op(tool).ok_or_else(|| ToolsError::NoExecutor(tool.to_string()))?;
+    let host = page.ok_or_else(|| {
+        ToolsError::Page(
+            "there is no browser panel to act on here: the page calls drive the window's preview \
+             panel, which only the run the user is watching has. A subagent's run, or the host's \
+             own check after a run, has no page."
+                .into(),
+        )
+    })?;
+    let patience = op.patience();
+    match op {
+        PageOp::Open => {
+            let raw = required(tool, arguments, "path")?;
+            let path = resolve(policy, raw, Access::Read)?;
+            let shown = relative(policy, &path);
+            if !path.is_file() {
+                return Err(ToolsError::InvalidArguments {
+                    tool: tool.to_string(),
+                    reason: format!("\"{shown}\" is not a file; browser_open shows one HTML page"),
+                });
+            }
+            if !is_html(&path) {
+                return Err(ToolsError::InvalidArguments {
+                    tool: tool.to_string(),
+                    reason: format!(
+                        "\"{shown}\" is not an HTML page. browser_open shows .html and .htm files, \
+                         and read_file is the call that reads anything else."
+                    ),
+                });
+            }
+            let answer = ask(host, op, json!({ "path": shown }), patience)?;
+            let url = page_str(&answer, "url");
+            let title = page_str(&answer, "title");
+            let text = page_str(&answer, "text");
+            let mut content = format!("Opened \"{shown}\" in the browser panel.\nAddress: {url}\n");
+            if !title.is_empty() {
+                content.push_str(&format!("Title: {title}\n"));
+            }
+            let (peek, more) = page_text(&text, PAGE_PEEK_TEXT);
+            if peek.trim().is_empty() {
+                content.push_str("\nThe page shows no text yet.\n");
+            } else {
+                content.push_str(&format!("\nText:\n{peek}\n"));
+                if more {
+                    content.push_str("(More text was left out; browser_read shows the page.)\n");
+                }
+            }
+            content.push_str(
+                "\nWhat is in the panel is what the page's own script made of it. browser_read, \
+                 browser_click, browser_type, browser_press, browser_wait and browser_console act \
+                 on this page.",
+            );
+            Ok(Executed {
+                summary: Summary::said(
+                    SummaryKey::BrowserOpened,
+                    json!({ "file": shown.clone() }),
+                    format!("Opened {shown} in the browser"),
+                ),
+                content,
+                edits: Vec::new(),
+            })
+        }
+        PageOp::Read => {
+            let selector = text_arg(arguments, "selector")
+                .map(str::trim)
+                .filter(|selector| !selector.is_empty());
+            let fields = match selector {
+                Some(selector) => json!({ "selector": selector }),
+                None => json!({}),
+            };
+            let answer = ask(host, op, fields, patience)?;
+            let url = page_str(&answer, "url");
+            let title = page_str(&answer, "title");
+            let text = page_str(&answer, "text");
+            let (shown, more) = page_text(&text, MAX_PAGE_TEXT);
+            let mut content = format!(
+                "Page: {}\nAddress: {url}\n",
+                if title.is_empty() {
+                    "(untitled)"
+                } else {
+                    title.as_str()
+                }
+            );
+            if let Some(selector) = selector {
+                content.push_str(&format!("Element: {selector}\n"));
+            }
+            if shown.trim().is_empty() {
+                content.push_str("\nThe page shows no text.\n");
+            } else {
+                content.push_str(&format!("\nText:\n{shown}\n"));
+            }
+            if more {
+                content.push_str(&format!(
+                    "\n(The page's text is longer than {MAX_PAGE_TEXT} characters; the rest is left \
+                     out.)\n"
+                ));
+            }
+            let count = text.chars().count();
+            Ok(Executed {
+                summary: Summary::said(
+                    SummaryKey::BrowserText,
+                    json!({ "count": count }),
+                    format!("Read the page ({count} characters)"),
+                ),
+                content,
+                edits: Vec::new(),
+            })
+        }
+        PageOp::Click => {
+            let selector = required(tool, arguments, "selector")?;
+            let mut fields = json!({ "selector": selector });
+            if let Some(x) = arguments.get("x").and_then(Value::as_f64) {
+                fields["x"] = json!(x);
+            }
+            if let Some(y) = arguments.get("y").and_then(Value::as_f64) {
+                fields["y"] = json!(y);
+            }
+            let answer = ask(host, op, fields, patience)?;
+            let target = named(page_str(&answer, "target"), selector);
+            Ok(Executed {
+                summary: Summary::said(
+                    SummaryKey::BrowserClicked,
+                    json!({ "target": target.clone() }),
+                    format!("Clicked {target} on the page"),
+                ),
+                content: format!(
+                    "Clicked {target}.\n\nThe page has had its turn to react; browser_read shows \
+                     what it displays now."
+                ),
+                edits: Vec::new(),
+            })
+        }
+        PageOp::Type => {
+            let text = required(tool, arguments, "text")?;
+            let selector = text_arg(arguments, "selector")
+                .map(str::trim)
+                .filter(|selector| !selector.is_empty());
+            let submit = flag_arg(arguments, "submit");
+            let mut fields = json!({ "text": text });
+            if let Some(selector) = selector {
+                fields["selector"] = json!(selector);
+            }
+            if submit {
+                fields["submit"] = json!(true);
+            }
+            let answer = ask(host, op, fields, patience)?;
+            let target = named(
+                page_str(&answer, "target"),
+                selector.unwrap_or("the focused field"),
+            );
+            let enter = if submit { ", then pressed Enter" } else { "" };
+            Ok(Executed {
+                summary: Summary::said(
+                    SummaryKey::BrowserTyped,
+                    json!({ "target": target.clone() }),
+                    format!("Typed into {target} on the page"),
+                ),
+                content: format!(
+                    "Typed into {target}: \"{text}\"{enter}.\n\nbrowser_read shows what the page \
+                     displays now."
+                ),
+                edits: Vec::new(),
+            })
+        }
+        PageOp::Press => {
+            let key = required(tool, arguments, "key")?;
+            let answer = ask(host, op, json!({ "key": key }), patience)?;
+            let key = named(page_str(&answer, "key"), key);
+            Ok(Executed {
+                summary: Summary::said(
+                    SummaryKey::BrowserPressed,
+                    json!({ "key": key.clone() }),
+                    format!("Pressed {key} on the page"),
+                ),
+                content: format!(
+                    "Pressed {key} on the page. browser_read shows what it displays now."
+                ),
+                edits: Vec::new(),
+            })
+        }
+        PageOp::Wait => {
+            let selector = required(tool, arguments, "selector")?;
+            let timeout = number_arg(arguments, "timeout_ms")
+                .unwrap_or(DEFAULT_WAIT_MS)
+                .clamp(100, MAX_WAIT_MS);
+            let answer = ask(
+                host,
+                op,
+                json!({ "selector": selector, "timeout_ms": timeout }),
+                patience,
+            )?;
+            let found = answer.get("found").and_then(Value::as_bool) == Some(true);
+            let elapsed = answer
+                .get("elapsed_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let text = page_str(&answer, "text");
+            let (peek, _) = page_text(&text, PAGE_PEEK_TEXT);
+            if !found {
+                return Ok(Executed {
+                    summary: Summary::said(
+                        SummaryKey::BrowserNotFound,
+                        json!({ "target": selector }),
+                        format!("Waited {timeout} ms for {selector}: not found"),
+                    ),
+                    content: format!(
+                        "\"{selector}\" did not appear within {timeout} ms. The page shows:\n{peek}\n\
+                         \nA page that draws nothing is usually a script that failed; browser_console \
+                         says why."
+                    ),
+                    edits: Vec::new(),
+                });
+            }
+            Ok(Executed {
+                summary: Summary::said(
+                    SummaryKey::BrowserFound,
+                    json!({ "target": selector }),
+                    format!("Found {selector} on the page"),
+                ),
+                content: format!(
+                    "\"{selector}\" appeared after {elapsed} ms.\n\nThe page shows:\n{peek}"
+                ),
+                edits: Vec::new(),
+            })
+        }
+        PageOp::Console => {
+            let answer = ask(host, op, json!({}), patience)?;
+            let lines: Vec<(String, String)> = answer
+                .get("lines")
+                .and_then(Value::as_array)
+                .map(|lines| {
+                    lines
+                        .iter()
+                        .filter_map(|line| {
+                            let text = page_str(line, "text");
+                            (!text.is_empty()).then(|| (page_str(line, "level"), text))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if lines.is_empty() {
+                return Ok(Executed {
+                    summary: Summary::said(
+                        SummaryKey::BrowserClean,
+                        json!({}),
+                        "Read the console: nothing logged",
+                    ),
+                    content:
+                        "The console is clean: the page has logged no errors or warnings since \
+                              it loaded."
+                            .into(),
+                    edits: Vec::new(),
+                });
+            }
+            let mut content = format!(
+                "The page logged {} console line{} since it loaded:\n",
+                lines.len(),
+                if lines.len() == 1 { "" } else { "s" }
+            );
+            for (level, text) in lines.iter().take(MAX_CONSOLE_LINES) {
+                let level = if level.is_empty() {
+                    "log"
+                } else {
+                    level.as_str()
+                };
+                content.push_str(&format!("[{level}] {text}\n"));
+            }
+            if lines.len() > MAX_CONSOLE_LINES {
+                content.push_str(&format!(
+                    "({} more lines left out.)\n",
+                    lines.len() - MAX_CONSOLE_LINES
+                ));
+            }
+            let count = lines.len();
+            Ok(Executed {
+                summary: Summary::said(
+                    SummaryKey::BrowserProblems,
+                    json!({ "count": count }),
+                    format!("Read the console: {count} problems"),
+                ),
+                content,
+                edits: Vec::new(),
+            })
+        }
+    }
+}
+
+/// The default and ceiling for `browser_wait`. The registry schema states the same range; this is the
+/// executor's own bound, because the host is what actually sleeps.
+const DEFAULT_WAIT_MS: usize = 3000;
+const MAX_WAIT_MS: usize = 15_000;
+
+/// One page operation, with the host's refusal passed through as it was worded: the host knows what
+/// the page answered, and a second wrapper sentence would bury it.
+fn ask(
+    host: &dyn PageHost,
+    op: PageOp,
+    fields: Value,
+    patience: Duration,
+) -> Result<Value, ToolsError> {
+    host.ask(op, &fields, patience).map_err(ToolsError::Page)
+}
+
+/// The name the page gave an element, or the selector the model used when it gave none.
+fn named(said: String, or: &str) -> String {
+    if said.is_empty() {
+        or.to_string()
+    } else {
+        said
+    }
+}
+
+/// A string field of a page's answer, or an empty one. The host fills these; an answer built by a
+/// test or a newer host may leave one out, and an absent field is a blank line rather than a failed
+/// call.
+fn page_str(answer: &Value, key: &str) -> String {
+    answer
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The first `max` characters of a page's text, and whether any were left.
+fn page_text(text: &str, max: usize) -> (String, bool) {
+    match text.char_indices().nth(max) {
+        Some((cut, _)) => (text[..cut].to_string(), true),
+        None => (text.to_string(), false),
+    }
+}
+
+/// Whether a path names a page. The preview scheme will serve the file whatever it is, but this call
+/// exists to put a *rendered* page in the panel, and a source file shown as text is not that.
+fn is_html(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("html" | "htm")
+    )
 }
 
 /// Read a text file, optionally a line range of one.
@@ -5123,6 +5543,7 @@ mod tests {
             &json!({ "command": "printf first; sleep 0.4; printf second" }),
             &p,
             Some(&watcher),
+            None,
         )
         .unwrap();
         let done = started.elapsed();
@@ -5148,6 +5569,7 @@ mod tests {
             &json!({ "path": "src/lib.rs" }),
             &p,
             Some(&watcher),
+            None,
         )
         .unwrap();
         assert!(quiet.lock().unwrap().is_empty());
@@ -5648,5 +6070,187 @@ mod tests {
             .expect_err("a step is a phrase")
             .to_string()
             .contains("longer than"));
+    }
+
+    /// The window's panel, as the executors see it: it records each operation and the fields it was
+    /// sent, and answers with one canned reply.
+    struct FakePage {
+        seen: std::sync::Mutex<Vec<(PageOp, Value, Duration)>>,
+        answer: Value,
+    }
+
+    impl FakePage {
+        fn saying(answer: Value) -> Self {
+            Self {
+                seen: std::sync::Mutex::new(Vec::new()),
+                answer,
+            }
+        }
+
+        fn seen(&self) -> Vec<(PageOp, Value, Duration)> {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    impl PageHost for FakePage {
+        fn ask(&self, op: PageOp, arguments: &Value, patience: Duration) -> Result<Value, String> {
+            self.seen
+                .lock()
+                .unwrap()
+                .push((op, arguments.clone(), patience));
+            Ok(self.answer.clone())
+        }
+    }
+
+    /// A workspace with one page and one source file, which is the difference `browser_open` judges.
+    fn page_fixture() -> (tempfile::TempDir, SandboxPolicy) {
+        let (dir, p) = plain();
+        std::fs::write(
+            dir.path().join("index.html"),
+            "<!doctype html><title>Mine</title><h1>Hello</h1>",
+        )
+        .unwrap();
+        (dir, p)
+    }
+
+    #[test]
+    fn a_page_open_asks_the_panel_for_the_sandboxed_path_and_shows_what_it_answered() {
+        let (_d, p) = page_fixture();
+        let host = FakePage::saying(json!({
+            "url": "preview://localhost/index.html",
+            "title": "Mine",
+            "text": "Hello"
+        }));
+        let got = page_tool(
+            "browser_open",
+            &json!({ "path": "index.html" }),
+            &p,
+            Some(&host),
+        )
+        .expect("a workspace page opens");
+        assert_eq!(got.summary.key, Some(SummaryKey::BrowserOpened));
+        assert_eq!(got.summary.params, json!({ "file": "index.html" }));
+        assert!(got.content.contains("preview://localhost/index.html"));
+        assert!(got.content.contains("Title: Mine"));
+        assert!(got.content.contains("Hello"));
+        let seen = host.seen();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, PageOp::Open);
+        // The host is told the workspace-relative path, not the absolute one the sandbox resolved.
+        assert_eq!(seen[0].1, json!({ "path": "index.html" }));
+    }
+
+    #[test]
+    fn a_page_open_refuses_a_source_file_and_a_path_outside_the_workspace() {
+        let (d, p) = page_fixture();
+        let host = FakePage::saying(json!({}));
+        let why = page_tool(
+            "browser_open",
+            &json!({ "path": "src/lib.rs" }),
+            &p,
+            Some(&host),
+        )
+        .expect_err("a source file is not a page");
+        assert!(why.to_string().contains("not an HTML page"), "{why}");
+        assert!(host.seen().is_empty(), "nothing reached the panel");
+
+        let outside = d.path().parent().unwrap().join("elsewhere.html");
+        let why = page_tool(
+            "browser_open",
+            &json!({ "path": outside.to_str().unwrap() }),
+            &p,
+            Some(&host),
+        )
+        .expect_err("the sandbox refuses a path outside the workspace");
+        assert!(host.seen().is_empty(), "{why}");
+    }
+
+    #[test]
+    fn a_read_sends_a_selector_only_when_one_was_given_and_caps_the_text() {
+        let (_d, p) = page_fixture();
+        let long = "x".repeat(MAX_PAGE_TEXT + 37);
+        let host = FakePage::saying(json!({
+            "url": "preview://localhost/index.html",
+            "title": "Mine",
+            "text": long
+        }));
+        let got = page_tool("browser_read", &json!({}), &p, Some(&host)).expect("a read runs");
+        assert_eq!(got.summary.key, Some(SummaryKey::BrowserText));
+        assert_eq!(
+            got.summary.params,
+            json!({ "count": MAX_PAGE_TEXT + 37 }),
+            "the count is the whole page, not the part that fit"
+        );
+        assert!(got.content.contains("longer than"), "{}", got.content);
+        assert_eq!(host.seen()[0].1, json!({}));
+
+        page_tool(
+            "browser_read",
+            &json!({ "selector": "h1" }),
+            &p,
+            Some(&host),
+        )
+        .expect("a read of one element runs");
+        assert_eq!(host.seen()[1].1, json!({ "selector": "h1" }));
+    }
+
+    #[test]
+    fn a_wait_that_ran_out_is_a_failed_row_that_quotes_the_page() {
+        let (_d, p) = page_fixture();
+        let host = FakePage::saying(json!({
+            "found": false,
+            "elapsed_ms": 3000,
+            "text": "Nothing here yet"
+        }));
+        let got = page_tool(
+            "browser_wait",
+            &json!({ "selector": "#ready" }),
+            &p,
+            Some(&host),
+        )
+        .expect("the wait itself finished");
+        assert_eq!(got.summary.key, Some(SummaryKey::BrowserNotFound));
+        assert!(got.summary.failed());
+        assert!(got.content.contains("did not appear"), "{}", got.content);
+        assert!(got.content.contains("Nothing here yet"), "{}", got.content);
+        let seen = host.seen();
+        assert_eq!(seen[0].0, PageOp::Wait);
+        assert_eq!(seen[0].1["timeout_ms"], json!(3000));
+        assert!(
+            seen[0].2 > Duration::from_secs(15),
+            "the panel gets the longest timeout plus travel: {:?}",
+            seen[0].2
+        );
+    }
+
+    #[test]
+    fn the_page_calls_refuse_a_run_with_no_panel() {
+        let (_d, p) = page_fixture();
+        let why = page_tool("browser_click", &json!({ "selector": "button" }), &p, None)
+            .expect_err("a subagent has no panel");
+        assert!(matches!(why, ToolsError::Page(_)));
+        assert!(why.to_string().contains("no browser panel"), "{why}");
+    }
+
+    #[test]
+    fn a_console_with_nothing_logged_is_clean_and_one_with_lines_names_them() {
+        let (_d, p) = page_fixture();
+        let quiet = FakePage::saying(json!({ "lines": [] }));
+        let got = page_tool("browser_console", &json!({}), &p, Some(&quiet)).expect("a read runs");
+        assert_eq!(got.summary.key, Some(SummaryKey::BrowserClean));
+        assert!(got.content.contains("clean"), "{}", got.content);
+
+        let noisy = FakePage::saying(json!({ "lines": [
+            { "level": "error", "text": "Uncaught TypeError: draw is not a function" },
+            { "level": "warn", "text": "deprecated" }
+        ] }));
+        let got = page_tool("browser_console", &json!({}), &p, Some(&noisy)).expect("a read runs");
+        assert_eq!(got.summary.key, Some(SummaryKey::BrowserProblems));
+        assert_eq!(got.summary.params, json!({ "count": 2 }));
+        assert!(
+            got.content.contains("[error] Uncaught TypeError"),
+            "{}",
+            got.content
+        );
     }
 }

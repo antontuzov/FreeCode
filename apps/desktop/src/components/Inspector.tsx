@@ -87,6 +87,7 @@ const CAPABILITY_ICONS: Partial<Record<StepKind, IconName>> = {
   git: "outline",
   webSearch: "search",
   webReading: "webReading",
+  browser: "browser",
 };
 
 /**

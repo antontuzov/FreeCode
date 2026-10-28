@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "./App";
+import { startPageBridge } from "./lib/page";
 import { connectAgentEvents } from "./state/chat";
 import { connectShellEvents } from "./state/shell";
 import "./styles/global.css";
@@ -12,6 +13,9 @@ import "./styles/global.css";
 // applied twice by the two listeners that were both live.
 void connectAgentEvents();
 void connectShellEvents();
+// The agent's page calls arrive on their own channel and are answered from the same window, so the
+// bridge is wired here for the same reason: one listener, installed before any page can be opened.
+startPageBridge();
 
 const container = document.getElementById("root");
 if (!container) throw new Error("#root is missing from index.html");

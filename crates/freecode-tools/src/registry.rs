@@ -398,6 +398,102 @@ pub fn registry() -> Vec<ToolDescriptor> {
                 &["query"],
             ),
         },
+        // The seven calls that drive the page the window's browser panel is showing. They read and
+        // act inside the run's own document rather than on disk or the network, which is why the
+        // first is confined to an HTML file in the workspace and the rest take nothing but a
+        // selector, text or a key name.
+        ToolDescriptor {
+            id: "browser_open",
+            title: "Open in browser",
+            description: "Show an HTML file from this workspace in the window's browser panel, where \
+                the browser calls can drive it. The other browser calls act on whatever page the \
+                panel is showing, so this is how a page is put there.",
+            permission: ReadOnly,
+            requires_network: false,
+            input_schema: s(
+                json!({ "path": { "type": "string", "description": "Workspace-relative path" } }),
+                &["path"],
+            ),
+        },
+        ToolDescriptor {
+            id: "browser_read",
+            title: "Read the page",
+            description: "Read the text the page in the browser panel is showing, with its title and \
+                address. Pass selector for one element instead of the whole page. This is the rendered \
+                page, so it shows what the page's own script wrote, not what its file says.",
+            permission: ReadOnly,
+            requires_network: false,
+            input_schema: s(json!({ "selector": { "type": "string" } }), &[]),
+        },
+        ToolDescriptor {
+            id: "browser_click",
+            title: "Click on the page",
+            description: "Click the first element matching a CSS selector in the browser panel. x and y, \
+                when given, are pixel offsets inside the element's box, which is how a canvas or a game \
+                field is clicked at a particular spot; otherwise the click lands at its centre.",
+            permission: WorkspaceWrite,
+            requires_network: false,
+            input_schema: s(
+                json!({
+                    "selector": { "type": "string" },
+                    "x": { "type": "number" },
+                    "y": { "type": "number" }
+                }),
+                &["selector"],
+            ),
+        },
+        ToolDescriptor {
+            id: "browser_type",
+            title: "Type into the page",
+            description: "Put text into the first element matching a CSS selector, the way typing does \
+                it: the field is focused, its value replaced, and input and change events sent. Without \
+                a selector the focused element takes it. submit presses Enter afterwards.",
+            permission: WorkspaceWrite,
+            requires_network: false,
+            input_schema: s(
+                json!({
+                    "selector": { "type": "string" },
+                    "text": { "type": "string" },
+                    "submit": { "type": "boolean" }
+                }),
+                &["text"],
+            ),
+        },
+        ToolDescriptor {
+            id: "browser_press",
+            title: "Press a key",
+            description: "Send one key press to the page, as a player's keyboard does: keydown, keypress \
+                where it applies, then keyup. Names are KeyboardEvent.key names — ArrowLeft, Space, \
+                Enter, Escape, a, 1.",
+            permission: WorkspaceWrite,
+            requires_network: false,
+            input_schema: s(json!({ "key": { "type": "string" } }), &["key"]),
+        },
+        ToolDescriptor {
+            id: "browser_wait",
+            title: "Wait for the page",
+            description: "Wait until an element matching a CSS selector appears in the browser panel, up \
+                to timeout_ms (3000 by default, 15000 at most), and say how long it took — or that it \
+                never appeared, with the text the page was showing.",
+            permission: ReadOnly,
+            requires_network: false,
+            input_schema: s(
+                json!({
+                    "selector": { "type": "string" },
+                    "timeout_ms": { "type": "integer", "minimum": 100, "maximum": 15000 }
+                }),
+                &["selector"],
+            ),
+        },
+        ToolDescriptor {
+            id: "browser_console",
+            title: "Read the console",
+            description: "Read the errors and warnings the page in the browser panel has logged since it \
+                loaded, uncaught exceptions included. This is where a page that draws nothing says why.",
+            permission: ReadOnly,
+            requires_network: false,
+            input_schema: s(json!({}), &[]),
+        },
         ToolDescriptor {
             id: "http_request",
             title: "HTTP request",
@@ -544,6 +640,13 @@ pub const EXECUTABLE: &[&str] = &[
     "git_log",
     "web_search",
     "fetch_url",
+    "browser_open",
+    "browser_read",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_wait",
+    "browser_console",
 ];
 
 pub fn is_executable(tool_id: &str) -> bool {
@@ -597,10 +700,14 @@ pub fn executable_specs(network: bool, shell: bool, subagents: bool) -> Vec<Valu
 /// saw. Web reads stay out of both — one switch already governs what leaves the machine, and a plan
 /// or a nested run is not the place to spend it a second time. The git calls are on the list because
 /// they read the repository with a fixed argv, the same bargain `read_file` makes with the sandbox.
+///
+/// The page reads are the third exclusion: they are read-only against the disk, but the document they
+/// read lives in the window's panel, which a subagent's own run cannot reach. A schema it cannot
+/// honour would cost it a round to learn that.
 pub fn read_only_specs() -> Vec<Value> {
     registry()
         .into_iter()
-        .filter(|t| is_executable(t.id) && t.is_read_only())
+        .filter(|t| is_executable(t.id) && t.is_read_only() && !crate::page::is_page_tool(t.id))
         .map(spec)
         .collect()
 }
@@ -659,6 +766,46 @@ pub fn summary(tool_id: &str, arguments: &Value) -> String {
                 .and_then(Value::as_str)
                 .unwrap_or("<no words>")
         ),
+        // A page call is named by the thing it acts on: the file it opens, the element it clicks or
+        // types into, the key it presses, the element it waits for. The two reads that act on the
+        // whole page say so rather than showing an empty chip.
+        "browser_open" => format!(
+            "Open {} in the browser",
+            arguments
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("<no path>")
+        ),
+        "browser_click" => format!(
+            "Click {} on the page",
+            arguments
+                .get("selector")
+                .and_then(Value::as_str)
+                .unwrap_or("<no selector>")
+        ),
+        "browser_type" => format!(
+            "Type into {}",
+            arguments
+                .get("selector")
+                .and_then(Value::as_str)
+                .unwrap_or("the focused field")
+        ),
+        "browser_press" => format!(
+            "Press {} on the page",
+            arguments
+                .get("key")
+                .and_then(Value::as_str)
+                .unwrap_or("<no key>")
+        ),
+        "browser_wait" => format!(
+            "Wait for {} on the page",
+            arguments
+                .get("selector")
+                .and_then(Value::as_str)
+                .unwrap_or("<no selector>")
+        ),
+        "browser_read" => "Read the page".to_string(),
+        "browser_console" => "Read the page's console".to_string(),
         // A write is named by its path alone: the whole contents of a new file, both sides of an
         // edit, or every line of a patch would be quoted back at the person being asked to approve
         // it.
@@ -910,9 +1057,20 @@ mod tests {
             .collect();
         assert_eq!(
             writes,
-            vec!["write_file", "edit_file", "apply_patch"],
-            "the offered writes are a create that cannot overwrite, an edit that has to match, and \
-             a patch whose every old line has to match"
+            vec![
+                "write_file",
+                "edit_file",
+                "apply_patch",
+                // These three are writes to the panel's document rather than to disk: they change what
+                // the run's own preview shows, and the plan-mode refusal still holds them out of a run
+                // that must only propose.
+                "browser_click",
+                "browser_type",
+                "browser_press"
+            ],
+            "the offered writes are a create that cannot overwrite, an edit that has to match, a patch \
+             whose every old line has to match, and the three page actions that change only the \
+             panel's document"
         );
         assert!(
             !is_executable("delete_path"),

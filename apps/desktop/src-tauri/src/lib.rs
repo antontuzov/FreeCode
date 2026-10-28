@@ -334,6 +334,9 @@ pub fn run() {
         // command to the next. One shell: the panel has one prompt, and a second one would be a
         // process nobody can see. See `shell`.
         .manage(shell::ShellState::default())
+        // The page calls waiting for the window's browser panel to answer. A tool thread parks on its
+        // own channel; `preview::page_reply` is what sends. See `preview`.
+        .manage(preview::PageBridge::default())
         // One process owns the engine, the conversation and the saved key, so a second launch hands
         // over and exits; the window already open comes forward instead. This plugin has to be
         // registered before the others — it runs their setup only after claiming the instance.
@@ -403,6 +406,10 @@ pub fn run() {
             preview::preview_url,
             // The page a blank browser tab starts on, in the same scheme and under the same policy.
             preview::preview_entry,
+            // The window's answer to one page operation the run asked for — see `preview`.
+            preview::page_reply,
+            // The development check behind `?pagecheck=1`; it refuses outside a probe launch.
+            preview::agent_page_probe,
             chat::start_engine,
             chat::stop_engine,
             chat::engine_status,

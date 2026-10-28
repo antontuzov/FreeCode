@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { translate, type Locale } from "../i18n";
 import { ipc } from "../lib/ipc";
+import { attachPage } from "../lib/page";
 import { previewPage, previewPathOf, previewTab, useNav } from "../state/nav";
 import { Icon } from "./icons";
 
@@ -45,6 +46,14 @@ export function Preview({ locale }: { locale: Locale }) {
 
   const at = page?.path ?? "";
   const url = page?.url ?? "";
+  // The frame the agent's page calls act on. It is registered from an effect rather than through a
+  // ref callback so a new document — a tab switch, a reload, a page the run opened — replaces it in
+  // one place, and an empty tab or a panel closing leaves the bridge nothing to post to.
+  const frame = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    attachPage(frame.current, url);
+    return () => attachPage(null, "");
+  }, [url, tab?.reloads]);
   // The field says where the frame actually is. Back, a tab switch or a page the review opened are
   // the panel moving, not the user typing, and an address left behind would name a page the column
   // is not showing.
@@ -248,6 +257,7 @@ export function Preview({ locale }: { locale: Locale }) {
 
       {page ? (
         <iframe
+          ref={frame}
           // The reload counter is part of the key: the same address with a new key is a new document,
           // which is what the reload control asks the scheme for.
           key={`${page.url}#${tab?.reloads ?? 0}`}
