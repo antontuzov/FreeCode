@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FreeCode — the fast, free desktop agent</title>
+    <meta
+      name="description"
+      content="FreeCode is a Rust-native desktop agent that runs every free model on the internet, drives a browser, and checks its own work. Free forever."
+    />
+    <meta property="og:title" content="FreeCode — the fast, free desktop agent" />
+    <meta
+      property="og:description"
+      content="A Rust-native desktop agent on free models. It builds, it checks, it plays."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="assets/site.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <a class="brand" href="./">
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="brand-mark">
+          <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H10a2 2 0 0 1 2 2v13a1 1 0 0 0 1 1h1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+          <path d="M4 5.5V17a3 3 0 0 0 3 3h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+          <path d="M8.5 8.5h2.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+          <circle cx="17.5" cy="6.5" r="3" fill="none" stroke="currentColor" stroke-width="1.7" />
+        </svg>
+        FreeCode
+      </a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="https://github.com/antontuzov/FreeCode" target="_blank" rel="noopener">GitHub</a>
+        <a class="nav-cta" href="#download">Download</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>With the FreeCode desktop app,<br />your models cost nothing.</h1>
+        <p class="hero-sub">
+          Every free model on the internet, one native app. It writes code, drives a browser,
+          and checks its own work — faster than any agent, because the whole loop is Rust.
+        </p>
+        <div class="downloads" id="download">
+          <a
+            class="btn btn-primary"
+            id="btn-macos"
+            href="https://github.com/antontuzov/FreeCode/releases/latest/download/FreeCode.dmg"
+          >
+            <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true">
+              <path d="M12 7.5c-1.9 0-3.2 1.2-3.2 1.2s.3-2.4 3.2-4.7c2.9 2.3 3.2 4.7 3.2 4.7S13.9 7.5 12 7.5Z" fill="currentColor"/>
+              <path d="M12 4c-1.5-1.7-3.7-2-5-1.9-.4 2.4.7 4.4 1.6 5.4M12 4c1.5-1.7 3.7-2 5-1.9.4 2.4-.7 4.4-1.6 5.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M6.3 14.2c0-3 1.8-5.7 2.9-5.7s1.3.8 2.8.8 1.7-.8 2.8-.8c1.1 0 2.9 2.7 2.9 5.7 0 3-2.1 5.8-5.7 5.8s-5.7-2.8-5.7-5.8Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            Download for macOS <span class="btn-note">.dmg · Apple silicon</span>
+          </a>
+          <a
+            class="btn btn-ghost"
+            id="btn-windows"
+            href="https://github.com/antontuzov/FreeCode/releases"
+            target="_blank"
+            rel="noopener"
+          >
+            <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true">
+              <path d="M4 5.5 11 4.4v7.1H4V5.5ZM12.9 4.1 20 3v8.5h-7.1V4.1ZM4 13.5h7v7.1L4 19.5v-6ZM12.9 13.5H20V22l-7.1-1v-7.5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+            Windows <span class="btn-note">in the works</span>
+          </a>
+        </div>
+        <p class="hero-note" id="hero-note">Free forever. No API key, no account, no credits.</p>
+
+        <div class="hero-video" id="hero-video-wrap">
+          <video
+            id="hero-video"
+            src="video/hero.mp4"
+            muted
+            loop
+            playsinline
+            preload="metadata"
+            poster="video/poster.png"
+          ></video>
+          <div class="video-chrome">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="video-title">FreeCode — a run, unedited</span>
+          </div>
+        </div>
+
+        <div class="hero-props">
+          <div class="prop">
+            <h3>Whatever you entrust, gets done</h3>
+            <p>Pages, games, scripts, edits — describe the task, the agent plans, writes, runs and fixes.</p>
+          </div>
+          <div class="prop">
+            <h3>Free models, all of them</h3>
+            <p>The OpenCode gateway carries every free model on the internet. Switch mid-task; the loop doesn't care.</p>
+          </div>
+          <div class="prop">
+            <h3>Fast because it's Rust</h3>
+            <p>The tool loop, the browser bridge, the diff engine — native code all the way down. No Electron tax.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="features" id="features">
+        <article class="feature">
+          <div class="feature-copy">
+            <span class="feature-num">01</span>
+            <h2>Every free model on the internet</h2>
+            <p>
+              One picker, every model the free service carries — from quick flash models to the big ones.
+              The agent picks its route per task, and you watch which one answered in the run report.
+            </p>
+          </div>
+          <div class="feature-art art-models" aria-hidden="true">
+            <span class="pill">big-pickle · free</span>
+            <span class="pill">glm flash · free</span>
+            <span class="pill">qwen coder · free</span>
+            <span class="pill">glm 5.3 · free</span>
+            <span class="pill">+ every model the service adds</span>
+          </div>
+        </article>
+
+        <article class="feature flip">
+          <div class="feature-copy">
+            <span class="feature-num">02</span>
+            <h2>Browser control, end to end</h2>
+            <p>
+              The agent opens the page it built, clicks it, types into it, and reads it back —
+              in the in-app browser, beside the chat. When the run makes a game, it plays its own game.
+            </p>
+          </div>
+          <div class="feature-art art-browser" aria-hidden="true">
+            <div class="mini-window">
+              <div class="mini-bar"><span></span><span></span><span></span></div>
+              <div class="mini-body">
+                <div class="mini-bounce"><i></i></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="feature">
+          <div class="feature-copy">
+            <span class="feature-num">03</span>
+            <h2>It checks its own work</h2>
+            <p>
+              A run doesn't just say it's done — it captures the page as a picture and asserts on the
+              pixels: not blank, the right colour where it should be. The frames land in the run report,
+              beside the checks that judged them.
+            </p>
+          </div>
+          <div class="feature-art art-checks" aria-hidden="true">
+            <div class="check-row">
+              <span class="thumb"></span>
+              <span class="check-label">not-blank</span>
+              <span class="verdict pass">passed</span>
+            </div>
+            <div class="check-row">
+              <span class="thumb thumb-b"></span>
+              <span class="check-label">#3f7f6a at 50% × 50%</span>
+              <span class="verdict fail">failed</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="feature flip">
+          <div class="feature-copy">
+            <span class="feature-num">04</span>
+            <h2>Native speed, native tools</h2>
+            <p>
+              The loop is Rust: the shell it drives, the patches it applies, the diffs it draws.
+              A terminal you can watch live, a todo list the run maintains, a review panel that can
+              revert everything it did.
+            </p>
+          </div>
+          <div class="feature-art art-rust" aria-hidden="true">
+            <pre><code>run → plan → write → check → play
+     ↑___________________________|</code></pre>
+          </div>
+        </article>
+      </section>
+
+      <section class="cta">
+        <h2>Start your first run in a minute</h2>
+        <p>Download, open, pick a free model, describe the task. That's the whole setup.</p>
+        <a class="btn btn-primary" href="https://github.com/antontuzov/FreeCode/releases/latest/download/FreeCode.dmg">
+          Download for macOS
+        </a>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <span class="brand">
+            <svg viewBox="0 0 24 24" aria-hidden="true" class="brand-mark">
+              <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H10a2 2 0 0 1 2 2v13a1 1 0 0 0 1 1h1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <path d="M4 5.5V17a3 3 0 0 0 3 3h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <path d="M8.5 8.5h2.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <circle cx="17.5" cy="6.5" r="3" fill="none" stroke="currentColor" stroke-width="1.7" />
+            </svg>
+            FreeCode
+          </span>
+          <p>The desktop agent that runs on free models.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Product</h4>
+          <a href="#download">Download</a>
+          <a href="#features">Features</a>
+          <a href="https://github.com/antontuzov/FreeCode/releases">Releases</a>
+        </div>
+        <div class="footer-col">
+          <h4>Project</h4>
+          <a href="https://github.com/antontuzov/FreeCode">GitHub</a>
+          <a href="https://github.com/antontuzov/FreeCode/issues">Issues</a>
+          <a href="https://opencode.ai">Powered by OpenCode free models</a>
+        </div>
+      </div>
+      <p class="footer-line">© 2026 FreeCode — free as in free models.</p>
+    </footer>
+
+    <script src="assets/site.js"></script>
+  </body>
+</html>
