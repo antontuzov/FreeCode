@@ -426,6 +426,9 @@ export type AgentEvent =
   | { type: "toolStarted"; step: HostStep }
   | { type: "toolFinished"; step: HostStep; outcome: HostToolOutcome }
   | { type: "toolBatchClosed"; step: HostStep }
+  /** Output a running command just wrote, against the row `stepId` names. Already text: the host
+   * holds back a character its pipe split until the read that completes it. */
+  | { type: "terminalOutput"; stepId: string; chunk: string }
   /** The run's ledger after one more write landed on it, so the "+N −M" pill moves while the run is
    * still going rather than arriving only once it ends. */
   | { type: "diffStaged"; diff: HostDiff }

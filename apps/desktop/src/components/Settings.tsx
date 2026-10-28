@@ -1306,10 +1306,10 @@ function Agent({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
 /**
  * The keys this window answers, and nothing else.
  *
- * There is no control on this page because there is no preference behind one: the four bindings are
+ * There is no control on this page because there is no preference behind one: the five bindings are
  * the table `lib/shortcuts.ts` holds, which is the same table the window's listener reads and the
  * script that fails the build when a printed key has no handler. A row here is therefore a promise
- * the app keeps, and a fifth row would need a binding before it could exist.
+ * the app keeps, and a sixth row would need a binding before it could exist.
  */
 function Shortcuts({ t }: { t: T }) {
   return (
@@ -1319,6 +1319,7 @@ function Shortcuts({ t }: { t: T }) {
           ["shortcutNewTask", "newTask"],
           ["shortcutPalette", "palette"],
           ["shortcutSettings", "settings"],
+          ["shortcutTerminal", "terminal"],
           ["shortcutEscape", "escape"],
         ] as const
       ).map(([key, id]) => (

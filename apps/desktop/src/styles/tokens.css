@@ -70,6 +70,10 @@
      that produced it line up; the Appearance page's "Content width" moves them together. */
   --content-width: 720px;
   --header-height: 44px;
+  /* The terminal panel's open height. Deep enough for a check's failure to be read in place — a test
+     runner's last lines and the summary under them — and shallow enough that the conversation above
+     it is still the page, not a strip between two panels. */
+  --terminal-height: 240px;
   --blur-amount: 18px;
   --space-1: 4px;
   --space-2: 8px;

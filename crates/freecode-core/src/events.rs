@@ -317,6 +317,18 @@ pub enum AgentEvent {
     ToolBatchClosed {
         step: TranscriptStep,
     },
+    /// Output a running command just wrote, for the window's terminal panel.
+    ///
+    /// It is not a row: the command's row opened with `ToolStarted` and closes with `ToolFinished`,
+    /// and this is what the command printed in between, in the order its pipes were read. `step_id`
+    /// names that row, so the panel appends to the run the id belongs to rather than to whichever tab
+    /// the reader happens to be looking at.
+    TerminalOutput {
+        step_id: String,
+        /// Already decoded into text. A character split across two pipe reads is held back until the
+        /// read that completes it, so a UTF-8 character is never sent as a replacement mark.
+        chunk: String,
+    },
     /// Approval required before the call may run.
     ApprovalRequested {
         call_id: String,
@@ -471,6 +483,18 @@ mod tests {
         .unwrap();
         assert_eq!(t["type"], json!("thoughtDelta"));
         assert_eq!(a["type"], json!("answerDelta"));
+    }
+
+    #[test]
+    fn a_running_commands_output_names_the_row_it_belongs_to() {
+        let raw = serde_json::to_value(AgentEvent::TerminalOutput {
+            step_id: "s1".into(),
+            chunk: "compiling\n".into(),
+        })
+        .unwrap();
+        assert_eq!(raw["type"], json!("terminalOutput"));
+        assert_eq!(raw["stepId"], json!("s1"));
+        assert_eq!(raw["chunk"], json!("compiling\n"));
     }
 
     #[test]

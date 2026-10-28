@@ -1,6 +1,8 @@
 import { translate, type Locale } from "../i18n";
+import { shortcutLabel } from "../lib/shortcuts";
 import { useChat } from "../state/chat";
 import { useModel } from "../state/model";
+import { useTerminal } from "../state/terminal";
 import { useTranscript } from "../state/transcript";
 import { Icon } from "./icons";
 
@@ -36,6 +38,9 @@ export function StatusBar({ locale }: { locale: Locale }) {
   const status = useModel((s) => s.status);
   const engine = useChat((s) => s.engine);
   const contextUsed = useTranscript((s) => s.contextUsed);
+  const terminalOpen = useTerminal((s) => s.open);
+  const terminalRuns = useTerminal((s) => s.runs.length);
+  const toggleTerminal = useTerminal((s) => s.toggle);
 
   // A selected provider makes the local engine's packing and backend beside the point, and a badge
   // reading "Remote" would hide the two refusals that can stop a prompt before it leaves: consent and
@@ -88,6 +93,22 @@ export function StatusBar({ locale }: { locale: Locale }) {
       </span>
       {runLine && <span className="truncate font-mono text-faint">{runLine}</span>}
       <span className="flex-1" />
+      {/* The way back to the bottom panel once it is closed. The count is the commands this task
+          ran, not a badge for new ones: the footer is a measurement strip, and a number here is the
+          same fact the tab strip holds. */}
+      <button
+        type="button"
+        onClick={toggleTerminal}
+        aria-pressed={terminalOpen}
+        aria-label={translate(locale, terminalOpen ? "terminal.close" : "terminal.open")}
+        title={`${translate(locale, terminalOpen ? "terminal.close" : "terminal.open")} · ${shortcutLabel("terminal")}`}
+        className={`-mx-1 flex h-6 shrink-0 items-center gap-1 rounded-[var(--radius-sm)] px-1.5 hover:bg-hover hover:text-fg ${
+          terminalOpen ? "text-fg" : ""
+        }`}
+      >
+        <Icon name="terminal" size={13} />
+        {terminalRuns > 0 && <span className="font-mono tabular-nums">{terminalRuns}</span>}
+      </button>
       <span
         role="progressbar"
         aria-valuenow={used ?? 0}

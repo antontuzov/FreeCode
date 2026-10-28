@@ -4,6 +4,7 @@ import { translate, type Locale } from "../i18n";
 import type { HostPlanItem } from "../lib/ipc";
 import { useNav } from "../state/nav";
 import { effortReachesRoute, nextEffort, useSettings } from "../state/settings";
+import { isCommand, useTerminal } from "../state/terminal";
 import {
   ctaLabel,
   isTurn,
@@ -111,6 +112,11 @@ function StepRow({
     (step.kind === "editFile" || step.kind === "createFile") && (step.hunk || step.files?.length)
       ? step.subject
       : undefined;
+  // A command's row and the panel's tab are one call, so the row is a way into what it printed. A
+  // command this window no longer holds — the panel was cleared, or the conversation was reopened —
+  // gets no control, for the same reason an edit row with no hunk does not: it would open nothing.
+  const held = useTerminal((s) => isCommand(step.kind) && s.runs.some((run) => run.id === step.id));
+  const focusRun = useTerminal((s) => s.focus);
   // A notice's line is its catalog sentence with the run's own numbers in it; every other row's line
   // is the detail the host gave it.
   const text = stepText(locale, step);
@@ -196,6 +202,17 @@ function StepRow({
           >
             · {text}
           </span>
+        )}
+        {held && (
+          <button
+            type="button"
+            onClick={() => focusRun(step.id)}
+            title={translate(locale, "terminal.show")}
+            aria-label={translate(locale, "terminal.show")}
+            className="icon-btn shrink-0"
+          >
+            <Icon name="terminal" size={13} />
+          </button>
         )}
       </div>
       {step.kind === "todo" && step.plan && step.plan.length > 0 && step.id === livePlanId && (

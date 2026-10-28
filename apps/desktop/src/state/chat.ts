@@ -5,6 +5,7 @@ import { create } from "zustand";
 
 import { ipc, type EngineView } from "../lib/ipc";
 import { fileable, useSessions } from "./sessions";
+import { useTerminal } from "./terminal";
 import { useTranscript } from "./transcript";
 
 type ChatStore = {
@@ -163,5 +164,8 @@ export function connectAgentEvents(): Promise<() => void> {
   return ipc.onAgentEvent((event) => {
     useChat.setState({ announced: true });
     useTranscript.getState().apply(event);
+    // The terminal is a second view of the same stream: the row that opened a command and the output
+    // it printed are the same event sequence, applied to the two stores that draw it.
+    useTerminal.getState().apply(event);
   });
 }

@@ -26,8 +26,8 @@ use std::path::Path;
 use freecode_config::agent::shell_governed;
 
 pub use exec::{
-    declared_checks, execute, plan, write_targets, Edit, Executed, PlanItem, PlanStatus, Summary,
-    SummaryKey, MAX_PLAN_ITEMS, MAX_RESULT_BYTES,
+    declared_checks, execute, execute_watched, plan, write_targets, Edit, Executed, PlanItem,
+    PlanStatus, Summary, SummaryKey, Watcher, MAX_PLAN_ITEMS, MAX_RESULT_BYTES,
 };
 pub use registry::{
     executable_specs, find, is_delegated, is_executable, is_runnable, patch_target,

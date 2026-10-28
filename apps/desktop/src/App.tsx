@@ -11,6 +11,7 @@ import { Review } from "./components/Review";
 import { Settings } from "./components/Settings";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
+import { Terminal } from "./components/Terminal";
 import { Transcript } from "./components/Transcript";
 import type { Locale } from "./i18n";
 import { ipc } from "./lib/ipc";
@@ -21,6 +22,7 @@ import { currentView, useNav } from "./state/nav";
 import { useOnboarding } from "./state/onboarding";
 import { useSettings } from "./state/settings";
 import { useSessions } from "./state/sessions";
+import { FIXTURE_RUNS, useTerminal } from "./state/terminal";
 import {
   FIXTURE_DIFF,
   FIXTURE_ROUNDS,
@@ -64,6 +66,11 @@ export default function App() {
   // column that only a press can reach is one no capture can show.
   const rightOpen = useNav((s) => s.rightOpen);
   const statusOpen = useNav((s) => s.statusOpen);
+  // The bottom panel a command's output lives in. A command opening it, a press closing it, and
+  // `?terminal=1` seeding it are the same switch: the panel is not a report on the run so much as a
+  // place the run prints, so it takes the transcript's column rather than the right one.
+  const terminalOpen = useTerminal((s) => s.open);
+  const seedTerminal = useTerminal((s) => s.seed);
   // `?search=<query>` opens the palette with that query already typed — the deep link the panel is
   // captured through, since the window takes no injected keystrokes and a search nobody can type
   // into is a search nobody can see.
@@ -157,7 +164,11 @@ export default function App() {
     setRunDiff(FIXTURE_DIFF);
     // …and the step pill beside it, which the scripted "Ran 3 tools" header earned.
     setRunRounds(FIXTURE_ROUNDS);
-  }, [fixture, setRows, setContextUsed, setRunDiff, setRunRounds]);
+    // The terminal panel's scripted check, but only for the window that asked to see the panel:
+    // `?fixture=1` alone is the reference shell, and a run count in the footer that no visible
+    // surface explains would be a second difference from the shot it is compared against.
+    if (terminalOpen) seedTerminal(FIXTURE_RUNS);
+  }, [fixture, terminalOpen, seedTerminal, setRows, setContextUsed, setRunDiff, setRunRounds]);
 
   // `?ask=<prompt>` sends that prompt on mount; `?ask_repeat=<n>` sends it n times in a row. The
   // native window takes no injected clicks, so this is how a real answer from the local engine gets
@@ -261,6 +272,13 @@ export default function App() {
       if (setupOpen) return;
       setPaletteOpen((open) => !open);
     },
+    // The panel is a strip of the conversation's column, so it answers only while that column is the
+    // page in front — over Settings or the setup flow it would open something behind them.
+    terminal: () => {
+      if (setupOpen) return;
+      if (view.kind !== "chat" || paletteOpen) return;
+      useTerminal.getState().toggle();
+    },
     // Esc leaves a step of the history when there is one to leave and stops the run when the window is
     // already back at the conversation. The one control that means two things takes three in hand: a
     // review panel the user opened is the nearest thing to close, and it is not on the stack. The
@@ -343,6 +361,7 @@ export default function App() {
               onPickModel={() => push({ kind: "settings", page: "model" })}
               onOpenPalette={() => setPaletteOpen(true)}
             />
+            {terminalOpen && <Terminal locale={locale} />}
             {statusOpen && <StatusBar locale={locale} />}
           </div>
           {/* The column owns its width, not either report inside it: both are the same column's turn, and

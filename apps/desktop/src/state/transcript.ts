@@ -735,6 +735,10 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
       // The pill is store state rather than a row: a run that changed six files already says so in six
       // rows, and a seventh line repeating the count would be a summary nobody asked for.
       return rows;
+    case "terminalOutput":
+      // A running command's bytes are the terminal panel's, not a row's: the row already says what
+      // started and how it ended, and the transcript is not the place to print a build log.
+      return rows;
     case "runFinished":
       return onOpenTurn(rows, (turn) => ({
         ...turn,

@@ -25,6 +25,8 @@
 //! nothing.
 
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
 use freecode_config::Settings;
@@ -35,7 +37,7 @@ use freecode_core::transcript::{
 };
 use freecode_llama::ToolCall;
 use freecode_tools::{
-    execute, is_delegated, is_executable, is_runnable, patch_target, Edit, SandboxPolicy,
+    execute_watched, is_delegated, is_executable, is_runnable, patch_target, Edit, SandboxPolicy,
 };
 
 /// One call's answer to the model, with the id the replay has to name.
@@ -152,7 +154,8 @@ pub(crate) fn run_one(
             // Before the executor touches disk: these are the texts a revert puts back, and reading
             // them here is what lets the pair of the old and the new state be recorded together.
             let captured = crate::undo::capture(name, &arguments, policy);
-            match execute(name, &arguments, policy) {
+            let watcher = watches(name).then(|| watcher_for(app, &row.id));
+            match execute_watched(name, &arguments, policy, watcher.as_ref()) {
                 Ok(done) => {
                     // The executor's own report of what it wrote. Its paths are workspace-relative by
                     // construction, which is what makes two calls that named one file — one by its
@@ -331,7 +334,9 @@ fn run_check(app: &AppHandle, tool: &str, policy: &SandboxPolicy) {
     let arguments = json!({});
     let mut row = started_row(tool, &arguments);
     emit(app, AgentEvent::ToolStarted { step: row.clone() });
-    match execute(tool, &arguments, policy) {
+    // A check is a command the user waits through, so it reports into the same panel a call does.
+    let watcher = watcher_for(app, &row.id);
+    match execute_watched(tool, &arguments, policy, Some(&watcher)) {
         Ok(done) => {
             let failed = done.summary.failed();
             let code = done.summary.params.get("code").and_then(Value::as_i64);
@@ -366,6 +371,74 @@ fn run_check(app: &AppHandle, tool: &str, policy: &SandboxPolicy) {
             );
         }
     }
+}
+
+/// Whether a call runs a command whose output the terminal panel can show. The four are the registry's
+/// own shell runners — the free-form one and the three the project's manifest decides — and nothing
+/// else in this build starts a process whose output would belong in a terminal.
+fn watches(name: &str) -> bool {
+    matches!(name, "terminal" | "run_tests" | "run_build" | "run_linter")
+}
+
+/// How much output one command may report before the panel stops hearing from it. A command can print
+/// for its whole deadline; the panel is a window, not a log store, and the row's own result still
+/// carries the tail. Nothing is said when this bound is reached, because the answer is: the panel
+/// stopped watching, not the command stopped printing.
+pub(crate) const TERMINAL_EVENT_BYTES: usize = 256 * 1024;
+
+/// The sink a running command's output goes to: one `TerminalOutput` event per pipe read, against the
+/// row that opened the command. The bytes are decoded across reads so a character the pipe split in
+/// two is completed rather than sent as a replacement mark; a read that is still mid-character waits
+/// for the next one, and a stream that never becomes text is dropped instead of held.
+pub(crate) fn watcher_for(app: &AppHandle, step_id: &str) -> freecode_tools::Watcher {
+    let app = app.clone();
+    let step_id = step_id.to_string();
+    let pending: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let sent = Arc::new(AtomicUsize::new(0));
+    Arc::new(move |bytes: &[u8]| {
+        let text = {
+            let mut buf = match pending.lock() {
+                Ok(buf) => buf,
+                // A panic on the other pipe's thread poisoned the lock; the reader still gets its
+                // output through the call's own result, so the panel losing a chunk is not worth a
+                // panic on this thread too.
+                Err(_) => return,
+            };
+            buf.extend_from_slice(bytes);
+            match std::str::from_utf8(&buf) {
+                Ok(text) => {
+                    let text = text.to_string();
+                    buf.clear();
+                    text
+                }
+                Err(invalid) => {
+                    let valid = invalid.valid_up_to();
+                    if valid == 0 {
+                        // Binary output would otherwise grow this buffer for as long as the command
+                        // runs. Once it is clearly not text, it is dropped: the panel shows text.
+                        if buf.len() > 4096 {
+                            buf.clear();
+                        }
+                        return;
+                    }
+                    let text = String::from_utf8_lossy(&buf[..valid]).to_string();
+                    buf.drain(..valid);
+                    text
+                }
+            }
+        };
+        if text.is_empty() || sent.fetch_add(text.len(), Ordering::Relaxed) >= TERMINAL_EVENT_BYTES
+        {
+            return;
+        }
+        emit(
+            &app,
+            AgentEvent::TerminalOutput {
+                step_id: step_id.clone(),
+                chunk: text,
+            },
+        );
+    })
 }
 
 /// Approval, then the sandbox. `Ok(())` is the only answer that lets a read happen, and everything

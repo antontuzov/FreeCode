@@ -31,6 +31,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -513,6 +514,15 @@ pub struct Executed {
     pub edits: Vec<Edit>,
 }
 
+/// Where a running command's bytes go while it is still running — the pipe's own chunks, in the order
+/// each drain thread read them. The two streams share one sink, so the order across them is the order
+/// the reads happened in rather than the order the process wrote; a terminal view is a window onto the
+/// command, not a transcript of it, and the answer the model gets still merges them the same way.
+///
+/// Only the three callers that run a command pass one. It is `Send + Sync` because each pipe drains on
+/// its own thread, and it must not block: it is called on the thread that is reading the pipe.
+pub type Watcher = Arc<dyn Fn(&[u8]) + Send + Sync>;
+
 /// Run one call. The single entry point: authorization, the executable gate, then the work.
 ///
 /// Takes the tool id and its parsed arguments rather than a [`crate::ToolCall`], because the wire's
@@ -521,6 +531,19 @@ pub fn execute(
     tool_id: &str,
     arguments: &Value,
     policy: &SandboxPolicy,
+) -> Result<Executed, ToolsError> {
+    execute_watched(tool_id, arguments, policy, None)
+}
+
+/// [`execute`] with a sink for a running command's output. The watcher sees the same bytes the
+/// executor captures — both streams, as they arrive — so the window can show a build finishing line by
+/// line while the call that started it is still open. It changes nothing about what runs: the same
+/// authorization, the same executable gate, the same process group and deadline.
+pub fn execute_watched(
+    tool_id: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+    watcher: Option<&Watcher>,
 ) -> Result<Executed, ToolsError> {
     let tool = authorize(tool_id, arguments, policy)?;
     if !is_executable(tool.id) {
@@ -535,10 +558,10 @@ pub fn execute(
         "edit_file" => edit_file(tool.id, arguments, policy),
         "write_file" => write_file(tool.id, arguments, policy),
         "apply_patch" => apply_patch(tool.id, arguments, policy),
-        "terminal" => terminal(tool.id, arguments, policy),
-        "run_tests" => run_project(tool.id, arguments, policy, ProjectKind::Tests),
-        "run_build" => run_project(tool.id, arguments, policy, ProjectKind::Build),
-        "run_linter" => run_project(tool.id, arguments, policy, ProjectKind::Lint),
+        "terminal" => terminal(tool.id, arguments, policy, watcher),
+        "run_tests" => run_project(tool.id, arguments, policy, ProjectKind::Tests, watcher),
+        "run_build" => run_project(tool.id, arguments, policy, ProjectKind::Build, watcher),
+        "run_linter" => run_project(tool.id, arguments, policy, ProjectKind::Lint, watcher),
         "git_status" => git_read(tool.id, arguments, policy, GitRead::Status),
         "git_diff" => git_read(tool.id, arguments, policy, GitRead::Diff),
         "git_log" => git_read(tool.id, arguments, policy, GitRead::Log),
@@ -1069,7 +1092,12 @@ const SHELL_KEEP_BYTES: usize = MAX_RESULT_BYTES * 2;
 /// the whole process group rather than its first process, and the tail of the output instead of all
 /// of it. A nonzero exit is a result, not a tool failure — the model asked what the command would
 /// say, and the exit status is part of the answer.
-fn terminal(tool: &str, arguments: &Value, policy: &SandboxPolicy) -> Result<Executed, ToolsError> {
+fn terminal(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+    watcher: Option<&Watcher>,
+) -> Result<Executed, ToolsError> {
     let command = required(tool, arguments, "command")?.trim().to_string();
     let refuse = |reason: String| ToolsError::InvalidArguments {
         tool: tool.to_string(),
@@ -1098,9 +1126,16 @@ fn terminal(tool: &str, arguments: &Value, policy: &SandboxPolicy) -> Result<Exe
         .spawn()
         .map_err(|e| io_error(tool, &command, &e))?;
     // Both pipes drain on their own thread: a command that fills one while the loop waits on the
-    // other would deadlock before it ever reached its deadline.
-    let stdout = child.stdout.take().map(drain);
-    let stderr = child.stderr.take().map(drain);
+    // other would deadlock before it ever reached its deadline. The watcher rides each thread rather
+    // than the wait loop, so output is reported as it arrives instead of only once the command ends.
+    let stdout = child
+        .stdout
+        .take()
+        .map(|pipe| drain_mode(pipe, Capture::Tail, watcher.cloned()));
+    let stderr = child
+        .stderr
+        .take()
+        .map(|pipe| drain_mode(pipe, Capture::Tail, watcher.cloned()));
     let started = Instant::now();
     let ended = wait_limited(&mut child, Duration::from_secs(seconds), tool)?;
     let out = stdout.and_then(|t| t.join().ok()).unwrap_or_default();
@@ -1261,13 +1296,29 @@ enum Capture {
     Tail,
 }
 
-fn drain(pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Drained> {
-    drain_mode(pipe, Capture::Tail)
+/// How a command's streams are read: which end the answer keeps, and the watcher that forwards the
+/// bytes to the window while the command is still running. They are one choice at every call —
+/// a watched run is a shell command or a check, which keeps its tail — so they travel together.
+#[derive(Clone, Copy)]
+struct Reporting<'w> {
+    capture: Capture,
+    watcher: Option<&'w Watcher>,
+}
+
+impl Reporting<'_> {
+    /// A read whose payload starts with the part worth keeping: git's.
+    fn head() -> Self {
+        Self {
+            capture: Capture::Head,
+            watcher: None,
+        }
+    }
 }
 
 fn drain_mode(
     mut pipe: impl Read + Send + 'static,
     capture: Capture,
+    watcher: Option<Watcher>,
 ) -> std::thread::JoinHandle<Drained> {
     std::thread::spawn(move || {
         let mut kept = Drained::default();
@@ -1277,6 +1328,12 @@ fn drain_mode(
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     kept.total += n;
+                    // The watcher sees every byte the pipe gave, including the ones the capture window
+                    // is about to drop: a build's progress line is worth showing long before the
+                    // window that keeps the error text would still hold it.
+                    if let Some(watch) = watcher.as_ref() {
+                        watch(&buf[..n]);
+                    }
                     match capture {
                         Capture::Tail => {
                             kept.bytes.extend_from_slice(&buf[..n]);
@@ -1389,6 +1446,7 @@ fn run_project(
     arguments: &Value,
     policy: &SandboxPolicy,
     kind: ProjectKind,
+    watcher: Option<&Watcher>,
 ) -> Result<Executed, ToolsError> {
     let target = word(tool, arguments, "target")?;
     let filter = word(tool, arguments, "filter")?;
@@ -1409,7 +1467,10 @@ fn run_project(
         &project.args,
         &policy.workspace_root,
         seconds,
-        Capture::Tail,
+        Reporting {
+            capture: Capture::Tail,
+            watcher,
+        },
         &[],
     )?;
     let summary = ended_summary(&finished.ended, seconds);
@@ -1947,7 +2008,7 @@ fn run_argv(
     args: &[String],
     cwd: &Path,
     seconds: u64,
-    capture: Capture,
+    reporting: Reporting,
     envs: &[(&str, &str)],
 ) -> Result<Finished, ToolsError> {
     let shown = display_command(program, args);
@@ -1958,8 +2019,14 @@ fn run_argv(
                 "{shown} could not be started ({e}); {program} may not be installed on this machine"
             ))
         })?;
-    let out = child.stdout.take().map(|pipe| drain_mode(pipe, capture));
-    let err = child.stderr.take().map(|pipe| drain_mode(pipe, capture));
+    let out = child
+        .stdout
+        .take()
+        .map(|pipe| drain_mode(pipe, reporting.capture, reporting.watcher.cloned()));
+    let err = child
+        .stderr
+        .take()
+        .map(|pipe| drain_mode(pipe, reporting.capture, reporting.watcher.cloned()));
     let started = Instant::now();
     let ended = wait_limited(&mut child, Duration::from_secs(seconds), tool)?;
     let out = out
@@ -2132,7 +2199,7 @@ fn git_read(
             &numstat,
             &policy.workspace_root,
             GIT_TIMEOUT_SECS,
-            Capture::Head,
+            Reporting::head(),
             &envs,
         )?)
     } else {
@@ -2145,7 +2212,7 @@ fn git_read(
         &run_args,
         &policy.workspace_root,
         GIT_TIMEOUT_SECS,
-        Capture::Head,
+        Reporting::head(),
         &envs,
     )?;
     let stdout = String::from_utf8_lossy(&finished.out.bytes).to_string();
@@ -2342,7 +2409,7 @@ fn git_answers(tool: &str, policy: &SandboxPolicy, args: &[&str]) -> bool {
         &argv,
         &policy.workspace_root,
         GIT_TIMEOUT_SECS,
-        Capture::Head,
+        Reporting::head(),
         &envs,
     )
     .map(|finished| !finished.ended_is_failure())
@@ -5029,6 +5096,61 @@ mod tests {
             .expect_err("an empty command is not a command");
         assert!(err.to_string().contains("empty"), "{err}");
         let _ = d;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_reports_its_output_while_it_is_still_running() {
+        let (d, _) = plain();
+        let p = shell_policy(d.path());
+        let started = Instant::now();
+        let first_at = Arc::new(std::sync::Mutex::new(None::<Duration>));
+        let seen = Arc::new(std::sync::Mutex::new(String::new()));
+        let (at, text) = (first_at.clone(), seen.clone());
+        // The command writes, waits, then writes again. A watcher fed only the final capture would see
+        // both lines at once, and the call would return before "first" was ever reported.
+        let watcher: Watcher = Arc::new(move |bytes: &[u8]| {
+            let mut at = at.lock().unwrap();
+            if at.is_none() {
+                *at = Some(started.elapsed());
+            }
+            text.lock()
+                .unwrap()
+                .push_str(&String::from_utf8_lossy(bytes));
+        });
+        let got = execute_watched(
+            "terminal",
+            &json!({ "command": "printf first; sleep 0.4; printf second" }),
+            &p,
+            Some(&watcher),
+        )
+        .unwrap();
+        let done = started.elapsed();
+        let first = first_at.lock().unwrap().expect("output was reported");
+        assert!(
+            done.saturating_sub(first) >= Duration::from_millis(150),
+            "output arrived only at the end: first at {first:?}, returned at {done:?}"
+        );
+        assert_eq!(seen.lock().unwrap().as_str(), "firstsecond");
+        // The watcher does not change what the call answers with: the same report, from the same tail.
+        assert!(got.content.contains("$ printf first"), "{}", got.content);
+        assert!(got.summary.text == "exit 0", "{}", got.summary.text);
+        // And a call that runs no command reports nothing, even when one is watching.
+        let quiet = Arc::new(std::sync::Mutex::new(String::new()));
+        let sink = quiet.clone();
+        let watcher: Watcher = Arc::new(move |bytes: &[u8]| {
+            sink.lock()
+                .unwrap()
+                .push_str(&String::from_utf8_lossy(bytes));
+        });
+        execute_watched(
+            "read_file",
+            &json!({ "path": "src/lib.rs" }),
+            &p,
+            Some(&watcher),
+        )
+        .unwrap();
+        assert!(quiet.lock().unwrap().is_empty());
     }
 
     #[cfg(unix)]

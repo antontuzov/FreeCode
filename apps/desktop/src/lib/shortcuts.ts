@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 
 import type { ShortcutDoc } from "./ipc";
 
-export type ShortcutId = "newTask" | "palette" | "settings" | "escape";
+export type ShortcutId = "newTask" | "palette" | "settings" | "terminal" | "escape";
 
 /**
  * `cmd` is the platform's primary modifier — ⌘ on macOS, Ctrl on Windows and Linux — because a
@@ -22,6 +22,9 @@ export const SHORTCUTS: Record<ShortcutId, ShortcutDoc> = {
   // replacing it, and the same key closes it — a user who reaches ⌘K twice changed their mind.
   palette: { cmd: true, shift: false, alt: false, ctrl: false, key: "k" },
   settings: { cmd: true, shift: false, alt: false, ctrl: false, key: "," },
+  // The reference's bottom panel key. ⇧ keeps it apart from the browser's own search keys, and the
+  // panel it answers moves neither the conversation nor the right column.
+  terminal: { cmd: true, shift: true, alt: false, ctrl: false, key: "j" },
   escape: { cmd: false, shift: false, alt: false, ctrl: false, key: "Escape" },
 };
 
