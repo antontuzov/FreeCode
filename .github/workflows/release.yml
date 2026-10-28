@@ -1,12 +1,17 @@
 name: release
 
 # A tag push builds the app on a macOS arm64 runner and publishes the .dmg as a GitHub release
-# asset named FreeCode.dmg — the name the landing page's download button points at. The build is
-# unsigned: Gatekeeper will ask the reader to confirm on first launch, and the release notes say so.
+# asset named FreeCode.dmg — the name the landing page's download button points at.
+#
+# The bundle is built as a bare .app and the dmg is made with hdiutil rather than Tauri's DMG step:
+# that step drives Finder through AppleScript to lay the window out, which a headless runner cannot
+# do, and the release only needs a mountable image. The build is unsigned, and the release notes say
+# so — Gatekeeper will ask the reader to confirm on first launch.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -25,10 +30,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: pnpm install --frozen-lockfile
-      - run: pnpm app:build
-      - name: name the dmg what the landing page downloads
+      - run: pnpm --filter @freecode/desktop tauri build --bundles app
+      - name: make the dmg the landing page downloads
         run: |
-          mv target/release/bundle/dmg/FreeCode_*_aarch64.dmg target/release/bundle/dmg/FreeCode.dmg
+          hdiutil create \
+            -volname "FreeCode" \
+            -srcfolder target/release/bundle/macos/FreeCode.app \
+            -ov -format UDZO \
+            target/release/bundle/dmg/FreeCode.dmg
       - uses: softprops/action-gh-release@v2
         with:
           files: target/release/bundle/dmg/FreeCode.dmg
