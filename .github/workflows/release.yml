@@ -1,0 +1,37 @@
+name: release
+
+# A tag push builds the app on a macOS arm64 runner and publishes the .dmg as a GitHub release
+# asset named FreeCode.dmg — the name the landing page's download button points at. The build is
+# unsigned: Gatekeeper will ask the reader to confirm on first launch, and the release notes say so.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm app:build
+      - name: name the dmg what the landing page downloads
+        run: |
+          mv target/release/bundle/dmg/FreeCode_*_aarch64.dmg target/release/bundle/dmg/FreeCode.dmg
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/bundle/dmg/FreeCode.dmg
+          body: |
+            macOS .dmg for Apple silicon — unsigned, so right-click → Open on first launch.
+            Windows build is in the works.
