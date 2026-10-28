@@ -198,6 +198,11 @@ type NavStore = {
   /** The diff pill and the panel's own close control are the same press seen from either side. */
   toggleReview: () => void;
   showInspector: () => void;
+  /** The palette's "Open built-in browser": the column showing the browser, on the blank tab the
+   * plus makes when no tab is open. */
+  openBrowser: () => void;
+  /** The palette's "Open review": the column answers the change, whether or not it already was. */
+  showReview: () => void;
   /** An edit row's file chip: the column switches to the change and opens on that file, because one
    * press that lands on the section is the answer to what was clicked. */
   openReviewAt: (path: string) => void;
@@ -255,6 +260,13 @@ export const useNav = create<NavStore>((set, get) => ({
       return { panel, rightOpen: panel === "review" ? true : s.rightOpen };
     }),
   showInspector: () => set({ panel: "inspector", reviewFile: null }),
+  openBrowser: () =>
+    set((s) =>
+      s.previewTabs.length > 0
+        ? { rightOpen: true }
+        : { previewTabs: [blankTab()], previewActive: 0, rightOpen: true },
+    ),
+  showReview: () => set({ panel: "review", rightOpen: true }),
   openReviewAt: (path) => set({ panel: "review", reviewFile: path, rightOpen: true }),
   openPreview: (url, path) =>
     set((s) => {

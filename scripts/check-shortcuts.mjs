@@ -96,9 +96,11 @@ for (const [file, id] of referenced) {
 
 // And no copy states a key of its own: `shortcutLabel` builds the string from the table, so a glyph
 // in a component or a catalog is either a second source of truth or a promise with nothing behind it.
+// Tests are the exception and not a loophole: the one place the built label is *checked* is a test,
+// and a test that cannot name the key it expects asserts nothing. Nothing in a test is ever painted.
 const GLYPH = /[⌘⌥⇧⌃]|Ctrl\+|\{\{shortcut\}\}/;
 for (const file of sources(SRC)) {
-  if (GLYPH_OWNERS.has(rel(file))) continue;
+  if (GLYPH_OWNERS.has(rel(file)) || /\.test\.tsx?$/.test(file)) continue;
   const lines = readFileSync(file, "utf8").split("\n");
   const body = file.endsWith(".json") ? lines : codeOnly(lines.join("\n")).split("\n");
   const line = body.find((l) => GLYPH.test(l));

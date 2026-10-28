@@ -789,6 +789,13 @@ select.field-input {
   box-shadow: var(--shadow);
   overflow: hidden;
 }
+/* The caret is the input's focus, and the panel's own edge is where it shows: the global
+ * `:focus-visible` ring is drawn for a control inside a page, while this input fills the top of a
+ * panel that is already the surface in front. The accent edge says the same thing at the panel's
+ * own measure instead of boxing the field. */
+.palette-panel:focus-within {
+  border-color: var(--accent-line);
+}
 /* A result is a conversation, so it is selected the way a nav row is — a hover and an outlined
  * accent for the one the keyboard is on — rather than with a second selection idiom. */
 .palette-row {

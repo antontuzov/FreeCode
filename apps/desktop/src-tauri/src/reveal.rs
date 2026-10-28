@@ -83,6 +83,29 @@ pub async fn open_file(app: AppHandle, path: String) -> Result<(), String> {
     launch(&file)
 }
 
+/// Hand a folder to the file manager, or say why there is none to show.
+fn show(path: &Path) -> Result<(), String> {
+    if !path.is_dir() {
+        return Err(format!(
+            "{} is not there any more, so there is no folder to show.",
+            path.display()
+        ));
+    }
+    launch(path)
+}
+
+/// Show the project folder in the desktop's file manager.
+///
+/// The path is the one settings names, not one the window sends: that is what makes this the only
+/// door that may open a directory — `open_file` still refuses one, and nothing a model printed can
+/// reach this command's argument, because it has none.
+#[tauri::command]
+pub async fn reveal_workspace(app: AppHandle) -> Result<(), String> {
+    let settings = crate::appearance::load_settings()?;
+    let root = crate::paths::project_root(Some(&app), &settings)?;
+    show(&root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +183,18 @@ mod tests {
     fn a_directory_is_not_a_file_to_open() {
         let (_root, policy) = fixture();
         assert!(confined(&policy, "my-app").is_err());
+    }
+
+    /// The palette's "Open workspace files" is the one press that may open a folder, and it opens
+    /// the root settings named rather than anything the window asks for. A root that is gone says so
+    /// with its own path instead of leaving the press silent.
+    #[test]
+    fn a_workspace_that_is_gone_is_refused_by_name() {
+        let (root, _policy) = fixture();
+        let gone = root.path().join("deleted");
+        let why = show(&gone).unwrap_err();
+        assert!(why.contains("deleted"), "{why}");
+        assert!(why.contains("no folder"), "{why}");
     }
 
     #[test]

@@ -9,7 +9,8 @@ import { useEffect, useRef } from "react";
 
 import type { ShortcutDoc } from "./ipc";
 
-export type ShortcutId = "newTask" | "palette" | "settings" | "terminal" | "escape";
+export type ShortcutId =
+  "newTask" | "palette" | "settings" | "terminal" | "files" | "browser" | "review" | "escape";
 
 /**
  * `cmd` is the platform's primary modifier — ⌘ on macOS, Ctrl on Windows and Linux — because a
@@ -18,13 +19,19 @@ export type ShortcutId = "newTask" | "palette" | "settings" | "terminal" | "esca
  */
 export const SHORTCUTS: Record<ShortcutId, ShortcutDoc> = {
   newTask: { cmd: true, shift: false, alt: false, ctrl: false, key: "n" },
-  // The palette is a search over what is already there, so it opens over the shell rather than
-  // replacing it, and the same key closes it — a user who reaches ⌘K twice changed their mind.
+  // The palette is a search over what is already there and a list of the window's own commands, so
+  // it opens over the shell rather than replacing it, and the same key closes it — a user who reaches
+  // ⌘K twice changed their mind.
   palette: { cmd: true, shift: false, alt: false, ctrl: false, key: "k" },
   settings: { cmd: true, shift: false, alt: false, ctrl: false, key: "," },
   // The reference's bottom panel key. ⇧ keeps it apart from the browser's own search keys, and the
   // panel it answers moves neither the conversation nor the right column.
   terminal: { cmd: true, shift: true, alt: false, ctrl: false, key: "j" },
+  // The palette's four open commands, at the reference's keys. `files` shows the project folder in
+  // the desktop's file manager; `browser` and `review` are the right column's two pages.
+  files: { cmd: true, shift: false, alt: true, ctrl: false, key: "e" },
+  browser: { cmd: true, shift: false, alt: false, ctrl: false, key: "t" },
+  review: { cmd: true, shift: true, alt: false, ctrl: false, key: "g" },
   escape: { cmd: false, shift: false, alt: false, ctrl: false, key: "Escape" },
 };
 
@@ -61,7 +68,11 @@ export function matches(event: KeyboardEvent, id: ShortcutId): boolean {
   const s = SHORTCUTS[id];
   if ((event.metaKey || event.ctrlKey) !== s.cmd) return false;
   if (event.altKey !== s.alt || event.shiftKey !== s.shift) return false;
-  return event.key.toLowerCase() === s.key.toLowerCase();
+  if (event.key.toLowerCase() === s.key.toLowerCase()) return true;
+  // ⌥E on macOS is a dead key: the event's `key` is "Dead", and the letter's position is the only
+  // name it still carries. Every letter binding is a physical key, which is also what lets ⌘N answer
+  // on a layout whose letters sit elsewhere.
+  return /^[a-z]$/.test(s.key) && event.code === `Key${s.key.toUpperCase()}`;
 }
 
 export type ShortcutHandlers = Partial<Record<ShortcutId, () => void>>;

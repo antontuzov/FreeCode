@@ -13,7 +13,7 @@ import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { Terminal } from "./components/Terminal";
 import { Transcript } from "./components/Transcript";
-import type { Locale } from "./i18n";
+import { translate, type Locale } from "./i18n";
 import { ipc } from "./lib/ipc";
 import { useShortcuts } from "./lib/shortcuts";
 import { useAppearance } from "./state/appearance";
@@ -77,6 +77,18 @@ export default function App() {
   // into is a search nobody can see.
   const paletteQuery = query("search");
   const [paletteOpen, setPaletteOpen] = useState(paletteQuery !== null);
+  // A command the palette lists is run from the palette itself; the same command pressed as a
+  // shortcut runs with no palette in front of it. When it cannot run, the palette opens holding the
+  // reason — the alternative is a key that did nothing, which is the one thing a shortcut must not be.
+  const [paletteNote, setPaletteNote] = useState<string | null>(null);
+  const showPalette = () => {
+    setPaletteNote(null);
+    setPaletteOpen(true);
+  };
+  const hidePalette = () => {
+    setPaletteNote(null);
+    setPaletteOpen(false);
+  };
   const fixture = fixtureMode();
   const ask = query("ask");
   const askRepeat = Math.max(1, Number(query("ask_repeat")) || 1);
@@ -289,7 +301,8 @@ export default function App() {
     // Twice closes it, because the second press is the user changing their mind.
     palette: () => {
       if (setupOpen) return;
-      setPaletteOpen((open) => !open);
+      if (paletteOpen) hidePalette();
+      else showPalette();
     },
     // The panel is a strip of the conversation's column, so it answers only while that column is the
     // page in front — over Settings or the setup flow it would open something behind them.
@@ -297,6 +310,27 @@ export default function App() {
       if (setupOpen) return;
       if (view.kind !== "chat" || paletteOpen) return;
       useTerminal.getState().toggle();
+    },
+    // The palette's open commands, at the keys the reference prints beside them. Each is the same
+    // press the palettes row makes; the folder command has no row to leave open on a refusal, so it
+    // opens the palette and puts the host's reason in it.
+    files: () => {
+      if (setupOpen) return;
+      if (view.kind !== "chat" || paletteOpen) return;
+      void ipc.revealWorkspace().catch((why) => {
+        setPaletteNote(translate(locale, "palette.commandFailed", { why: String(why) }));
+        setPaletteOpen(true);
+      });
+    },
+    browser: () => {
+      if (setupOpen) return;
+      if (view.kind !== "chat" || paletteOpen) return;
+      useNav.getState().openBrowser();
+    },
+    review: () => {
+      if (setupOpen) return;
+      if (view.kind !== "chat" || paletteOpen) return;
+      useNav.getState().showReview();
     },
     // Esc leaves a step of the history when there is one to leave and stops the run when the window is
     // already back at the conversation. The one control that means two things takes three in hand: a
@@ -369,7 +403,7 @@ export default function App() {
             onOpenSettings={() => push({ kind: "settings", page: "appearance" })}
             actions={{
               newTask: () => void newTask(),
-              openPalette: () => setPaletteOpen(true),
+              openPalette: showPalette,
               openKnowledge: () => push({ kind: "knowledge", model: "" }),
               openExtensions: () => push({ kind: "extensions" }),
             }}
@@ -378,7 +412,7 @@ export default function App() {
             <Transcript
               locale={locale}
               onPickModel={() => push({ kind: "settings", page: "model" })}
-              onOpenPalette={() => setPaletteOpen(true)}
+              onOpenPalette={showPalette}
             />
             {terminalOpen && <Terminal locale={locale} />}
             {statusOpen && <StatusBar locale={locale} />}
@@ -414,7 +448,8 @@ export default function App() {
           <Palette
             locale={locale}
             initial={paletteQuery ?? ""}
-            onClose={() => setPaletteOpen(false)}
+            notice={paletteNote}
+            onClose={hidePalette}
           />
         )}
       </div>

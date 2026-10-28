@@ -395,6 +395,9 @@ pub fn run() {
             // Handing a file this run changed back to the desktop's default handler. Confined to the
             // workspace by the same sandbox a `read_file` goes through — see `reveal`.
             reveal::open_file,
+            // The same door for the folder itself, which is the palette's "Open workspace files".
+            // It takes no path from the window: the root settings names is the only one it can show.
+            reveal::reveal_workspace,
             // The in-app address of one of the run's pages, which the review's open control frames
             // instead of leaving the app — see `preview`.
             preview::preview_url,

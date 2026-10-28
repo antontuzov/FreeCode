@@ -919,6 +919,14 @@ export const ipc = {
    */
   openFile: (path: string) => invoke<void>("open_file", { path }),
   /**
+   * Show the project folder in the desktop's file manager — the palette's "Open workspace files".
+   *
+   * The host takes no path: the folder is the one settings names, which is what keeps this from
+   * being a second, wider way into the disk. A folder that is gone rejects with the host's sentence,
+   * and the palette shows it rather than the press going quiet.
+   */
+  revealWorkspace: () => invoke<void>("reveal_workspace"),
+  /**
    * The in-app address of one of the run's pages (`preview://localhost/…`), which the host serves
    * from the project folder through its `preview` scheme. The review's open control frames it for an
    * HTML file, so the page runs inside the app instead of leaving it. Same confinement as `open_file`,
