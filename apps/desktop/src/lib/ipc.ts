@@ -453,6 +453,43 @@ export type AgentEvent =
 /** Host event carrying `AgentEvent`; must match `chat::EVENT` in Rust. */
 export const AGENT_EVENT = "agent-event";
 
+/* ---- the terminal panel's own shell ---- */
+
+/**
+ * The shell the panel opened. Mirrors `shell::ShellInfo`. `cwd` is the folder it started in — the
+ * project folder the run works in — which the panel says rather than guessing from the app's own
+ * directory.
+ */
+export type ShellInfo = { id: number; cwd: string };
+
+/**
+ * `shell::ShellEvent` on the `shell-event` channel. `sent` is the line the host admitted, emitted
+ * before it reaches the terminal: the shell runs with echo off, so this is the only copy of what the
+ * user typed, and a refused line never produces one. `chunk` is the terminal's text with the escapes a
+ * terminal would interpret already dropped; `exit` is the shell ending, with its code.
+ */
+export type ShellEvent =
+  | { kind: "sent"; id: number; command: string }
+  | { kind: "chunk"; id: number; text: string }
+  | { kind: "exit"; id: number; code: number };
+
+/**
+ * Why the host would not open the shell or send a line. Mirrors `shell::Refusal`, which is the
+ * `Result`'s error payload — so `invoke` rejects with one of these rather than a string.
+ *
+ * `blocked` is the half this panel exists to honour: the line was refused by the same approval
+ * dial the agent's `terminal` calls go through, and the panel names it instead of running it.
+ */
+export type ShellRefusal =
+  | { code: "off" }
+  | { code: "plan" }
+  | { code: "blocked"; command: string }
+  | { code: "closed" }
+  | { code: "start"; reason: string };
+
+/** Host event carrying `ShellEvent`; must match the channel `shell.rs` emits on. */
+export const SHELL_EVENT = "shell-event";
+
 /* ---- the whole settings document, as the Settings surface edits it ----
  * Field-for-field the Rust schema in `crates/freecode-config`. The surface mutates the loaded object
  * in place and hands it straight back, so a field no control renders still round-trips untouched. */
@@ -999,6 +1036,26 @@ export const ipc = {
    * nothing — `stopEngine` is the one that releases them, and the composer's Stop is not that.
    */
   chatStop: () => invoke<void>("chat_stop"),
+  /**
+   * Open the panel's own shell in the project folder, or answer why it will not. Refused while the
+   * Terminal switch is off, while the dial is Plan only, or by a tool override that takes the shell
+   * away — the same three the agent's own `terminal` call meets, and the same answer.
+   */
+  shellOpen: () => invoke<ShellInfo>("shell_open"),
+  /**
+   * Send one line. The host admits it through the approval engine before a byte reaches the terminal,
+   * so a refused line rejects with a `ShellRefusal` and never runs. The line's echo arrives on
+   * `onShellEvent` as `sent`, which is also the proof it was admitted.
+   */
+  shellSend: (line: string) => invoke<void>("shell_send", { line }),
+  /** Ctrl-C: stop what is running. It closes a command rather than starting one, so no line is admitted. */
+  shellInterrupt: () => invoke<void>("shell_interrupt"),
+  /** Tell the terminal how wide the panel is, so a command that formats to the terminal wraps there. */
+  shellResize: (rows: number, cols: number) => invoke<void>("shell_resize", { rows, cols }),
+  /** End the shell with the app's own kill — the tab's close, and the way out of a wedged command. */
+  shellClose: () => invoke<void>("shell_close"),
+  onShellEvent: (onEvent: (event: ShellEvent) => void): Promise<() => void> =>
+    listen<ShellEvent>(SHELL_EVENT, (event) => onEvent(event.payload)),
   onAgentEvent: (onEvent: (event: AgentEvent) => void): Promise<() => void> =>
     listen<AgentEvent>(AGENT_EVENT, (event) => onEvent(event.payload)),
 };

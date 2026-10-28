@@ -21,6 +21,7 @@ mod preview;
 mod provider;
 mod reveal;
 mod sessions;
+mod shell;
 mod status;
 mod storage;
 mod undo;
@@ -300,6 +301,7 @@ fn watch_signals(app: AppHandle) {
         tauri::async_runtime::spawn(async move {
             let Ok(mut stream) = signal(kind) else { return };
             if stream.recv().await.is_some() {
+                shell::shutdown(&app);
                 release_engine(&app);
                 std::process::exit(status);
             }
@@ -328,6 +330,10 @@ pub fn run() {
         // The supervised server and the conversation it is answering from. One window, one engine:
         // the state is here so a second `start_engine` cannot begin a second 6 GB load.
         .manage(chat::ChatState::default())
+        // The panel's own shell, kept across lines so `cd` and an exported variable survive from one
+        // command to the next. One shell: the panel has one prompt, and a second one would be a
+        // process nobody can see. See `shell`.
+        .manage(shell::ShellState::default())
         // One process owns the engine, the conversation and the saved key, so a second launch hands
         // over and exits; the window already open comes forward instead. This plugin has to be
         // registered before the others — it runs their setup only after claiming the instance.
@@ -423,7 +429,14 @@ pub fn run() {
             // its file off the machine. Only the second one is a loss.
             chat::list_trashed,
             chat::restore_trashed,
-            chat::purge_trashed
+            chat::purge_trashed,
+            // The terminal's own prompt: a shell in the project folder, whose every line is admitted
+            // by the same dial a model's `terminal` call goes through before it runs. See `shell`.
+            shell::shell_open,
+            shell::shell_send,
+            shell::shell_interrupt,
+            shell::shell_resize,
+            shell::shell_close
         ])
         .setup(|app| {
             // Before anything reads settings or the filed conversations: the rename moved the
@@ -443,7 +456,12 @@ pub fn run() {
         // the built icon there itself when the event loop reports Ready — after the setup hook and
         // before this callback. Whoever answers Ready last is the one whose face you see.
         tauri::RunEvent::Ready => brand::set_dock_tile(app_handle),
-        tauri::RunEvent::Exit => release_engine(app_handle),
+        tauri::RunEvent::Exit => {
+            // The shell dies with the window: it is a process in the project folder, and one left
+            // behind is one still holding the folder after the app is gone.
+            shell::shutdown(app_handle);
+            release_engine(app_handle);
+        }
         _ => {}
     });
 }

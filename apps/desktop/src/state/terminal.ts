@@ -39,7 +39,7 @@ export const MAX_RUNS = 20;
  *  errors are at its end. */
 export const MAX_OUTPUT = 256 * 1024;
 
-function keepTail(text: string): string {
+export function keepTail(text: string): string {
   if (text.length <= MAX_OUTPUT) return text;
   let cut = text.length - MAX_OUTPUT;
   // Do not split a surrogate pair: half a character renders as a replacement mark for good.
@@ -55,9 +55,18 @@ function seededOpen(): boolean {
   return asked === "1" || asked === "show";
 }
 
+/**
+ * The id of the tab that is the panel's own shell. It is not a run and has no transcript row: the
+ * shell outlives every command in the strip, so it gets a stable id of its own rather than one the
+ * host mints.
+ */
+export const SHELL_TAB = "shell";
+
 type TerminalStore = {
   /** The commands of this window, in the order they started. */
   runs: TerminalRun[];
+  /** Whether the strip holds the shell tab. The shell itself lives in `state/shell.ts`. */
+  shell: boolean;
   /** The tab the body is showing. */
   active: string | null;
   /** Whether the panel is in the window at all. A command opening closes it, a press closes it. */
@@ -73,6 +82,10 @@ type TerminalStore = {
   /** Drop one run from the strip — the tab's own close, for a command whose output the reader is
    *  done with. The neighbour becomes the tab, the way a browser's strip behaves. */
   dismiss: (id: string) => void;
+  /** Put the shell tab in the strip and show it. The PTY itself is opened by `state/shell.ts`. */
+  showShell: () => void;
+  /** Take the shell tab out. The session is killed by `state/shell.ts`, which the press also calls. */
+  hideShell: () => void;
   /** Empty the panel. The runs are the panel; a command still running keeps its tab, because a blank
    *  strip over a command that is still printing would say it had ended. */
   clear: () => void;
@@ -81,8 +94,23 @@ type TerminalStore = {
   seed: (runs: TerminalRun[]) => void;
 };
 
+/** The state the tab-strip rules need, so `closedTab` can be read on its own. */
+type StripState = Pick<TerminalStore, "runs" | "shell" | "active" | "open">;
+
+/**
+ * The shell tab leaving the strip. It is the first tab, so the neighbour that takes its place is the
+ * first run — and with no runs left the strip is empty, which is the panel closing. Killing the shell
+ * is not this function's job: the tab's press calls the session's own close, and the panel only draws
+ * what is left.
+ */
+function closedTab(s: StripState): Partial<TerminalStore> {
+  const active = s.active === SHELL_TAB ? (s.runs[0]?.id ?? null) : s.active;
+  return s.runs.length === 0 ? { shell: false, active, open: false } : { shell: false, active };
+}
+
 export const useTerminal = create<TerminalStore>((set) => ({
   runs: [],
+  shell: false,
   active: null,
   open: seededOpen(),
   collapsed: false,
@@ -91,28 +119,39 @@ export const useTerminal = create<TerminalStore>((set) => ({
   setCollapsed: (collapsed) => set({ collapsed }),
   focus: (id) =>
     set((s) =>
-      s.runs.some((run) => run.id === id) ? { active: id, open: true, collapsed: false } : {},
+      s.runs.some((run) => run.id === id) || (id === SHELL_TAB && s.shell)
+        ? { active: id, open: true, collapsed: false }
+        : {},
     ),
   dismiss: (id) =>
     set((s) => {
+      if (id === SHELL_TAB) return closedTab(s);
       const at = s.runs.findIndex((run) => run.id === id);
       if (at < 0) return {};
       const runs = s.runs.filter((run) => run.id !== id);
       // The tab that takes the closed one's place is the next one, or the previous when the last tab
       // was the one closed — the strip shrinks by one rather than jumping to its other end.
-      const active = s.active === id ? (runs[Math.min(at, runs.length - 1)]?.id ?? null) : s.active;
+      const active =
+        s.active === id
+          ? (runs[Math.min(at, runs.length - 1)]?.id ?? (s.shell ? SHELL_TAB : null))
+          : s.active;
       // The strip is the panel: a press that closed the last tab meant the panel, not an empty body
       // below a strip with nothing left to switch to.
-      return runs.length === 0 ? { runs, active, open: false } : { runs, active };
+      return runs.length === 0 && !s.shell ? { runs, active, open: false } : { runs, active };
     }),
+  showShell: () => set({ shell: true, active: SHELL_TAB, open: true, collapsed: false }),
+  hideShell: () => set((s) => closedTab(s)),
   clear: () =>
     set((s) => {
       const running = s.runs.filter((run) => run.status === "running");
+      const keepShell = s.shell && s.active === SHELL_TAB;
       return {
         runs: running,
-        active: running.some((run) => run.id === s.active)
-          ? s.active
-          : (running[running.length - 1]?.id ?? null),
+        active: keepShell
+          ? SHELL_TAB
+          : running.some((run) => run.id === s.active)
+            ? s.active
+            : (running[running.length - 1]?.id ?? (s.shell ? SHELL_TAB : null)),
       };
     }),
   seed: (runs) => set({ runs: runs.slice(-MAX_RUNS), active: runs[runs.length - 1]?.id ?? null }),

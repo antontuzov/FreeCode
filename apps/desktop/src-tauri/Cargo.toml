@@ -40,6 +40,7 @@ arboard = { version = "3", default-features = false }
 # The local OpenCode service streams its turn over SSE; the host reads that stream and checks the
 # Stop flag between chunks, so it needs the timer and `select!` rather than only the runtime.
 tokio = { workspace = true }
+portable-pty = "0.9"
 
 # Only for the shutdown hook's SIGTERM/SIGINT listener; `tokio::signal::unix` does not exist on
 # Windows, so the dependency is gated to the platforms that have the signals.

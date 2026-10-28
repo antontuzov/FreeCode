@@ -164,6 +164,54 @@ describe("the strip's controls", () => {
   });
 });
 
+describe("the shell tab", () => {
+  it("is the first tab and is what the body shows when the shell is opened", () => {
+    apply(started("a"));
+    useTerminal.getState().showShell();
+    const state = useTerminal.getState();
+    expect(state.shell).toBe(true);
+    expect(state.active).toBe("shell");
+    expect(state.open).toBe(true);
+    expect(state.collapsed).toBe(false);
+  });
+
+  it("hands the strip to the first command when it closes, and closes the panel with no commands", () => {
+    useTerminal.getState().showShell();
+    useTerminal.getState().hideShell();
+    expect(useTerminal.getState().open).toBe(false);
+
+    apply(started("a"));
+    useTerminal.getState().showShell();
+    useTerminal.getState().hideShell();
+    const state = useTerminal.getState();
+    expect(state.shell).toBe(false);
+    expect(state.active).toBe("a");
+    expect(state.open).toBe(true);
+  });
+
+  it("is shown by the same press that shows a command, and only while it exists", () => {
+    useTerminal.getState().setOpen(false);
+    useTerminal.getState().focus("shell");
+    expect(useTerminal.getState().open).toBe(false);
+
+    useTerminal.getState().showShell();
+    useTerminal.getState().setOpen(false);
+    useTerminal.getState().focus("shell");
+    expect(useTerminal.getState().open).toBe(true);
+  });
+
+  it("survives the clear press, which is about finished commands", () => {
+    useTerminal.getState().showShell();
+    apply(started("done"));
+    apply(finished("done"));
+    useTerminal.getState().focus("shell");
+    useTerminal.getState().clear();
+    const state = useTerminal.getState();
+    expect(state.shell).toBe(true);
+    expect(state.active).toBe("shell");
+  });
+});
+
 describe("fixture", () => {
   it("scripts a finished check, so the panel's chrome has a tab to draw", () => {
     expect(useTerminal.getState().runs).toHaveLength(0);

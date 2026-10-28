@@ -22,6 +22,7 @@ import { currentView, useNav } from "./state/nav";
 import { useOnboarding } from "./state/onboarding";
 import { useSettings } from "./state/settings";
 import { useSessions } from "./state/sessions";
+import { useShell } from "./state/shell";
 import { FIXTURE_RUNS, useTerminal } from "./state/terminal";
 import {
   FIXTURE_DIFF,
@@ -193,6 +194,24 @@ export default function App() {
       await send(askAgain);
     })();
   }, [ask, askRepeat, askAgain, forgetBetween, newTask, send]);
+
+  // `?shell=<command>` opens the panel's own shell and sends that line into it. The native window
+  // takes no injected keystrokes, and a terminal nobody can type into is a surface no capture can
+  // reach, so this is the dev-only press of the prompt row: with an empty value it only opens the
+  // shell. A refusal — the Terminal switch off, Plan only, a denied command — lands in the panel as
+  // its own sentence, which is the half of this feature a capture can prove.
+  const shellLine = query("shell");
+  useEffect(() => {
+    if (shellLine === null) return;
+    const panel = useTerminal.getState();
+    panel.setOpen(true);
+    panel.showShell();
+    void (async () => {
+      if (!(await useShell.getState().open())) return;
+      const command = shellLine.trim();
+      if (command) await useShell.getState().send(command);
+    })();
+  }, [shellLine]);
 
   // `?reopen=1` opens the newest filed conversation once the list arrives — the same call the
   // sidebar's row makes, and the only way that row's behavior gets verified rather than assumed,
