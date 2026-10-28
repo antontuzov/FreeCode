@@ -75,3 +75,6 @@ keyring = { version = "3", features = ["apple-native"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# A test writes the capture a row's frame is cut from; the host itself reads PNGs through
+# `freecode-tools`, so this encoder is test scaffolding rather than a second decoder.
+png = "0.17"

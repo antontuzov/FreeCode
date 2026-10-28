@@ -8,6 +8,7 @@ import {
   builtPage,
   changedFiles,
   ctaLabel,
+  drawnPictures,
   isPagePath,
   isTurn,
   liveRows,
@@ -432,6 +433,28 @@ describe("derivations off the rows", () => {
       },
     ]);
   });
+
+  it("lists every frame the run drew, a repeated assertion as the two pictures it is", () => {
+    const shot = "data:image/png;base64,AAAA";
+    const drawn: Row[] = [
+      { id: "turn", kind: "turn", role: "user", text: "check the page" },
+      {
+        id: "batch",
+        kind: "toolBatch",
+        children: [
+          { id: "c1", kind: "browser", frame: shot, status: "ok" },
+          // A check of the same page before and after a fix: one assertion, two frames, and both are
+          // the report's to show — the pair is what says the change worked.
+          { id: "k1", kind: "browser", frame: shot, status: "ok" },
+          { id: "k2", kind: "browser", frame: shot, status: "ok" },
+          // A browser call that read or clicked the page drew nothing, so it is not a picture.
+          { id: "b1", kind: "browser", status: "ok" },
+        ],
+      },
+      { id: "c2", kind: "browser", frame: shot, status: "ok" },
+    ];
+    expect(drawnPictures(drawn).map((step) => step.id)).toEqual(["c1", "k1", "k2", "c2"]);
+  });
 });
 
 describe("the live round", () => {
@@ -616,6 +639,33 @@ describe("the reducer", () => {
       diff: { added: 1, removed: 2 },
     });
     expect(rows()).toHaveLength(3);
+  });
+
+  it("keeps the frame a capture or a check drew on the row that took it", () => {
+    const frame = "data:image/png;base64,AAAA";
+    apply({
+      type: "toolFinished",
+      step: hostStep({ id: "shot", kind: "browser", status: "done", frame }),
+      outcome: {
+        ok: true,
+        summary: "Captured the page (1440×900)",
+        summaryKey: "transcript.summary.browserCaptured",
+        summaryParams: { size: "1440×900" },
+        diff: null,
+      },
+    });
+    apply({
+      type: "toolFinished",
+      step: hostStep({ id: "click", kind: "browser", status: "done" }),
+      outcome: { ok: true, summary: "clicked", diff: null },
+    });
+
+    expect(at(rows(), 0)).toMatchObject({ id: "shot", frame });
+    // A browser call that drew nothing carries nothing: the report lists pictures, not calls, and a
+    // row with a frame-shaped hole would be a thumbnail the window draws as a broken image.
+    const click = rows().find((row): row is Step => !isTurn(row) && row.id === "click");
+    expect(click).toBeDefined();
+    expect(click?.frame).toBeUndefined();
   });
 
   it("appends a finished call that never opened a row rather than dropping it", () => {

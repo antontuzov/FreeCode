@@ -4,6 +4,7 @@ import { translate, type Locale } from "../i18n";
 import type { RunReport } from "../lib/ipc";
 import {
   changedFiles,
+  drawnPictures,
   readSubjects,
   reviewRows,
   stepLabel,
@@ -40,6 +41,9 @@ const GROUPS: Group[] = [
   { key: "subagents", icon: "user", round: true },
   { key: "skills", icon: "skills", counted: true },
   { key: "artifact", icon: "artifact" },
+  // The frames sit beside the artifact because both are what the run *made* rather than what it read:
+  // a page it built, then the pictures it took of that page to judge it.
+  { key: "pictures", icon: "browser" },
   { key: "webReading", icon: "webReading" },
   // The document glyph rather than a stack of them, because every row in this group is one file the
   // run opened: the pair of path lists has to read as *read* against *changed* at a glance, which is
@@ -47,7 +51,22 @@ const GROUPS: Group[] = [
   { key: "source", icon: "readFile" },
 ];
 
-type Item = { label: string; meta?: string; diff?: DiffStat; icon?: IconName; path?: boolean };
+type Item = {
+  label: string;
+  meta?: string;
+  /** A meta line that judges rather than measures — a check that held, or one that did not — drawn in
+   * the colour the transcript gives the same verdict, so the two surfaces cannot disagree. */
+  tone?: "passed" | "failed";
+  diff?: DiffStat;
+  icon?: IconName;
+  path?: boolean;
+  /**
+   * A picture the run drew, as a small `data:` URL. The row draws it in place of the group's chip: the
+   * frame is the thing the reader came to this group for, and a generic glyph beside every picture would
+   * be five identical squares where five different pages should be.
+   */
+  frame?: string;
+};
 
 /**
  * The sites this build can name, and the sign each one gets on a row that says it was read. Only the
@@ -200,14 +219,27 @@ function Section({ group, items, locale }: { group: Group; items: Item[]; locale
               {translate(locale, "inspector.empty", { group: label })}
             </li>
           ) : (
-            items.map((item) => (
+            items.map((item, index) => (
               <li
-                key={item.label}
+                // The index is part of the key because a picture group can hold two rows with one name:
+                // a run that checks the same assertion before and after a fix drew two frames, and a
+                // label alone would fold them into one React child.
+                key={`${index}:${item.label}`}
                 className="flex items-center gap-[var(--space-3)] border-b border-dashed border-line/60 py-[var(--space-2)] text-quiet text-fg last:border-0"
               >
-                <span className={`insp-chip ${group.round ? "round" : ""}`}>
-                  <Icon name={item.icon ?? group.icon} size={14} />
-                </span>
+                {item.frame ? (
+                  // The frame, where every other group draws its chip: the picture is what a reader
+                  // checks this row for, and a page's shape is still legible at the row's own height.
+                  <img
+                    src={item.frame}
+                    alt=""
+                    className="h-8 w-12 shrink-0 rounded-sm border border-line bg-sunken object-cover object-top"
+                  />
+                ) : (
+                  <span className={`insp-chip ${group.round ? "round" : ""}`}>
+                    <Icon name={item.icon ?? group.icon} size={14} />
+                  </span>
+                )}
                 {item.diff || item.path ? (
                   <FileLabel path={item.label} />
                 ) : (
@@ -219,7 +251,19 @@ function Section({ group, items, locale }: { group: Group; items: Item[]; locale
                     <span className="text-danger">−{item.diff.removed}</span>
                   </span>
                 )}
-                {item.meta && <span className="shrink-0 text-micro text-faint">{item.meta}</span>}
+                {item.meta && (
+                  <span
+                    className={`shrink-0 text-micro ${
+                      item.tone === "passed"
+                        ? "text-success"
+                        : item.tone === "failed"
+                          ? "text-danger"
+                          : "text-faint"
+                    }`}
+                  >
+                    {item.meta}
+                  </span>
+                )}
               </li>
             ))
           )}
@@ -403,6 +447,32 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
       })),
     [rows, locale],
   );
+  // A picture is what the run drew rather than what it wrote: a capture, or the frame a check measured,
+  // and the check's own assertion beside it. The label is the token the model wrote into the call, not
+  // a sentence this panel invents — "not-blank", "#3f7f6a at 50% × 50%" — because that is what the
+  // picture has to be read against. A capture asserts nothing, so the catalog names it for what it is,
+  // and its measurement is the picture's size rather than a verdict nobody took.
+  const pictures = useMemo<Item[]>(
+    () =>
+      drawnPictures(reviewRows(rows, "lastTurn")).map((step) => {
+        const param = (name: string) => {
+          const value = step.detailParams?.[name];
+          return typeof value === "string" ? value : "";
+        };
+        const passed = step.detailKey === "transcript.summary.browserChecked";
+        const failed = step.detailKey === "transcript.summary.browserCheckFailed";
+        return {
+          label: param("check") || translate(locale, "inspector.pictures.captured"),
+          meta:
+            passed || failed
+              ? translate(locale, `inspector.pictures.${passed ? "passed" : "failed"}`)
+              : param("size") || undefined,
+          tone: passed ? "passed" : failed ? "failed" : undefined,
+          frame: step.frame,
+        };
+      }),
+    [rows, locale],
+  );
   // The scripted group fills in under the row-derived ones, which a real run never sees — it has no
   // scripted rows to fill it from, and no heading either.
   const groups = useMemo<Record<string, Item[]>>(
@@ -413,8 +483,9 @@ export function Inspector({ locale, fixture }: { locale: Locale; fixture: boolea
       source: sources,
       webReading: pages,
       artifact: artifacts,
+      pictures,
     }),
-    [fixture, delegated, files, capabilities, sources, pages, artifacts],
+    [fixture, delegated, files, capabilities, sources, pages, artifacts, pictures],
   );
 
   return (

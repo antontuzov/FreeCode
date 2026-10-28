@@ -149,6 +149,12 @@ export type Step = {
    */
   files?: EditedFile[];
   /**
+   * On a `browser` row that drew one: the picture the call kept, as a `data:` URL. It is a thumbnail
+   * the host cut down, not the file, so the run report can show the frame beside the check that judged
+   * it and a reopened conversation still draws the picture after the capture folder has moved on.
+   */
+  frame?: string;
+  /**
    * On a `todo` row: the list the run restated, in its order. The plan panel draws the newest one,
    * so the list is state the transcript holds rather than a second store that could disagree.
    */
@@ -411,6 +417,7 @@ function hostRow(step: HostStep, summary?: ToolSummary): Step {
     diff: step.diff ? { added: step.diff.linesAdded, removed: step.diff.linesRemoved } : undefined,
     hunk: step.hunk ?? undefined,
     files: step.files?.length ? step.files : undefined,
+    frame: step.frame ?? undefined,
     collapsed: step.collapsedByDefault || undefined,
     status: hostStatus(step.status),
   };
@@ -701,6 +708,21 @@ export function usedCapabilities(rows: Row[]): Step[] {
     if (!first.has(row.kind)) first.set(row.kind, row);
   }
   return [...first.values()];
+}
+
+/**
+ * The frames this span's rows say the run drew, in the order it drew them: one entry per browser call
+ * that came back holding a picture — a `browser_capture`, or the frame a `browser_check` measured.
+ *
+ * The row is the only source, for the reason the other groups are: the host writes the frame onto the
+ * row that took it, so a report listing pictures from anywhere else would show one the transcript above
+ * does not describe. A check that did not pass is still a frame the run drew — its verdict is exactly
+ * what the report has to say about it — so the test here is the picture, not the row's status. Repeats
+ * do not fold, unlike reads: two checks of one page are two pictures, and the pair is what tells a
+ * before from an after.
+ */
+export function drawnPictures(rows: Row[]): Step[] {
+  return everyStep(rows).filter((row) => row.kind === "browser" && row.frame);
 }
 
 function reduce(rows: Row[], event: AgentEvent): Row[] {
@@ -1167,6 +1189,42 @@ export const FIXTURE_ROWS: Row[] = [
         id: "f4j",
         kind: "webReading",
         subject: "https://en.wikipedia.org/wiki/Quantization_(signal_processing)",
+        status: "ok",
+      },
+      // The three pictures a run can draw: a capture, a check that held, and one that did not. The
+      // frames are SVGs rather than PNGs because a fixture is read by eye, not decoded — a real run
+      // sends what the panel drew, and the inspector draws either the same way. The first row is the
+      // page; the second asserts the colour at its middle, which that page has; the third asserts the
+      // same colour against the blank frame of the page *before* the run wrote it, which is the shape
+      // of a failure — the report has to show that frame too, so the pair reads as before and after.
+      {
+        id: "f4k",
+        kind: "browser",
+        detail: "1440×900",
+        detailKey: "transcript.summary.browserCaptured",
+        detailParams: { size: "1440×900" },
+        frame:
+          "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTYwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2VlZjJlZiIvPjxyZWN0IHdpZHRoPSIxNjAiIGhlaWdodD0iMjIiIGZpbGw9IiMzZjdmNmEiLz48dGV4dCB4PSIxMCIgeT0iMTUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjkiIGZpbGw9IiNmZmZmZmYiPnNuYWtlPC90ZXh0PjxyZWN0IHg9IjEwIiB5PSIzMiIgd2lkdGg9IjE0MCIgaGVpZ2h0PSIyNCIgcng9IjMiIGZpbGw9IiNmZmZmZmYiLz48cmVjdCB4PSIxMCIgeT0iNjQiIHdpZHRoPSI2NiIgaGVpZ2h0PSIyNCIgcng9IjMiIGZpbGw9IiMzZjdmNmEiLz48cmVjdCB4PSI4NCIgeT0iNjQiIHdpZHRoPSI2NiIgaGVpZ2h0PSIyNCIgcng9IjMiIGZpbGw9IiNmZmZmZmYiLz48L3N2Zz4=",
+        status: "ok",
+      },
+      {
+        id: "f4l",
+        kind: "browser",
+        detail: "not-blank — passed (1440×900)",
+        detailKey: "transcript.summary.browserChecked",
+        detailParams: { check: "not-blank", size: "1440×900" },
+        frame:
+          "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTYwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2ZmZmZmZiIvPjxyZWN0IHg9IjYwIiB5PSIzMCIgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjM2Y3ZjZhIi8+PHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjE2MCIgaGVpZ2h0PSI2IiBmaWxsPSIjZGZlN2UyIi8+PC9zdmc+",
+        status: "ok",
+      },
+      {
+        id: "f4m",
+        kind: "browser",
+        detail: "did not pass: #3f7f6a at 50% × 50% (1440×900)",
+        detailKey: "transcript.summary.browserCheckFailed",
+        detailParams: { check: "#3f7f6a at 50% × 50%", size: "1440×900" },
+        frame:
+          "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTYwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2ZmZmZmZiIvPjxyZWN0IHg9IjEyIiB5PSIxNCIgd2lkdGg9IjkwIiBoZWlnaHQ9IjgiIHJ4PSIyIiBmaWxsPSIjZDdkYmQ5Ii8+PHJlY3QgeD0iMTIiIHk9IjI4IiB3aWR0aD0iNjAiIGhlaWdodD0iNiIgcng9IjIiIGZpbGw9IiNlNmU5ZTciLz48L3N2Zz4=",
         status: "ok",
       },
     ],

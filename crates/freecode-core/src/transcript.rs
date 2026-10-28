@@ -247,6 +247,12 @@ pub struct TranscriptStep {
     /// label.
     #[serde(default)]
     pub tool_id: Option<String>,
+    /// The frame this row took, as a `data:` URL, when the call drew one: a capture, or the picture
+    /// a check measured. It is a copy small enough to draw on a row rather than the file, so the
+    /// run's report can show the picture beside the check and a reopened conversation still holds
+    /// it after the run's own folder has moved on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<String>,
     pub collapsed_by_default: bool,
 }
 
@@ -263,6 +269,7 @@ impl TranscriptStep {
             files: Vec::new(),
             plan: Vec::new(),
             tool_id: None,
+            frame: None,
             // Reasoning rows and finished batches start collapsed, as in the reference shot.
             collapsed_by_default: matches!(kind, StepKind::Processed | StepKind::ToolBatch),
         }

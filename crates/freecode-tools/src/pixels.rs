@@ -95,6 +95,77 @@ pub fn evaluate(png: &[u8], expect: &Expect) -> Result<Verdict, String> {
     }
 }
 
+/// The picture again, small enough to hang on a row of the run report, as a PNG of its own.
+///
+/// A capture is around 100 KB and the report's column is a few dozen pixels wide, so the row that
+/// says a picture was taken carries a copy at `max_width` rather than the file: a reopened
+/// conversation then draws the frame it was shown instead of a name for a file that may be gone.
+/// Each output pixel is the average of the block it covers, so a page's text and edges stay
+/// readable as shapes rather than turning into speckle.
+pub fn thumbnail(png: &[u8], max_width: u32) -> Result<Vec<u8>, String> {
+    let picture = decode(png)?;
+    let width = picture.width.min(max_width.max(1));
+    let height =
+        (u64::from(picture.height) * u64::from(width) / u64::from(picture.width)).max(1) as u32;
+    let mut small = Vec::with_capacity((width * height * 3) as usize);
+    for y in 0..height {
+        let y0 = block_start(y, height, picture.height);
+        let y1 = block_end(y, height, picture.height);
+        for x in 0..width {
+            let x0 = block_start(x, width, picture.width);
+            let x1 = block_end(x, width, picture.width);
+            let mut sum = [0u64; 3];
+            let mut read = 0u64;
+            for sy in y0..y1 {
+                for sx in x0..x1 {
+                    let [r, g, b] = picture.rgb(sx, sy);
+                    sum[0] += u64::from(r);
+                    sum[1] += u64::from(g);
+                    sum[2] += u64::from(b);
+                    read += 1;
+                }
+            }
+            let read = read.max(1);
+            for channel in sum {
+                small.push((channel / read) as u8);
+            }
+        }
+    }
+    encode(&small, width, height)
+}
+
+/// Where the block of source pixels a thumbnail pixel covers begins.
+fn block_start(at: u32, cells: u32, source: u32) -> u32 {
+    (u64::from(at) * u64::from(source) / u64::from(cells)) as u32
+}
+
+/// Where it ends — never empty, so a thumbnail taller than its source cannot skip a row.
+fn block_end(at: u32, cells: u32, source: u32) -> u32 {
+    let start = block_start(at, cells, source);
+    block_start(at + 1, cells, source)
+        .max(start + 1)
+        .min(source)
+}
+
+fn encode(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|why| format!("the picture's thumbnail cannot be written: {why}"))?;
+        writer
+            .write_image_data(rgb)
+            .map_err(|why| format!("the picture's thumbnail cannot be written: {why}"))?;
+        writer
+            .finish()
+            .map_err(|why| format!("the picture's thumbnail cannot be written: {why}"))?;
+    }
+    Ok(bytes)
+}
+
 /// A decoded frame, read as RGB. Palette and sub-byte depths are expanded by the decoder; a 16-bit
 /// sample keeps its high byte, which is all a colour check needs.
 struct Picture {
@@ -334,6 +405,38 @@ mod tests {
             "{}",
             verdict.detail
         );
+    }
+
+    #[test]
+    fn a_thumbnail_keeps_the_shape_and_the_colours_of_the_frame() {
+        // Red on the left half, white on the right: the shape a page's layout would leave in pixels.
+        let full = png_of(40, 30, |x, _| {
+            if x < 20 {
+                [220, 40, 40, 255]
+            } else {
+                [255, 255, 255, 255]
+            }
+        });
+        let small = thumbnail(&full, 10).expect("a picture can be drawn small");
+        let picture = decode(&small).expect("the thumbnail is a PNG this module reads");
+        // A quarter of the width and the same proportions, rounded down to whole rows.
+        assert_eq!((picture.width, picture.height), (10, 7));
+        // The halves are still red and white: the row holds the frame, not a blur of it.
+        assert_eq!(picture.rgb(1, 4), [220, 40, 40]);
+        assert_eq!(picture.rgb(8, 4), [255, 255, 255]);
+
+        // A frame already narrower than the row is copied rather than stretched.
+        let tiny = png_of(2, 2, |x, _| {
+            if x == 0 {
+                [0, 0, 0, 255]
+            } else {
+                [255, 255, 255, 255]
+            }
+        });
+        let small = thumbnail(&tiny, 96).expect("a picture can be drawn small");
+        let picture = decode(&small).expect("the thumbnail is a PNG this module reads");
+        assert_eq!((picture.width, picture.height), (2, 2));
+        assert_eq!(picture.rgb(0, 0), [0, 0, 0]);
     }
 
     #[test]

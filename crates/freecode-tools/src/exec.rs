@@ -511,6 +511,10 @@ pub struct Summary {
     pub params: Value,
     /// The same line in English, which is what [`Executed::content`] quotes to the model.
     pub text: String,
+    /// The PNG a capture or a check drew, when the call kept one. The line above names the file; this
+    /// is how the host reaches it without reading the sentence, so the row that reports the call can
+    /// show the frame itself. `None` on every call that drew nothing.
+    pub picture: Option<String>,
 }
 
 impl Summary {
@@ -536,6 +540,7 @@ impl Summary {
             key: Some(key),
             params,
             text: text.into(),
+            picture: None,
         }
     }
 
@@ -545,6 +550,7 @@ impl Summary {
             key: None,
             params: Value::Null,
             text: text.into(),
+            picture: None,
         }
     }
 
@@ -999,12 +1005,14 @@ fn page_tool(
             }
             let size = format!("{width}×{height}");
             let kb = (bytes as f64 / 1024.0).round().max(1.0);
+            let mut summary = Summary::said(
+                SummaryKey::BrowserCaptured,
+                json!({ "size": size }),
+                format!("Captured the page ({size})"),
+            );
+            summary.picture = Some(file.to_string());
             Ok(Executed {
-                summary: Summary::said(
-                    SummaryKey::BrowserCaptured,
-                    json!({ "size": size }),
-                    format!("Captured the page ({size})"),
-                ),
+                summary,
                 content: format!(
                     "Saved a PNG of what the page is showing: {size} pixels, {kb} KB.\nFile: {file}\n\
                      \nThis is the page as it is drawn — its pixels, not its markup and not its text. \
@@ -1068,9 +1076,14 @@ fn page_tool(
                      page drew nothing; browser_read answers what it says.\n",
                 );
             }
-            let summary = format!("Picture check {headline}: {check} ({size})");
+            let mut summary = Summary::said(
+                key,
+                json!({ "check": check, "size": size }),
+                format!("Picture check {headline}: {check} ({size})"),
+            );
+            summary.picture = Some(file.to_string());
             Ok(Executed {
-                summary: Summary::said(key, json!({ "check": check, "size": size }), summary),
+                summary,
                 content,
                 edits: Vec::new(),
             })

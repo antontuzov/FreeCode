@@ -24,6 +24,8 @@
 //! instead of "that path is protected" tries the same call again, and the run spends a round to learn
 //! nothing.
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -171,6 +173,7 @@ pub(crate) fn run_one(
                             &policy.workspace_root,
                         ));
                     let written = written(&done.edits);
+                    let picture = done.summary.picture.clone();
                     (
                         ToolOutcome {
                             diff: written.as_ref().map(|written| written.diff),
@@ -178,6 +181,7 @@ pub(crate) fn run_one(
                         },
                         done.content,
                         written,
+                        picture,
                     )
                 }
                 Err(why) => {
@@ -185,6 +189,7 @@ pub(crate) fn run_one(
                     (
                         ToolOutcome::blocked(&reason),
                         format!("{name} did not run: {reason}"),
+                        None,
                         None,
                     )
                 }
@@ -194,9 +199,16 @@ pub(crate) fn run_one(
             ToolOutcome::blocked(&reason),
             format!("{name} did not run: {reason}"),
             None,
+            None,
         ),
     };
-    let (outcome, result, written) = staged;
+    let (outcome, result, written, picture) = staged;
+    // A call that drew a picture leaves the frame on its row, small enough to hang in the run report
+    // beside the check that judged it. The file stays where the host keeps it; the row holds an image
+    // a reopened conversation can still draw, not a path into this user's home.
+    if let Some(file) = picture {
+        row.frame = frame(&file);
+    }
     row.finish(if outcome.ok {
         StepStatus::Done
     } else {
@@ -487,6 +499,23 @@ fn task_subject(task: &str) -> String {
     let mut clipped: String = line.chars().take(TASK_CHARS).collect();
     clipped.push('…');
     clipped
+}
+
+/// How wide a frame is drawn on the row it came from. The run report's column is a few dozen pixels
+/// wide there, and a page's shape is what the picture has to say at that size.
+const FRAME_WIDTH: u32 = 96;
+
+/// The frame a call took, cut down to something a row can draw.
+///
+/// The file itself stays in the host's own captures folder — it is the run's evidence, and nothing in
+/// the workspace may change it. What rides on the row is a copy: a `data:` URL the window draws
+/// directly, so a reopened conversation shows the picture the run was judged on even though the
+/// panel that took it is long gone. A capture this build cannot read leaves the row without a frame
+/// rather than failing the call: the capture succeeded, and its sentence still names the file.
+fn frame(file: &str) -> Option<String> {
+    let png = std::fs::read(file).ok()?;
+    let small = freecode_tools::pixels::thumbnail(&png, FRAME_WIDTH).ok()?;
+    Some(format!("data:image/png;base64,{}", BASE64.encode(small)))
 }
 
 /// The row's label argument: the path or pattern the call worked on, shown as the chip beside
@@ -893,5 +922,49 @@ mod tests {
         assert_eq!(rows_for(&called(&["spawn_subagent", "read_file"])), 2);
         assert_eq!(rows_for(&called(&["read_file", "delete_path"])), 1);
         assert_eq!(rows_for(&called(&["delete_everything"])), 0);
+    }
+
+    #[test]
+    fn a_picture_a_call_kept_becomes_a_frame_the_row_can_draw() {
+        let dir = std::env::temp_dir().join(format!("freecode-frame-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a folder to write the capture in");
+        let path = dir.join("page-1.png");
+        // A page-shaped 400×300 capture: red on the left, white on the right.
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 400, 300);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("a PNG header");
+            let mut data = Vec::with_capacity(400 * 300 * 4);
+            for _ in 0..300 {
+                for x in 0..400 {
+                    data.extend_from_slice(if x < 200 {
+                        &[220, 40, 40, 255]
+                    } else {
+                        &[255, 255, 255, 255]
+                    });
+                }
+            }
+            writer.write_image_data(&data).expect("pixels");
+        }
+        std::fs::write(&path, &bytes).expect("the capture on disk");
+
+        let url =
+            frame(path.to_str().expect("a UTF-8 path")).expect("a read capture becomes a frame");
+        assert!(url.starts_with("data:image/png;base64,"), "{url}");
+        let small = BASE64
+            .decode(url.trim_start_matches("data:image/png;base64,"))
+            .expect("the frame carries PNG bytes");
+        let picture =
+            freecode_tools::pixels::evaluate(&small, &freecode_tools::pixels::Expect::NotBlank)
+                .expect("the frame is a picture this build reads");
+        // The row holds the page, not the file: the frame is the capture at the row's width.
+        assert_eq!((picture.width, picture.height), (FRAME_WIDTH, 72));
+        assert!(picture.passed, "{}", picture.detail);
+
+        // A capture that is not there is a row without a frame, not a failed call.
+        assert!(frame("/nonexistent/freecode/page.png").is_none());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

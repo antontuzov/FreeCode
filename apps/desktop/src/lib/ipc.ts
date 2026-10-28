@@ -375,6 +375,12 @@ export type HostStep = {
    * keeping a second copy of state that could drift from the transcript.
    */
   plan?: HostPlanItem[];
+  /**
+   * `freecode_core::transcript::TranscriptStep::frame`: the picture a `browser_capture` or
+   * `browser_check` call drew, as a small `data:` URL the window draws directly. The file itself stays
+   * in the host's captures folder; this is a copy so a reopened conversation still holds the frame.
+   */
+  frame?: string | null;
   /** The registry id, which is what tells a generic "Ran tool" row which tool it ran. */
   toolId: string | null;
   collapsedByDefault: boolean;
