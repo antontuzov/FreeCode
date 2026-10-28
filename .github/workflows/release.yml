@@ -33,6 +33,7 @@ jobs:
       - run: pnpm --filter @freecode/desktop tauri build --bundles app
       - name: make the dmg the landing page downloads
         run: |
+          mkdir -p target/release/bundle/dmg
           hdiutil create \
             -volname "FreeCode" \
             -srcfolder target/release/bundle/macos/FreeCode.app \
