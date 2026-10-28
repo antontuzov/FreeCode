@@ -120,6 +120,21 @@ async function open(fields: Record<string, unknown>): Promise<Record<string, unk
   return { ...body, url: body.url || url };
 }
 
+/**
+ * Save what the panel's frame draws. The page's own script is not asked: the pixels are the webview's
+ * own render, so what lands on disk is the frame as the window shows it, and only the window knows
+ * where that frame sits in the layout.
+ */
+async function capture(target: Shown): Promise<Record<string, unknown>> {
+  const box = target.frame.getBoundingClientRect();
+  return ipc.capturePage({
+    x: box.left,
+    y: box.top,
+    width: box.width,
+    height: box.height,
+  });
+}
+
 async function perform(op: string, fields: Record<string, unknown>): Promise<unknown> {
   if (op === "open") return open(fields);
   if (!shown) {
@@ -128,6 +143,7 @@ async function perform(op: string, fields: Record<string, unknown>): Promise<unk
         "and the other browser calls act on that page.",
     );
   }
+  if (op === "capture") return capture(shown);
   const waited = typeof fields.timeout_ms === "number" ? fields.timeout_ms : 0;
   const deadline = Date.now() + (op === "wait" ? waited + WAIT_SLACK_MS : REPLY_MS);
   return ask(shown, op, fields, deadline);

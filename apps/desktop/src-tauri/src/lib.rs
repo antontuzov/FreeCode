@@ -408,6 +408,9 @@ pub fn run() {
             preview::preview_entry,
             // The window's answer to one page operation the run asked for — see `preview`.
             preview::page_reply,
+            // What the page draws, as a PNG kept in the app's own folder. The window sends the panel's
+            // rectangle because only the layout knows where the frame ended up.
+            preview::page_capture,
             // The development check behind `?pagecheck=1`; it refuses outside a probe launch.
             preview::agent_page_probe,
             chat::start_engine,

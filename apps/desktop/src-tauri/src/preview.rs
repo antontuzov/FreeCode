@@ -430,6 +430,221 @@ pub fn page_reply(bridge: State<'_, PageBridge>, id: u64, reply: Value) -> Resul
     Ok(())
 }
 
+/// One rectangle of the window's page, in the webview's own points. The window measures the panel's
+/// frame and sends it: the host cannot know where the page ended up in the layout, and a guess would
+/// capture the wrong part of the window.
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+pub struct CaptureRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// A capture the run keeps: the file it was written to, and the pixels it holds.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Capture {
+    pub path: String,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: u64,
+}
+
+/// How long the webview gets to paint the frame a capture asked for.
+const CAPTURE_PATIENCE: Duration = Duration::from_secs(10);
+
+/// What the webview's snapshot answers with: the PNG bytes and the pixel size they hold.
+type Snapshot = Result<(Vec<u8>, u32, u32), String>;
+
+/// Capture the part of the window's page named by `rect`, save it as a PNG and answer where it went.
+///
+/// The snapshot is the webview's own rendering, not a screen recording: it needs no permission and
+/// cannot pick up whatever else is on the display. What it does capture is the window's page, so the
+/// rectangle has to be the panel's frame — which is why the window measures it rather than the host.
+///
+/// The file lands in the app's own data folder rather than the project: a capture is evidence about a
+/// run, not a file the run edits, and a project that filled up with PNGs after every check would be
+/// a workspace the user did not ask for.
+#[tauri::command]
+pub async fn page_capture(app: AppHandle, rect: CaptureRect) -> Result<Capture, String> {
+    if !(rect.width >= 2.0
+        && rect.height >= 2.0
+        && rect.width.is_finite()
+        && rect.height.is_finite())
+    {
+        return Err(
+            "the browser panel is not showing enough of the page to capture: open a page in it \
+             first, or give the window room to show it."
+                .into(),
+        );
+    }
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "the window that holds the page is gone".to_string())?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    window
+        .with_webview(move |webview| snapshot::page(webview.inner(), rect, sender))
+        .map_err(|why| format!("the window could not be asked for a capture: {why}"))?;
+    // The completion block fires on the main thread, so the wait happens on the blocking pool: a
+    // capture that blocked the main thread would wait for the frame it is blocking.
+    let (png, width, height) =
+        tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(CAPTURE_PATIENCE))
+            .await
+            .map_err(|why| format!("the capture stopped: {why}"))?
+            .map_err(|_| {
+                format!(
+                    "the page did not paint a frame within {} s to capture",
+                    CAPTURE_PATIENCE.as_secs()
+                )
+            })??;
+    let dir = capture_dir()?;
+    let file = unique_capture(&dir)?;
+    std::fs::write(&file, &png)
+        .map_err(|why| format!("{} cannot be written: {why}", file.display()))?;
+    Ok(Capture {
+        path: file.display().to_string(),
+        width,
+        height,
+        bytes: png.len() as u64,
+    })
+}
+
+/// The folder captures are kept in, beside the settings file: the app's own data, not the project.
+fn capture_dir() -> Result<std::path::PathBuf, String> {
+    let settings = freecode_config::Settings::default_path().ok_or_else(|| {
+        "this machine has no application-data folder to keep a capture in".to_string()
+    })?;
+    let dir = settings
+        .parent()
+        .ok_or_else(|| "the settings path has no folder".to_string())?
+        .join("captures");
+    std::fs::create_dir_all(&dir)
+        .map_err(|why| format!("{} cannot be created: {why}", dir.display()))?;
+    Ok(dir)
+}
+
+/// A name no earlier capture holds. The millisecond is enough for a person, but a probe that runs
+/// twice in one frame would not: the counter is what keeps two captures from being one file.
+fn unique_capture(dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or(0);
+    for n in 1..1000 {
+        let name = if n == 1 {
+            format!("page-{stamp}.png")
+        } else {
+            format!("page-{stamp}-{n}.png")
+        };
+        let file = dir.join(name);
+        if !file.exists() {
+            return Ok(file);
+        }
+    }
+    Err(format!(
+        "{} already holds a thousand captures from this millisecond",
+        dir.display()
+    ))
+}
+
+/// The webview's own snapshot of one rectangle. Split from [`page_capture`] so the platform detail
+/// stays in one place; a platform without the API refuses the call instead of pretending.
+#[cfg(target_os = "macos")]
+mod snapshot {
+    use std::ffi::c_void;
+    use std::sync::mpsc::Sender;
+
+    use block2::RcBlock;
+    use objc2::runtime::AnyObject;
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImage};
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+    use objc2_foundation::{NSDictionary, NSError, NSString};
+    use objc2_web_kit::{WKSnapshotConfiguration, WKWebView};
+
+    use super::{CaptureRect, Snapshot};
+
+    /// Ask the webview to render `rect` and answer with the PNG bytes and their pixel size. The block
+    /// is retained by WebKit until it fires, which is why the sender travels inside it.
+    pub fn page(view: *mut c_void, rect: CaptureRect, done: Sender<Snapshot>) {
+        // `with_webview` runs this on the main thread, which is the only thread AppKit's snapshot
+        // configuration belongs to; the marker states that rather than trusting the caller.
+        let Some(mtm) = MainThreadMarker::new() else {
+            let _ = done.send(Err(
+                "the capture was asked for off the main thread".to_string()
+            ));
+            return;
+        };
+        if view.is_null() {
+            let _ = done.send(Err("the window has no webview to capture".to_string()));
+            return;
+        }
+        let config = unsafe { WKSnapshotConfiguration::new(mtm) };
+        unsafe {
+            config.setRect(CGRect {
+                origin: CGPoint {
+                    x: rect.x,
+                    y: rect.y,
+                },
+                size: CGSize {
+                    width: rect.width,
+                    height: rect.height,
+                },
+            });
+        }
+        let handler = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
+            let answer = unsafe { encode(image, error) };
+            let _ = done.send(answer);
+        });
+        let webview: &WKWebView = unsafe { &*view.cast::<WKWebView>() };
+        unsafe { webview.takeSnapshotWithConfiguration_completionHandler(Some(&config), &handler) };
+    }
+
+    /// The NSImage a snapshot answers with, as PNG bytes and the pixel size they hold.
+    unsafe fn encode(image: *mut NSImage, error: *mut NSError) -> Snapshot {
+        if !error.is_null() {
+            let why = (*error).localizedDescription().to_string();
+            return Err(format!("the page could not be rendered: {why}"));
+        }
+        let Some(image) = image.as_ref() else {
+            return Err("the page answered the capture with no image".to_string());
+        };
+        let Some(tiff) = image.TIFFRepresentation() else {
+            return Err("the page's image holds no pixels".to_string());
+        };
+        let Some(rep) = NSBitmapImageRep::initWithData(NSBitmapImageRep::alloc(), &tiff) else {
+            return Err("the page's image could not be read".to_string());
+        };
+        let props = NSDictionary::<NSString, AnyObject>::new();
+        let Some(png) = rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &props)
+        else {
+            return Err("the page's image could not be encoded as PNG".to_string());
+        };
+        Ok((
+            png.to_vec(),
+            rep.pixelsWide() as u32,
+            rep.pixelsHigh() as u32,
+        ))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod snapshot {
+    use std::ffi::c_void;
+    use std::sync::mpsc::Sender;
+
+    use super::{CaptureRect, Snapshot};
+
+    pub fn page(_view: *mut c_void, _rect: CaptureRect, done: Sender<Snapshot>) {
+        let _ = done.send(Err(
+            "capturing a page is built for macOS only in this build; the browser calls otherwise act \
+             on the page as before."
+                .to_string(),
+        ));
+    }
+}
+
 /// The window's page, as a tool executor sees it: one operation becomes one event, and the answer
 /// arrives on [`page_reply`]. This is the only implementation of [`PageHost`] in the build.
 pub struct Page<'a> {
@@ -571,6 +786,11 @@ fn probe(app: &AppHandle) -> Result<Value, String> {
         return Err(format!("the typed name did not reach the page: {waited:?}"));
     }
     run_page(&mut steps, "browser_console", json!({}), &policy, &host)?;
+    // The capture is the one call that answers what the page looks like, so the probe keeps the file
+    // it named and reads the picture back: the answer has to be a PNG on disk, not a sentence about
+    // one.
+    let shot = run_page(&mut steps, "browser_capture", json!({}), &policy, &host)?;
+    capture_file(&shot)?;
     let summary = format!("{} checks passed on this page", steps.len());
     host.ask(
         PageOp::Type,
@@ -582,6 +802,28 @@ fn probe(app: &AppHandle) -> Result<Value, String> {
         "url": format!("{SCHEME}://localhost/{PROBE_PATH}"),
         "steps": steps,
     }))
+}
+
+/// The PNG a capture's content names, read back to prove it is one. The check is the file's own
+/// header and IHDR, so a call that answered with a path and no picture fails here rather than in a
+/// report that looks complete.
+fn capture_file(content: &str) -> Result<(std::path::PathBuf, u32, u32), String> {
+    let path = content
+        .lines()
+        .find_map(|line| line.strip_prefix("File: "))
+        .ok_or_else(|| format!("the capture named no file: {content:?}"))?;
+    let bytes = std::fs::read(path).map_err(|why| format!("{path} cannot be read back: {why}"))?;
+    if bytes.len() < 24 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") || &bytes[12..16] != b"IHDR" {
+        return Err(format!("{path} is not a PNG"));
+    }
+    let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+    let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+    if width < 2 || height < 2 {
+        return Err(format!(
+            "{path} is {width}×{height}, which is not a picture of a page"
+        ));
+    }
+    Ok((path.into(), width, height))
 }
 
 /// One probe step through the real executor, recorded for the report rather than answered to a model.

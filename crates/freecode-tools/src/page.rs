@@ -7,10 +7,10 @@
 //! document — [`PageHost`] is the one door between the two.
 //!
 //! The operation list is deliberately small and each one is a thing a person does with a browser:
-//! open a page, read what it shows, click, type, press a key, wait for something to appear, and read
-//! what the console said. Nothing here reaches outside the panel: `PageOp::Open` takes a workspace
-//! path the executor has already resolved through the sandbox, and the rest act on whatever document
-//! the panel is showing.
+//! open a page, read what it shows, click, type, press a key, wait for something to appear, read what
+//! the console said, and take a picture of what is on screen. Nothing here reaches outside the panel:
+//! `PageOp::Open` takes a workspace path the executor has already resolved through the sandbox, and
+//! the rest act on whatever document the panel is showing.
 
 use std::time::Duration;
 
@@ -33,6 +33,8 @@ pub enum PageOp {
     Wait,
     /// The errors and warnings the page has logged since it loaded.
     Console,
+    /// The page as it is drawn, saved as a PNG the run keeps.
+    Capture,
 }
 
 impl PageOp {
@@ -46,14 +48,17 @@ impl PageOp {
             Self::Press => "press",
             Self::Wait => "wait",
             Self::Console => "console",
+            Self::Capture => "capture",
         }
     }
 
     /// How long the panel gets to answer. A page still loading is the ordinary case, so this is
-    /// longer than a disk read; a wait carries its own deadline and gets that plus the travel.
+    /// longer than a disk read; a wait carries its own deadline and gets that plus the travel, and a
+    /// capture is the webview rendering a frame of a page that may still be animating.
     pub fn patience(self) -> Duration {
         match self {
             Self::Wait => Duration::from_secs(17),
+            Self::Capture => Duration::from_secs(12),
             _ => Duration::from_secs(8),
         }
     }
@@ -77,6 +82,7 @@ pub const PAGE_TOOLS: &[&str] = &[
     "browser_press",
     "browser_wait",
     "browser_console",
+    "browser_capture",
 ];
 
 /// The operation a tool id means, or `None` for every other call.
@@ -89,6 +95,7 @@ pub fn page_op(tool_id: &str) -> Option<PageOp> {
         "browser_press" => Some(PageOp::Press),
         "browser_wait" => Some(PageOp::Wait),
         "browser_console" => Some(PageOp::Console),
+        "browser_capture" => Some(PageOp::Capture),
         _ => None,
     }
 }

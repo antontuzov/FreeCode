@@ -52,8 +52,19 @@ tokio = { workspace = true }
 # keeps this a handful of small crates rather than the AppKit binding tree. See `brand`.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSImage",
+    "NSImageRep",
+    "NSBitmapImageRep",
+] }
 objc2-foundation = { version = "0.3", features = ["NSData"] }
+# A page capture is the webview's own snapshot of one rectangle: WebKit renders the frame the panel
+# is showing, so no screen recording and nothing else on the display is involved.
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration"] }
+objc2-core-foundation = "0.3"
+# That snapshot answers in a completion block; this is the crate that builds one.
+block2 = "0.6"
 # A remote API key is a credential, so it belongs in the login keychain rather than in the settings
 # document the Settings surface hands back and forth. The crate talks to Security.framework directly,
 # which keeps the secret out of a subprocess's argv as well as out of the JSON file.

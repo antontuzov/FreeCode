@@ -328,12 +328,14 @@ pub enum SummaryKey {
     BrowserClean,
     /// `{{count}}` console lines the page has logged since it loaded.
     BrowserProblems,
+    /// The page saved as a PNG of `{{size}}` pixels, kept at the `{{file}}` the content names.
+    BrowserCaptured,
 }
 
 impl SummaryKey {
     /// Every key the executors can answer with, so a catalog entry no executor reaches is named as the
     /// dead copy it is.
-    pub const ALL: [Self; 46] = [
+    pub const ALL: [Self; 47] = [
         Self::Empty,
         Self::Lines,
         Self::NoRange,
@@ -380,6 +382,7 @@ impl SummaryKey {
         Self::BrowserNotFound,
         Self::BrowserClean,
         Self::BrowserProblems,
+        Self::BrowserCaptured,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -432,6 +435,7 @@ impl SummaryKey {
             Self::BrowserNotFound => "transcript.summary.browserNotFound",
             Self::BrowserClean => "transcript.summary.browserClean",
             Self::BrowserProblems => "transcript.summary.browserProblems",
+            Self::BrowserCaptured => "transcript.summary.browserCaptured",
         }
     }
 
@@ -469,6 +473,7 @@ impl SummaryKey {
             | Self::BrowserFound
             | Self::BrowserNotFound => &["target"],
             Self::BrowserPressed => &["key"],
+            Self::BrowserCaptured => &["size"],
             Self::GitDiffFile => &["added", "removed"],
             Self::GitDiff => &["files", "added", "removed"],
             Self::Empty
@@ -620,11 +625,13 @@ pub fn execute_watched(
         // them without the Privacy switch, and a URL is not a path the sandbox can resolve.
         "web_search" => web_search(tool.id, arguments),
         "fetch_url" => fetch_url(tool.id, arguments),
-        // Seven calls that act inside the document the window's browser panel is showing rather than
+        // Eight calls that act inside the document the window's browser panel is showing rather than
         // on disk or the network. The page itself is reached through [`PageHost`], which only the
         // window can answer; a run with no panel — a subagent's — is told so rather than failing mute.
         "browser_open" | "browser_read" | "browser_click" | "browser_type" | "browser_press"
-        | "browser_wait" | "browser_console" => page_tool(tool.id, arguments, policy, page),
+        | "browser_wait" | "browser_console" | "browser_capture" => {
+            page_tool(tool.id, arguments, policy, page)
+        }
         // Unreachable while [`registry::EXECUTABLE`](crate::registry::EXECUTABLE) and this match move
         // together, and a refusal rather than a panic if they ever do not.
         other => Err(ToolsError::NoExecutor(other.to_string())),
@@ -660,7 +667,7 @@ pub fn write_targets(tool_id: &str, arguments: &Value, policy: &SandboxPolicy) -
 /// the rest.
 const PAGE_PEEK_TEXT: usize = 1200;
 
-/// The seven calls that act on the page in the window's browser panel.
+/// The eight calls that act on the page in the window's browser panel.
 ///
 /// Only `browser_open` names a file, and that path goes through the same sandbox as a read: it must
 /// resolve inside the workspace, exist, and be a page. The rest act on the document the panel is
@@ -957,6 +964,40 @@ fn page_tool(
                     format!("Read the console: {count} problems"),
                 ),
                 content,
+                edits: Vec::new(),
+            })
+        }
+        PageOp::Capture => {
+            let answer = ask(host, op, json!({}), patience)?;
+            let file = page_str(&answer, "path");
+            let width = answer.get("width").and_then(Value::as_u64).unwrap_or(0);
+            let height = answer.get("height").and_then(Value::as_u64).unwrap_or(0);
+            let bytes = answer.get("bytes").and_then(Value::as_u64).unwrap_or(0);
+            // A capture that came back without a picture is not a capture the run can rely on: an
+            // empty PNG would read as "the page draws nothing", which is the one thing this call
+            // exists to tell apart from "the page is fine".
+            if file.is_empty() || width == 0 || height == 0 {
+                return Err(ToolsError::Page(
+                    "the panel answered the capture without a picture: it named no file, or no size. \
+                     The page may still be painting; browser_wait can hold the call until something \
+                     appears."
+                        .into(),
+                ));
+            }
+            let size = format!("{width}×{height}");
+            let kb = (bytes as f64 / 1024.0).round().max(1.0);
+            Ok(Executed {
+                summary: Summary::said(
+                    SummaryKey::BrowserCaptured,
+                    json!({ "size": size }),
+                    format!("Captured the page ({size})"),
+                ),
+                content: format!(
+                    "Saved a PNG of what the page is showing: {size} pixels, {kb} KB.\nFile: {file}\n\
+                     \nThis is the page as it is drawn — its pixels, not its markup and not its text. \
+                     The file is kept beside the app's own data rather than in the project folder, so \
+                     no call in this workspace can change it.\n"
+                ),
                 edits: Vec::new(),
             })
         }
@@ -6252,5 +6293,53 @@ mod tests {
             "{}",
             got.content
         );
+    }
+
+    #[test]
+    fn a_capture_names_the_file_it_kept_and_the_size_it_drew() {
+        let (_d, p) = page_fixture();
+        let host = FakePage::saying(json!({
+            "path": "/Users/someone/Library/Application Support/freecode/captures/page-1.png",
+            "width": 1440,
+            "height": 900,
+            "bytes": 94208
+        }));
+        let got =
+            page_tool("browser_capture", &json!({}), &p, Some(&host)).expect("a capture runs");
+        assert_eq!(seen_ops(&host), vec![PageOp::Capture]);
+        assert_eq!(got.summary.key, Some(SummaryKey::BrowserCaptured));
+        // The size is the row's whole subject: a run comparing two captures reads those two numbers.
+        assert_eq!(got.summary.params, json!({ "size": "1440×900" }));
+        assert!(got.content.contains("1440×900"), "{}", got.content);
+        assert!(got.content.contains("page-1.png"), "{}", got.content);
+        assert!(got.content.contains("92 KB"), "{}", got.content);
+        // The model is told where the file is and that nothing it can call will change it, so it does
+        // not spend a round trying to read or edit a PNG with the workspace tools.
+        assert!(
+            got.content.contains("rather than in the project folder"),
+            "{}",
+            got.content
+        );
+    }
+
+    #[test]
+    fn a_capture_that_came_back_without_a_picture_is_a_refusal_not_an_empty_page() {
+        let (_d, p) = page_fixture();
+        for answer in [
+            json!({}),
+            json!({ "path": "/tmp/page.png" }),
+            json!({ "path": "/tmp/page.png", "width": 0, "height": 900 }),
+        ] {
+            let host = FakePage::saying(answer.clone());
+            let why = page_tool("browser_capture", &json!({}), &p, Some(&host))
+                .expect_err("no picture means no capture");
+            assert!(matches!(why, ToolsError::Page(_)), "{answer}");
+            assert!(why.to_string().contains("without a picture"), "{why}");
+        }
+    }
+
+    /// The operations one call asked the fake panel for, in order.
+    fn seen_ops(host: &FakePage) -> Vec<PageOp> {
+        host.seen().into_iter().map(|(op, _, _)| op).collect()
     }
 }

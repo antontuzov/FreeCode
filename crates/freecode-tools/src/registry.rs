@@ -495,6 +495,17 @@ pub fn registry() -> Vec<ToolDescriptor> {
             input_schema: s(json!({}), &[]),
         },
         ToolDescriptor {
+            id: "browser_capture",
+            title: "Capture the page",
+            description: "Save what the page in the browser panel looks like as a PNG and answer where \
+                the file is kept. The text calls read what the page says; this is what it draws, which \
+                is the only way to see that a game rendered its field or that a layout put things where \
+                they belong. One capture is the page as the panel shows it right now.",
+            permission: WorkspaceWrite,
+            requires_network: false,
+            input_schema: s(json!({}), &[]),
+        },
+        ToolDescriptor {
             id: "http_request",
             title: "HTTP request",
             description: "Issue an HTTP request to an allowed host with explicit method and body.",
@@ -610,8 +621,9 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
 }
 
 /// The tools this build can actually run: the four workspace reads, the plan the run keeps, the
-/// three writes, the shell and the three project runners, the three read-only git calls, and the two
-/// calls that reach the internet, whose executors live in [`crate::exec`] and [`crate::web`].
+/// three writes, the eight browser calls, the shell and the three project runners, the three
+/// read-only git calls, and the two calls that reach the internet, whose executors live in
+/// [`crate::exec`] and [`crate::web`].
 ///
 /// The rest of the registry is a declaration with no verb behind it — a schema, a permission class,
 /// and nothing that touches the disk. Offering one of those would invite the model to ask for a
@@ -647,6 +659,7 @@ pub const EXECUTABLE: &[&str] = &[
     "browser_press",
     "browser_wait",
     "browser_console",
+    "browser_capture",
 ];
 
 pub fn is_executable(tool_id: &str) -> bool {
@@ -1066,7 +1079,11 @@ mod tests {
                 // that must only propose.
                 "browser_click",
                 "browser_type",
-                "browser_press"
+                "browser_press",
+                // A capture writes one file the run keeps, but it writes it where the app keeps its
+                // own data rather than into the project — the row is a write because a row that wrote
+                // a file and said "read" would be the one place the list lied about what a call does.
+                "browser_capture"
             ],
             "the offered writes are a create that cannot overwrite, an edit that has to match, a patch \
              whose every old line has to match, and the three page actions that change only the \

@@ -670,6 +670,7 @@
   "transcript.summary.browserNotFound": "{{target}} не появился",
   "transcript.summary.browserClean": "в консоли нет ошибок",
   "transcript.summary.browserProblems": "проблем в консоли: {{count}}",
+  "transcript.summary.browserCaptured": "Снимок страницы ({{size}})",
   "transcript.summary.terminalExit": "код {{code}}",
   "transcript.summary.terminalTimedOut": "остановлена через {{seconds}} с",
   "transcript.summary.terminalStopped": "остановлена сигналом",

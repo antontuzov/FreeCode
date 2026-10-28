@@ -512,6 +512,15 @@ export type PageProbeStep = {
   failed: boolean;
 };
 
+/**
+ * One rectangle of the window, in the webview's own points. Passed to `capturePage` for the panel's
+ * frame: only the layout knows where the page ended up, so the window measures it.
+ */
+export type CaptureRect = { x: number; y: number; width: number; height: number };
+
+/** Mirrors `preview::Capture`: where the PNG went and the pixels it holds. */
+export type Capture = { path: string; width: number; height: number; bytes: number };
+
 /** Mirrors the JSON `preview::probe` answers with. */
 export type PageProbeReport = { ok: boolean; url: string; steps: PageProbeStep[] };
 
@@ -971,6 +980,12 @@ export const ipc = {
    */
   pageReply: (id: number, reply: { value: unknown } | { error: string }) =>
     invoke<void>("page_reply", { id, reply }),
+  /**
+   * Save what the page in the panel draws, as a PNG in the app's own folder. The webview renders the
+   * rectangle itself, so this needs no screen-recording permission and cannot pick up anything else
+   * on the display. Rejects with the host's reason — the run shows it rather than inventing a file.
+   */
+  capturePage: (rect: CaptureRect) => invoke<Capture>("page_capture", { rect }),
   /**
    * Run the development page check: drive a page written into the project folder with the real
    * browser calls. Refused unless the host was started with `FREECODE_PAGE_PROBE=1`, so a released
