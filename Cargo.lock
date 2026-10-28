@@ -1206,6 +1206,7 @@ name = "freecode-desktop"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "block2",
  "freecode-config",
  "freecode-core",

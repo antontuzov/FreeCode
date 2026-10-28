@@ -31,6 +31,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
@@ -165,6 +167,20 @@ pub struct EngineView {
     pub command: String,
 }
 
+/// Whether a picture taken in the middle of a run can reach the model.
+///
+/// This is not the same question as [`Needs`]: `Needs` is what a request asked the launcher for, while
+/// this is what the route that answered it can actually carry. A local server started without a
+/// projector is text-only for the whole run even if its model's card publishes one, and the free
+/// service's prompt is text by construction. A remote provider takes the picture on its request
+/// whether or not the model it names reads it, which is the same promise an attached image has always
+/// had on that route.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Sight {
+    Carries,
+    TextOnly,
+}
+
 /// Everything one turn needs, snapshotted so the request can be built and streamed without touching
 /// the state (and the child process) while it runs.
 #[derive(Clone)]
@@ -176,6 +192,9 @@ struct Turn {
     /// downgrade, so this host does not pre-apply the same rule twice.
     effort: String,
     max_tokens: u32,
+    /// Whether this server holds the projector, which is what makes a capture taken mid-run
+    /// something the next request can carry rather than a file the model only hears about.
+    sight: Sight,
 }
 
 /// A turn answered by a remote provider instead of the supervised local server.
@@ -249,6 +268,14 @@ impl Answer {
     /// app's own loopback service. Either way no prompt leaves for the internet from here.
     fn is_local(&self) -> bool {
         matches!(self, Self::Local(_) | Self::OpenCode(_))
+    }
+
+    fn sight(&self) -> Sight {
+        match self {
+            Self::Local(turn) => turn.sight,
+            Self::Remote(_) => Sight::Carries,
+            Self::OpenCode(_) => Sight::TextOnly,
+        }
     }
 
     fn label(&self) -> String {
@@ -327,6 +354,11 @@ impl Running {
             command: handle.plan.display.clone(),
         };
         let (effort, effort_swap) = resolve_effort(&assembly.model, settings.sampling.effort);
+        let sight = if tuning.vision_projector.is_some() {
+            Sight::Carries
+        } else {
+            Sight::TextOnly
+        };
         Self {
             handle,
             turn: Turn {
@@ -334,6 +366,7 @@ impl Running {
                 model: assembly.model.clone(),
                 effort,
                 max_tokens: settings.sampling.budget.clamped().max_tokens,
+                sight,
             },
             tuning,
             weights: model_key(settings),
@@ -758,6 +791,28 @@ async fn projector_for(app: &AppHandle) -> Result<(String, PathBuf), String> {
     }
 }
 
+/// The selected model's projector, if this machine holds it at the published size.
+///
+/// [`projector_for`] is the answer to a request that has to carry a picture, and it refuses with a
+/// notice when none is there. This one is the answer to the vision switch being off: the tower is
+/// worth loading at every launch only when there is one to load, and a text run must not be turned
+/// into a refusal by a model that publishes nothing.
+async fn ready_projector(app: &AppHandle) -> Result<Option<(String, PathBuf)>, String> {
+    let (root, settings) = crate::root_and_settings(app)?;
+    let blocking_root = root.clone();
+    let probe_settings = settings.clone();
+    let assembly = tauri::async_runtime::spawn_blocking(move || {
+        status::assemble(&blocking_root, &probe_settings)
+    })
+    .await
+    .map_err(|e| format!("engine resolution failed: {e}"))??;
+    let weights = status::weights_dir(&root, &settings);
+    Ok(match projector(&weights, &assembly.model) {
+        Projector::Present { file, path } => Some((file, path)),
+        Projector::Unsupported | Projector::Absent { .. } => None,
+    })
+}
+
 /// Start the supervised server, or report the guard's refusal to allow it.
 ///
 /// The refusal is emitted as `EngineBlocked` rather than only returned: the transcript has to show
@@ -880,7 +935,16 @@ async fn ensure_running(app: &AppHandle, needs: Needs) -> Result<Turn, String> {
     // the question the projector answers, and a model that cannot take the picture is refused here
     // rather than after a launch that would have to refuse it anyway.
     let (vision_file, vision_projector) = match needs {
-        Needs::TextOnly => (None, None),
+        // Lazy is the default, and it is what the Settings row prices: a text run pays for no tower.
+        Needs::TextOnly if settings.local_model.vision_lazy_load => (None, None),
+        // With the switch off the tower is resident for every local launch, which is what lets a
+        // capture taken in the middle of a run reach the model. A model whose projector this machine
+        // does not have still starts text-only: the switch is a preference about cost, not a promise
+        // that a picture will be readable.
+        Needs::TextOnly => match ready_projector(app).await? {
+            Some((file, path)) => (Some(file), Some(path)),
+            None => (None, None),
+        },
         Needs::Projector => {
             let (file, path) = projector_for(app).await?;
             (Some(file), Some(path))
@@ -2070,6 +2134,32 @@ async fn run_rounds(
             checked || ran_a_check(&calls)
         };
 
+        // A capture the model asked for with its own call is handed back as the picture it is, on a
+        // route that can carry one. Tool results have no image field, so the picture goes in as the
+        // next user turn — right after the results, so the batch and the page it drew stay one
+        // sequence in the replay rather than a question about a file the model cannot see.
+        let mut shown = Vec::new();
+        for one in ran.iter_mut() {
+            let captured = calls
+                .iter()
+                .any(|call| call.id == one.call_id && call.name == "browser_capture");
+            if !captured {
+                continue;
+            }
+            // A capture that never wrote a file has nothing to hand back: its result already names
+            // the reason, and a second sentence about a picture would describe one that is not there.
+            let Some(path) = capture_path(&one.result) else {
+                continue;
+            };
+            match carried_capture(answer.sight(), &path) {
+                Ok(url) => shown.push(url),
+                Err(why) => one.result.push_str(&format!(
+                    "\n\nThe picture above was not shown to you: {why}. Judge the page from \
+                     browser_read and browser_console, and say what you could not see."
+                )),
+            }
+        }
+
         // The replay the fork's template needs: the assistant's own call list, then one result per
         // `call_id`. Both go in even for a call that was refused, because a call with no answer at all
         // is what makes the next prompt untemplateable.
@@ -2081,6 +2171,9 @@ async fn run_rounds(
             });
             for one in &ran {
                 history.push(Message::tool_result(&one.call_id, &one.result));
+            }
+            for url in shown {
+                history.push(Message::user_with_image(CAPTURE_CAPTION, url));
             }
         }
 
@@ -2274,6 +2367,70 @@ const IMAGE_MAX_CHARS: usize = 12 * 1024 * 1024;
 /// Whether a string is the base64 picture the launcher could hand to a projector.
 fn is_picture(url: &str) -> bool {
     url.starts_with("data:image/") && url.contains(";base64,") && url.len() <= IMAGE_MAX_CHARS
+}
+
+/// The most a capture's PNG may weigh before the host stops carrying it back.
+///
+/// [`IMAGE_MAX_CHARS`] bounds the data URL every request is checked against, and base64 inflates a
+/// file by a third: 8 MiB of PNG becomes about 10.7 M characters, comfortably inside it. A bigger
+/// capture is not truncated — half a PNG is not a picture — it is refused, and the model is told why.
+const CAPTURE_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
+
+/// The turn that carries a capture back to the model. A tool result has no image field, so the
+/// picture arrives as a user turn, and its words are what make the model look before describing.
+const CAPTURE_CAPTION: &str =
+    "This is the page browser_capture just drew, as the panel showed it at that moment. Look at it \
+     before saying what the page does; if it is not what you meant, fix the page and capture again.";
+
+/// The file a capture's result named, which is how the picture finds its way back to the model.
+///
+/// The executor writes the path on its own line, so a reader can find it without parsing the sentence
+/// around it.
+fn capture_path(result: &str) -> Option<PathBuf> {
+    result
+        .lines()
+        .find_map(|line| line.strip_prefix("File: "))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+}
+
+/// A PNG file as the `data:` URL a chat message carries it in.
+///
+/// The size and signature are checked here rather than trusted: the file was written by this host,
+/// but a file in the app's folder is a file on disk, and a request carrying something else would be
+/// refused by the launcher long after the tool row said the capture worked.
+fn as_picture(bytes: &[u8]) -> Result<String, String> {
+    if bytes.len() > CAPTURE_MAX_BYTES {
+        return Err(format!(
+            "the PNG is {} bytes, more than the {} bytes a request will carry",
+            bytes.len(),
+            CAPTURE_MAX_BYTES
+        ));
+    }
+    if !bytes.starts_with(&PNG_SIGNATURE) {
+        return Err("the capture is not a PNG any more".into());
+    }
+    Ok(format!("data:image/png;base64,{}", BASE64.encode(bytes)))
+}
+
+/// The picture a capture is handed back as, or the reason the model gets none.
+///
+/// A reason rather than a silent absence: a route that cannot take pictures still has `browser_read`
+/// and `browser_console`, and a model told nothing would describe a page it never saw.
+fn carried_capture(sight: Sight, path: &Path) -> Result<String, String> {
+    if sight == Sight::TextOnly {
+        return Err(
+            "the model answering this run is not given pictures, so the capture was kept for the \
+             report only"
+                .into(),
+        );
+    }
+    let bytes = std::fs::read(path)
+        .map_err(|why| format!("{} cannot be read back: {why}", path.display()))?;
+    as_picture(&bytes)
 }
 
 /// Send one prompt to the local engine and stream the answer as `agent-event`s. The return value is
@@ -3787,5 +3944,69 @@ mod tests {
         for bound in ["cannot change", "cannot reach the internet", "read_file"] {
             assert!(SUBAGENT_SYSTEM.contains(bound), "{bound}");
         }
+    }
+
+    /// A capture's result names the file on its own line, and that line is how the host finds the
+    /// picture the model asked for. A result without one is answered with a sentence, not a panic.
+    #[test]
+    fn a_capture_result_names_the_picture_or_says_it_did_not() {
+        let result = "Saved a PNG of what the page is showing: 800×600 pixels, 12 KB.\n\
+                      File: /tmp/page.png\n\nThis is the page as it is drawn.";
+        assert_eq!(capture_path(result), Some(PathBuf::from("/tmp/page.png")));
+        // A blank path is the same as none: it would otherwise be a file named "".
+        assert_eq!(capture_path("Saved a PNG.\nFile:   \n"), None);
+        assert_eq!(capture_path("no file line at all"), None);
+    }
+
+    /// The URL the next request carries has to be something the request path will accept: PNG bytes,
+    /// inside the ceiling the data URL leaves, and nothing else passed off as a picture.
+    #[test]
+    fn a_capture_is_carried_as_the_png_it_is() {
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(&[0u8; 64]);
+        let url = as_picture(&png).unwrap();
+        assert!(is_picture(&url), "{url}");
+        assert!(url.starts_with("data:image/png;base64,"));
+
+        let refused = as_picture(b"\x89PNG not really").unwrap_err();
+        assert!(refused.contains("not a PNG any more"), "{refused}");
+
+        // One byte over the limit is refused whole: a truncated PNG is not a picture.
+        let refused = as_picture(&vec![0u8; CAPTURE_MAX_BYTES + 1]).unwrap_err();
+        assert!(refused.contains("more than"), "{refused}");
+    }
+
+    /// The file a capture wrote comes back as the message the loop appends; a route that cannot show
+    /// pictures is told so in words it can act on, and a file that is not there is named rather than
+    /// dropped.
+    #[test]
+    fn a_capture_is_handed_back_only_to_a_route_that_can_show_it() {
+        let why = carried_capture(Sight::TextOnly, Path::new("/no/such.png")).unwrap_err();
+        assert!(why.contains("not given pictures"), "{why}");
+        let why = carried_capture(Sight::Carries, Path::new("/no/such.png")).unwrap_err();
+        assert!(why.contains("cannot be read back"), "{why}");
+
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(&[0u8; 64]);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("page.png");
+        std::fs::write(&path, &png).unwrap();
+        let url = carried_capture(Sight::Carries, &path).unwrap();
+        assert!(is_picture(&url), "{url}");
+    }
+
+    /// A remote provider takes the picture on its request. The local answer is whatever the server
+    /// was launched with — the launch path sets that from the projector it actually handed the
+    /// process — and the free service's prompt is text by construction.
+    #[test]
+    fn a_remote_route_carries_a_mid_run_picture() {
+        let remote = Answer::Remote(RemoteTurn {
+            base_url: "http://localhost:1234".into(),
+            model: "m".into(),
+            context_tokens: 8_192,
+            max_tokens: 1_024,
+            key: String::new(),
+        });
+        assert_eq!(remote.sight(), Sight::Carries);
     }
 }

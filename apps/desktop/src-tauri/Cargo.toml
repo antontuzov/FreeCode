@@ -41,6 +41,9 @@ arboard = { version = "3", default-features = false }
 # Stop flag between chunks, so it needs the timer and `select!` rather than only the runtime.
 tokio = { workspace = true }
 portable-pty = "0.9"
+# A capture comes back from the panel as a PNG file; a chat message carries a picture as a
+# `data:image/png;base64,…` URL, so the host has to put one into the other before the next request.
+base64 = "0.22"
 
 # Only for the shutdown hook's SIGTERM/SIGINT listener; `tokio::signal::unix` does not exist on
 # Windows, so the dependency is gated to the platforms that have the signals.

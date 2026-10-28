@@ -739,7 +739,7 @@
   "knowledge.vision.desc": "The projector files this model's card publishes for image input — a separate file, fetched alongside one of the packs above.",
   "knowledge.vision.none": "The card publishes no projector for this model",
   "knowledge.vision.recommended": "The card's pick",
-  "knowledge.vision.note": "The engine takes a projector at launch when one is asked for, and the composer's attach button is what asks: attaching a picture starts the server with this file loaded, so the first picture after a text-only run also pays a reload.",
+  "knowledge.vision.note": "The engine takes a projector at launch when one is asked for: attaching a picture asks for it, and so does a local run with \"Load vision lazily\" off — which is what lets the agent read a capture it takes mid-run. Either way the first picture after a text-only run pays a reload.",
   "knowledge.issues": "Known issues",
   "knowledge.issues.desc": "Quoted from the model card. Nothing here checks these conditions against this machine.",
   "knowledge.issues.none": "The card lists no issues",
