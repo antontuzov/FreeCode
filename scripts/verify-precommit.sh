@@ -27,4 +27,7 @@ pnpm_cmd test
 step "frontend build"
 pnpm_cmd build
 
+step "landing page root copy"
+node scripts/site-root.mjs --check
+
 printf '\n\033[1mrust-tauri-precommit-gate: OK\033[0m\n'
