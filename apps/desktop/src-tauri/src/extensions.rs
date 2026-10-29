@@ -119,12 +119,12 @@ mod tests {
     /// The four workspace reads, the plan list, the three repository reads, the three workspace
     /// writes, the nine browser calls, the two web calls, the one command, its three runners and
     /// the one delegation are what the agent loop actually offers today, and the page has to say so:
-    /// a list that showed all thirty-two as live would describe an agent this build does not have.
+    /// a list that showed all thirty-seven as live would describe an agent this build does not have.
     #[test]
     fn the_reads_the_writes_the_web_calls_the_shell_and_the_delegation_are_what_a_call_can_run_through(
     ) {
         let inv = inventory(&Settings::default());
-        assert_eq!(inv.runnable, 27, "{:?}", inv.tools);
+        assert_eq!(inv.runnable, 32, "{:?}", inv.tools);
         for id in ["read_file", "list_dir", "glob", "grep_search"] {
             assert!(row(&inv, id).runnable, "{id}");
             assert_eq!(row(&inv, id).decision, "auto", "{id}");
@@ -175,10 +175,23 @@ mod tests {
         // that pays for it starts off.
         assert!(row(&inv, "spawn_subagent").runnable);
         assert_eq!(row(&inv, "spawn_subagent").decision, "blocked");
-        // And the calls that would take a file away, commit it or run something else are declared only.
-        for id in ["delete_path", "git_commit", "git_stage"] {
-            assert!(!row(&inv, id).runnable, "{id}");
+        // The repository's own two writes stay inside the checkout, so the sandbox bounds them the
+        // way it bounds a file write.
+        for id in ["git_stage", "git_branch"] {
+            assert!(row(&inv, id).runnable, "{id}");
+            assert_eq!(row(&inv, id).decision, "auto", "{id}");
         }
+        // The commit asks: it rewrites history, and no dial but the user's own clears it.
+        assert!(row(&inv, "git_commit").runnable);
+        assert_eq!(row(&inv, "git_commit").decision, "ask");
+        // The push and the pull request leave the machine, so the Privacy switch gates them first and
+        // the page shows them refused while this machine stays local.
+        for id in ["git_push", "github_pr"] {
+            assert!(row(&inv, id).runnable, "{id}");
+            assert_eq!(row(&inv, id).decision, "blocked", "{id}");
+        }
+        // And the calls that would take a file away are declared only.
+        assert!(!row(&inv, "delete_path").runnable);
     }
 
     /// The Subagents switch is the delegation's consent, and the page follows it the way the shell
@@ -221,6 +234,11 @@ mod tests {
         assert!(inv.network_allowed);
         assert_eq!(row(&inv, "web_search").decision, "auto");
         assert_eq!(row(&inv, "fetch_url").decision, "auto");
+        // The two calls that reach GitHub open, but they do not run on the dial's own authority: a
+        // push and a pull request are the two things this app must never do without being told to.
+        for id in ["git_push", "github_pr"] {
+            assert_eq!(row(&inv, id).decision, "ask", "{id}");
+        }
         // Nothing else on the list changed: the switch opens the network class, not a shell.
         assert_eq!(row(&inv, "terminal").decision, "blocked");
     }
@@ -258,14 +276,14 @@ mod tests {
 
     /// A declared side effect under the default dial still asks, and the page says "ask" — which is
     /// the difference between an agent and a script, so it is not something to smooth over. A commit
-    /// is that row: declared so the model can ask, with no executor behind it yet. The command rows
-    /// are not it any more; they have executors and a switch, and the switch's off position is what
-    /// keeps them out of a run.
+    /// is that row: it has an executor now, and it still asks. The command rows are not it any more;
+    /// they have executors and a switch, and the switch's off position is what keeps them out of a
+    /// run.
     #[test]
     fn a_side_effecting_tool_under_auto_approve_still_has_to_ask() {
         let inv = inventory(&Settings::default());
         assert_eq!(row(&inv, "git_commit").decision, "ask");
-        assert!(!row(&inv, "git_commit").runnable);
+        assert!(row(&inv, "git_commit").runnable);
     }
 
     /// Plan-only is the dial that turns the agent into a reader. The page has to move with it, or it

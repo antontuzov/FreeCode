@@ -340,8 +340,10 @@ pub fn registry() -> Vec<ToolDescriptor> {
         ToolDescriptor {
             id: "git_stage",
             title: "Stage changes",
-            description: "Stage specific paths for the next commit.",
-            permission: SideEffect,
+            description: "Stage the named paths for the next commit. The paths have to be inside the \
+                workspace; nothing else is staged, and a path that is not there is refused rather \
+                than matched loosely.",
+            permission: WorkspaceWrite,
             requires_network: false,
             input_schema: s(
                 json!({ "paths": { "type": "array", "items": { "type": "string" } } }),
@@ -351,7 +353,9 @@ pub fn registry() -> Vec<ToolDescriptor> {
         ToolDescriptor {
             id: "git_commit",
             title: "Commit changes",
-            description: "Create a commit. Always requires approval outside Auto approve.",
+            description: "Commit the staged changes with the given message. Always requires approval \
+                outside Auto approve, and refuses a message that is empty. An amend rewrites the \
+                last commit rather than adding one.",
             permission: SideEffect,
             requires_network: false,
             input_schema: s(
@@ -360,15 +364,51 @@ pub fn registry() -> Vec<ToolDescriptor> {
             ),
         },
         ToolDescriptor {
+            id: "git_branch",
+            title: "Switch branch",
+            description: "Switch to a branch, creating it from the current one when it does not \
+                exist yet. The uncommitted changes travel with the switch.",
+            permission: WorkspaceWrite,
+            requires_network: false,
+            input_schema: s(
+                json!({ "name": { "type": "string" }, "start_point": { "type": "string" } }),
+                &["name"],
+            ),
+        },
+        ToolDescriptor {
             id: "git_push",
             title: "Push branch",
             description:
-                "Push the current branch to its remote. Network plus an explicit approval.",
-            permission: Network,
+                "Push the current branch to its remote, with whatever credential this machine \
+                 already holds for that remote. It leaves the machine, so it needs the Privacy \
+                 switch on and an approval of its own.",
+            permission: SideEffect,
             requires_network: true,
             input_schema: s(
                 json!({ "remote": { "type": "string" }, "branch": { "type": "string" } }),
                 &[],
+            ),
+        },
+        ToolDescriptor {
+            id: "github_pr",
+            title: "Open a pull request",
+            description:
+                "Open a pull request on GitHub. The repository and the branches are read from the \
+                 local checkout and the remote, so they only have to be named when they differ. \
+                 Needs a GitHub token saved in the Keychain; without one the call says so rather \
+                 than failing quietly.",
+            permission: SideEffect,
+            requires_network: true,
+            input_schema: s(
+                json!({
+                    "title": { "type": "string" },
+                    "body": { "type": "string" },
+                    "head": { "type": "string" },
+                    "base": { "type": "string" },
+                    "repo": { "type": "string" },
+                    "draft": { "type": "boolean" },
+                }),
+                &["title"],
             ),
         },
         ToolDescriptor {
@@ -650,8 +690,8 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
 
 /// The tools this build can actually run: the four workspace reads, the plan the run keeps, the
 /// three writes, the nine browser calls, the shell and the three project runners, the three
-/// read-only git calls, and the two calls that reach the internet, whose executors live in
-/// [`crate::exec`] and [`crate::web`].
+/// read-only git calls, the five calls that change the repository or take it to GitHub, and the two
+/// calls that reach the internet, whose executors live in [`crate::exec`] and [`crate::web`].
 ///
 /// The rest of the registry is a declaration with no verb behind it — a schema, a permission class,
 /// and nothing that touches the disk. Offering one of those would invite the model to ask for a
@@ -662,6 +702,11 @@ pub fn tool_specs(allow_network: bool) -> Vec<Value> {
 /// Terminal access switch bounds them: the switch is off by default, and [`executable_specs`] does
 /// not hand any of them over until the switch says so. The git calls are reads of what the
 /// repository already holds, with a fixed argv and no switch of their own.
+///
+/// The five repository calls are the route to GitHub. Staging, switching a branch and committing
+/// stay inside the checkout, so the sandbox and the path rules still mean something there; the push
+/// and the pull request leave the machine, which is why they carry `requires_network` and sit
+/// behind the Privacy switch as well as behind an approval of their own.
 pub const EXECUTABLE: &[&str] = &[
     "read_file",
     "list_dir",
@@ -678,6 +723,11 @@ pub const EXECUTABLE: &[&str] = &[
     "git_status",
     "git_diff",
     "git_log",
+    "git_stage",
+    "git_commit",
+    "git_branch",
+    "git_push",
+    "github_pr",
     "web_search",
     "fetch_url",
     "browser_open",
@@ -796,6 +846,44 @@ pub fn summary(tool_id: &str, arguments: &Value) -> String {
                 .lines()
                 .next()
                 .unwrap_or("")
+        ),
+        // The repository route names the thing it would do, the way the shell names its command: a
+        // commit question is about the message, a push is about the branch that leaves, and a pull
+        // request is about the title the reviewer will read first.
+        "git_stage" => {
+            let paths = arguments
+                .get("paths")
+                .and_then(Value::as_array)
+                .map(|paths| {
+                    paths
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            format!("Stage {paths}")
+        }
+        "git_branch" => format!(
+            "Switch to branch {}",
+            arguments
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("<no branch>")
+        ),
+        "git_push" => format!(
+            "Push {}",
+            arguments
+                .get("branch")
+                .and_then(Value::as_str)
+                .unwrap_or("the current branch")
+        ),
+        "github_pr" => format!(
+            "Open a pull request: {}",
+            arguments
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("<no title>")
         ),
         "fetch_url" | "http_request" => format!(
             "Read {}",
@@ -1089,7 +1177,12 @@ mod tests {
             let allowed = match tool.permission {
                 PermissionClass::ReadOnly | PermissionClass::WorkspaceWrite => true,
                 PermissionClass::Network => matches!(*id, "web_search" | "fetch_url"),
-                PermissionClass::SideEffect => shell_governed(id),
+                // A side effect either stands behind the Terminal switch, or stands on an approval of
+                // its own: the commit is local but rewrites history, and the push and the pull
+                // request leave the machine.
+                PermissionClass::SideEffect => {
+                    shell_governed(id) || matches!(*id, "git_commit" | "git_push" | "github_pr")
+                }
             };
             assert!(allowed, "{id} is offered with {:?}", tool.permission);
         }
@@ -1104,6 +1197,10 @@ mod tests {
                 "write_file",
                 "edit_file",
                 "apply_patch",
+                // Two writes to the repository's own index and refs: they change what the next commit
+                // holds and which branch the checkout is on, and both stay inside the checkout.
+                "git_stage",
+                "git_branch",
                 // These three are writes to the panel's document rather than to disk: they change what
                 // the run's own preview shows, and the plan-mode refusal still holds them out of a run
                 // that must only propose.
@@ -1118,8 +1215,9 @@ mod tests {
                 "browser_check"
             ],
             "the offered writes are a create that cannot overwrite, an edit that has to match, a patch \
-             whose every old line has to match, the three page actions that change only the panel's \
-             document, and the two pictures of it kept beside the app's data"
+             whose every old line has to match, the two repository writes that stay inside the \
+             checkout, the three page actions that change only the panel's document, and the two \
+             pictures of it kept beside the app's data"
         );
         assert!(
             !is_executable("delete_path"),
@@ -1143,8 +1241,9 @@ mod tests {
         assert!(executable_specs(true, true, true)
             .iter()
             .all(|s| s["type"] == json!("function")));
-        // With the Privacy switch off, the two web calls are not offered at all — refused-and-explained
-        // would spend a round of the run to arrive at the same answer.
+        // With the Privacy switch off, the two web calls and the two calls that reach GitHub are not
+        // offered at all — refused-and-explained would spend a round of the run to arrive at the same
+        // answer.
         let offline = executable_specs(false, true, true);
         let names: Vec<&str> = offline
             .iter()
@@ -1152,11 +1251,12 @@ mod tests {
             .collect();
         assert_eq!(
             names.len(),
-            EXECUTABLE.len() + DELEGATED.len() - 2,
+            EXECUTABLE.len() + DELEGATED.len() - 4,
             "{names:?}"
         );
-        assert!(!names.contains(&"web_search"), "{names:?}");
-        assert!(!names.contains(&"fetch_url"), "{names:?}");
+        for id in ["web_search", "fetch_url", "git_push", "github_pr"] {
+            assert!(!names.contains(&id), "{id}: {names:?}");
+        }
         // And with Terminal access off, the command and its runners are not offered either, whatever
         // the other switch says. This is the offer the default settings produce.
         for network in [true, false] {
@@ -1168,10 +1268,10 @@ mod tests {
             for id in ["terminal", "run_tests", "run_build", "run_linter"] {
                 assert!(!names.contains(&id), "{names:?}");
             }
-            // Four runners out with the shell off, and the two web calls out when the network is.
+            // Four runners out with the shell off, and the four network calls out when the network is.
             assert_eq!(
                 names.len(),
-                EXECUTABLE.len() + DELEGATED.len() - 4 - if network { 0 } else { 2 },
+                EXECUTABLE.len() + DELEGATED.len() - 4 - if network { 0 } else { 4 },
                 "{names:?}"
             );
             // Subagents stay out until their own switch is on, on top of every other gate.

@@ -37,6 +37,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use walkdir::WalkDir;
 
+use crate::github::GitHubToken;
 use crate::page::{page_op, PageHost, PageOp, MAX_CONSOLE_LINES, MAX_PAGE_TEXT};
 use crate::pixels::Expect;
 use crate::{authorize, registry::is_executable, web, Access, SandboxPolicy, ToolsError};
@@ -311,6 +312,16 @@ pub enum SummaryKey {
     GitCommit,
     /// `{{count}}` commits in the log.
     GitCommits,
+    /// `{{count}}` paths put into the index.
+    GitStaged,
+    /// A commit that was made, named by its `{{sha}}`.
+    GitCommitted,
+    /// The checkout moved to `{{branch}}`.
+    GitSwitched,
+    /// `{{branch}}` went to its remote.
+    GitPushed,
+    /// Pull request #`{{number}}` was opened.
+    GitPullRequest,
     /// A page put into the window's browser panel, named by `{{file}}`.
     BrowserOpened,
     /// The visible text one read of the page took back, `{{count}}` characters of it.
@@ -340,7 +351,7 @@ pub enum SummaryKey {
 impl SummaryKey {
     /// Every key the executors can answer with, so a catalog entry no executor reaches is named as the
     /// dead copy it is.
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 54] = [
         Self::Empty,
         Self::Lines,
         Self::NoRange,
@@ -378,6 +389,11 @@ impl SummaryKey {
         Self::GitDiff,
         Self::GitCommit,
         Self::GitCommits,
+        Self::GitStaged,
+        Self::GitCommitted,
+        Self::GitSwitched,
+        Self::GitPushed,
+        Self::GitPullRequest,
         Self::BrowserOpened,
         Self::BrowserText,
         Self::BrowserClicked,
@@ -433,6 +449,11 @@ impl SummaryKey {
             Self::GitDiff => "transcript.summary.gitDiff",
             Self::GitCommit => "transcript.summary.gitCommit",
             Self::GitCommits => "transcript.summary.gitCommits",
+            Self::GitStaged => "transcript.summary.gitStaged",
+            Self::GitCommitted => "transcript.summary.gitCommitted",
+            Self::GitSwitched => "transcript.summary.gitSwitched",
+            Self::GitPushed => "transcript.summary.gitPushed",
+            Self::GitPullRequest => "transcript.summary.gitPullRequest",
             Self::BrowserOpened => "transcript.summary.browserOpened",
             Self::BrowserText => "transcript.summary.browserText",
             Self::BrowserClicked => "transcript.summary.browserClicked",
@@ -460,6 +481,7 @@ impl SummaryKey {
             | Self::ChangedFile
             | Self::ChangedFiles
             | Self::GitCommits
+            | Self::GitStaged
             | Self::BrowserText
             | Self::BrowserProblems => &["count"],
             Self::NoRange => &["from", "to"],
@@ -486,6 +508,9 @@ impl SummaryKey {
             Self::BrowserChecked | Self::BrowserCheckFailed => &["check", "size"],
             Self::GitDiffFile => &["added", "removed"],
             Self::GitDiff => &["files", "added", "removed"],
+            Self::GitCommitted => &["sha"],
+            Self::GitSwitched | Self::GitPushed => &["branch"],
+            Self::GitPullRequest => &["number"],
             Self::Empty
             | Self::MatchInFile
             | Self::CopyReplaced
@@ -606,19 +631,23 @@ pub fn execute(
     arguments: &Value,
     policy: &SandboxPolicy,
 ) -> Result<Executed, ToolsError> {
-    execute_watched(tool_id, arguments, policy, None, None)
+    execute_watched(tool_id, arguments, policy, None, None, None)
 }
 
 /// [`execute`] with a sink for a running command's output. The watcher sees the same bytes the
 /// executor captures — both streams, as they arrive — so the window can show a build finishing line by
 /// line while the call that started it is still open. It changes nothing about what runs: the same
 /// authorization, the same executable gate, the same process group and deadline.
+///
+/// `page` is the window's browser panel and `github` the machine's GitHub credential. Both are
+/// doors only the host can open, so a call that needs one is told so rather than failing mute.
 pub fn execute_watched(
     tool_id: &str,
     arguments: &Value,
     policy: &SandboxPolicy,
     watcher: Option<&Watcher>,
     page: Option<&dyn PageHost>,
+    github: Option<&dyn GitHubToken>,
 ) -> Result<Executed, ToolsError> {
     let tool = authorize(tool_id, arguments, policy)?;
     if !is_executable(tool.id) {
@@ -640,6 +669,12 @@ pub fn execute_watched(
         "git_status" => git_read(tool.id, arguments, policy, GitRead::Status),
         "git_diff" => git_read(tool.id, arguments, policy, GitRead::Diff),
         "git_log" => git_read(tool.id, arguments, policy, GitRead::Log),
+        // The route to GitHub: three calls that stay inside the checkout and two that leave it.
+        "git_stage" => git_stage(tool.id, arguments, policy),
+        "git_commit" => git_commit(tool.id, arguments, policy),
+        "git_branch" => git_branch(tool.id, arguments, policy),
+        "git_push" => git_push(tool.id, arguments, policy),
+        "github_pr" => github_pr(tool.id, arguments, policy, github),
         // The two that leave the machine. Neither takes the policy: `authorize` has already refused
         // them without the Privacy switch, and a URL is not a path the sandbox can resolve.
         "web_search" => web_search(tool.id, arguments),
@@ -2982,6 +3017,445 @@ fn git_answers(tool: &str, policy: &SandboxPolicy, args: &[&str]) -> bool {
     )
     .map(|finished| !finished.ended_is_failure())
     .unwrap_or(false)
+}
+
+/// The environment every git call runs in.
+///
+/// `GIT_TERMINAL_PROMPT=0` is the one that matters for the writes: a call that needs a password
+/// must fail rather than wait for one, because a run that hangs on a prompt nobody can see is a run
+/// that never finishes.
+const GIT_ENV: [(&str, &str); 3] = [
+    ("GIT_OPTIONAL_LOCKS", "0"),
+    ("GIT_TERMINAL_PROMPT", "0"),
+    ("GIT_PAGER", "cat"),
+];
+
+/// How long a push may take. The push is the one git call that talks to a server, and a first push
+/// of a big repository is slow; the read deadline would cut it off half way through.
+const GIT_PUSH_TIMEOUT_SECS: u64 = 180;
+
+/// Stage the named paths.
+///
+/// The paths go through the sandbox first: a path outside the workspace is refused here, with the
+/// rule that refused it, rather than by git's own complaint about a path outside the repository.
+fn git_stage(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+) -> Result<Executed, ToolsError> {
+    let named: Vec<&str> = arguments
+        .get("paths")
+        .and_then(Value::as_array)
+        .map(|paths| paths.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    if named.is_empty() {
+        return Err(ToolsError::InvalidArguments {
+            tool: tool.to_string(),
+            reason: "\"paths\" must name at least one file to stage".into(),
+        });
+    }
+    let mut argv: Vec<String> = vec!["add".into(), "--".into()];
+    let mut shown: Vec<String> = Vec::new();
+    for raw in named {
+        let resolved = resolve(policy, raw, Access::Write)?;
+        argv.push(resolved.display().to_string());
+        shown.push(relative(policy, &resolved));
+    }
+    let command = format!("git add -- {}", shown.join(" "));
+    let finished = run_argv(
+        tool,
+        "git",
+        &argv,
+        &policy.workspace_root,
+        GIT_TIMEOUT_SECS,
+        Reporting::head(),
+        &GIT_ENV,
+    )?;
+    let (body, lost) = captured_text(&finished);
+    if finished.ended_is_failure() {
+        let (summary, content) = git_failed(&command, &body, lost, &finished, GIT_TIMEOUT_SECS);
+        return Ok(Executed {
+            summary,
+            content,
+            edits: Vec::new(),
+        });
+    }
+    // The row counts what the index holds, not what was asked for: a path that was already staged
+    // does not become a second file, and a path git ignored does not become one at all.
+    let count = git_output(tool, policy, &["diff", "--cached", "--name-only"])
+        .map(|text| text.lines().filter(|line| !line.trim().is_empty()).count())
+        .unwrap_or(shown.len());
+    let summary = Summary::said(
+        SummaryKey::GitStaged,
+        json!({ "count": count }),
+        format!("{count} files staged"),
+    );
+    let content = git_said(&command, &body, lost, &finished, &summary.text);
+    Ok(Executed {
+        summary,
+        content,
+        edits: Vec::new(),
+    })
+}
+
+/// Commit what is staged.
+///
+/// The message goes to git as one argument, so a message with a newline in it stays one message and
+/// a message that starts with a dash is still a message. An amend rewrites the last commit, which
+/// is why the row says so.
+fn git_commit(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+) -> Result<Executed, ToolsError> {
+    let message = required(tool, arguments, "message")?.trim().to_string();
+    if message.is_empty() {
+        return Err(ToolsError::InvalidArguments {
+            tool: tool.to_string(),
+            reason: "a commit needs a message".into(),
+        });
+    }
+    let amend = flag_arg(arguments, "amend");
+    let mut argv: Vec<String> = vec!["commit".into()];
+    if amend {
+        argv.push("--amend".into());
+    }
+    argv.push("-m".into());
+    argv.push(message.clone());
+    let command = if amend {
+        format!("git commit --amend -m \"{message}\"")
+    } else {
+        format!("git commit -m \"{message}\"")
+    };
+    let finished = run_argv(
+        tool,
+        "git",
+        &argv,
+        &policy.workspace_root,
+        GIT_TIMEOUT_SECS,
+        Reporting::head(),
+        &GIT_ENV,
+    )?;
+    let (body, lost) = captured_text(&finished);
+    if finished.ended_is_failure() {
+        let (summary, content) = git_failed(&command, &body, lost, &finished, GIT_TIMEOUT_SECS);
+        return Ok(Executed {
+            summary,
+            content,
+            edits: Vec::new(),
+        });
+    }
+    let sha = git_output(tool, policy, &["rev-parse", "--short", "HEAD"])
+        .map(|text| text.trim().to_string())
+        .unwrap_or_default();
+    let summary = Summary::said(
+        SummaryKey::GitCommitted,
+        json!({ "sha": sha }),
+        format!("commit {sha}"),
+    );
+    let content = git_said(&command, &body, lost, &finished, &summary.text);
+    Ok(Executed {
+        summary,
+        content,
+        edits: Vec::new(),
+    })
+}
+
+/// Switch the checkout to a branch, creating it when it is not there yet.
+///
+/// An existing branch is switched to and a missing one is created from the current commit, so the
+/// model does not have to know which of the two the workspace is in. The uncommitted changes travel
+/// with the switch; git refuses the ones that cannot, and says so.
+fn git_branch(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+) -> Result<Executed, ToolsError> {
+    let name = required(tool, arguments, "name")?.trim().to_string();
+    if !crate::github::valid_branch(&name) {
+        return Err(ToolsError::InvalidArguments {
+            tool: tool.to_string(),
+            reason: format!("\"{name}\" is not a branch name this tool will hand to git"),
+        });
+    }
+    let start = match text_arg(arguments, "start_point") {
+        Some(start) => {
+            let start = start.trim();
+            if !crate::github::valid_branch(start) {
+                return Err(ToolsError::InvalidArguments {
+                    tool: tool.to_string(),
+                    reason: format!("\"{start}\" is not a branch name this tool will hand to git"),
+                });
+            }
+            Some(start.to_string())
+        }
+        None => None,
+    };
+    let reference = format!("refs/heads/{name}");
+    let exists = git_answers(
+        tool,
+        policy,
+        &["rev-parse", "--verify", "--quiet", reference.as_str()],
+    );
+    let argv: Vec<String> = if exists {
+        vec!["switch".into(), name.clone()]
+    } else {
+        let mut argv = vec!["switch".into(), "-c".into(), name.clone()];
+        if let Some(start) = &start {
+            argv.push(start.clone());
+        }
+        argv
+    };
+    let command = display_command("git", &argv);
+    let finished = run_argv(
+        tool,
+        "git",
+        &argv,
+        &policy.workspace_root,
+        GIT_TIMEOUT_SECS,
+        Reporting::head(),
+        &GIT_ENV,
+    )?;
+    let (body, lost) = captured_text(&finished);
+    if finished.ended_is_failure() {
+        let (summary, content) = git_failed(&command, &body, lost, &finished, GIT_TIMEOUT_SECS);
+        return Ok(Executed {
+            summary,
+            content,
+            edits: Vec::new(),
+        });
+    }
+    let summary = Summary::said(
+        SummaryKey::GitSwitched,
+        json!({ "branch": name }),
+        format!("on {name}"),
+    );
+    let content = git_said(&command, &body, lost, &finished, &summary.text);
+    Ok(Executed {
+        summary,
+        content,
+        edits: Vec::new(),
+    })
+}
+
+/// Push the current branch to its remote.
+///
+/// The credential is git's own: whatever this machine already holds for that remote — a keychain
+/// entry, an SSH agent, a helper — is what answers. The app does not ask for a password it did not
+/// need. A push that cannot authenticate fails with git's own words, and the row says where a
+/// credential would have to be added.
+fn git_push(tool: &str, arguments: &Value, policy: &SandboxPolicy) -> Result<Executed, ToolsError> {
+    let remote = text_arg(arguments, "remote")
+        .unwrap_or("origin")
+        .trim()
+        .to_string();
+    if remote.is_empty() || remote.starts_with('-') {
+        return Err(ToolsError::InvalidArguments {
+            tool: tool.to_string(),
+            reason: format!("\"{remote}\" is not a remote this tool will hand to git"),
+        });
+    }
+    let branch = match text_arg(arguments, "branch") {
+        Some(branch) => branch.trim().to_string(),
+        None => git_output(tool, policy, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .map(|text| text.trim().to_string())
+            .unwrap_or_default(),
+    };
+    if branch.is_empty() || branch == "HEAD" {
+        return Err(ToolsError::InvalidArguments {
+            tool: tool.to_string(),
+            reason: "there is no branch checked out to push; name one".into(),
+        });
+    }
+    // A branch with no upstream of its own gets one, so the next push and the pull request both
+    // know where the branch belongs.
+    let tracked = git_output(
+        tool,
+        policy,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    .is_some();
+    let mut argv: Vec<String> = vec!["push".into()];
+    if !tracked {
+        argv.push("--set-upstream".into());
+    }
+    argv.push(remote.clone());
+    argv.push(branch.clone());
+    let command = display_command("git", &argv);
+    let finished = run_argv(
+        tool,
+        "git",
+        &argv,
+        &policy.workspace_root,
+        GIT_PUSH_TIMEOUT_SECS,
+        Reporting::head(),
+        &GIT_ENV,
+    )?;
+    let (body, lost) = captured_text(&finished);
+    if finished.ended_is_failure() {
+        let (summary, content) =
+            git_failed(&command, &body, lost, &finished, GIT_PUSH_TIMEOUT_SECS);
+        let content = format!(
+            "{content}\n\nIf this is an authentication failure, this machine has no credential for \
+             {remote}: add one to the macOS Keychain, or use an SSH remote."
+        );
+        return Ok(Executed {
+            summary,
+            content,
+            edits: Vec::new(),
+        });
+    }
+    let summary = Summary::said(
+        SummaryKey::GitPushed,
+        json!({ "branch": branch }),
+        format!("pushed {branch}"),
+    );
+    let content = git_said(&command, &body, lost, &finished, &summary.text);
+    Ok(Executed {
+        summary,
+        content,
+        edits: Vec::new(),
+    })
+}
+
+/// Open a pull request on GitHub.
+///
+/// Everything the call needs is read rather than asked for: the repository from the origin remote,
+/// the branch from the checkout, and the branch to land on from the repository's own default. The
+/// token is the one thing the app cannot do without, and a run without one is told so in words the
+/// model can act on rather than failing on a request that was never sent.
+fn github_pr(
+    tool: &str,
+    arguments: &Value,
+    policy: &SandboxPolicy,
+    token: Option<&dyn GitHubToken>,
+) -> Result<Executed, ToolsError> {
+    let token = token
+        .and_then(|host| host.token())
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| {
+            ToolsError::NotConfigured(
+                "no GitHub token is saved; paste one under Settings → Agent → GitHub token".into(),
+            )
+        })?;
+    let title = required(tool, arguments, "title")?.trim().to_string();
+    if title.is_empty() {
+        return Err(ToolsError::InvalidArguments {
+            tool: tool.to_string(),
+            reason: "a pull request needs a title".into(),
+        });
+    }
+    let body = text_arg(arguments, "body").unwrap_or("").trim().to_string();
+    let repo = match text_arg(arguments, "repo") {
+        Some(repo) => {
+            let repo = repo.trim();
+            if !crate::github::valid_repo(repo) {
+                return Err(ToolsError::InvalidArguments {
+                    tool: tool.to_string(),
+                    reason: format!("\"{repo}\" is not a repository name; use \"owner/name\""),
+                });
+            }
+            repo.to_string()
+        }
+        None => {
+            let url =
+                git_output(tool, policy, &["remote", "get-url", "origin"]).unwrap_or_default();
+            crate::github::repo_from_remote(&url).ok_or_else(|| ToolsError::InvalidArguments {
+                tool: tool.to_string(),
+                reason: "the origin remote is not a GitHub repository; name the repository as \
+                          \"owner/name\""
+                    .into(),
+            })?
+        }
+    };
+    let head = match text_arg(arguments, "head") {
+        Some(head) => head.trim().to_string(),
+        None => git_output(tool, policy, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .map(|text| text.trim().to_string())
+            .unwrap_or_default(),
+    };
+    if !crate::github::valid_branch(&head) {
+        return Err(ToolsError::InvalidArguments {
+            tool: tool.to_string(),
+            reason: "there is no branch checked out to open a pull request from; name one".into(),
+        });
+    }
+    let base = match text_arg(arguments, "base") {
+        Some(base) => base.trim().to_string(),
+        None => crate::github::default_branch(&token, &repo)?,
+    };
+    if !crate::github::valid_branch(&base) {
+        return Err(ToolsError::InvalidArguments {
+            tool: tool.to_string(),
+            reason: format!("\"{base}\" is not a branch name"),
+        });
+    }
+    let draft = flag_arg(arguments, "draft");
+    let pull = crate::github::open_pull_request(&token, &repo, &head, &base, &title, &body, draft)?;
+    let summary = Summary::said(
+        SummaryKey::GitPullRequest,
+        json!({ "number": pull.number }),
+        format!("pull request #{}", pull.number),
+    );
+    let content = format!(
+        "Opened pull request #{} on {repo} from {head} into {base}.\n{}\n{}",
+        pull.number, pull.title, pull.url
+    );
+    Ok(Executed {
+        summary,
+        content,
+        edits: Vec::new(),
+    })
+}
+
+/// One small read of git's own output, for the number a row wants to show.
+fn git_output(tool: &str, policy: &SandboxPolicy, args: &[&str]) -> Option<String> {
+    let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let finished = run_argv(
+        tool,
+        "git",
+        &argv,
+        &policy.workspace_root,
+        GIT_TIMEOUT_SECS,
+        Reporting::head(),
+        &GIT_ENV,
+    )
+    .ok()?;
+    if finished.ended_is_failure() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&finished.out.bytes).to_string())
+}
+
+/// What a git call that worked leaves: the command as it ran, git's own words, and the row's line.
+fn git_said(command: &str, body: &str, lost: usize, finished: &Finished, legend: &str) -> String {
+    let (output, held) = head(body, MAX_RESULT_BYTES);
+    command_report(command, "", &output, held + lost, finished.elapsed, legend)
+}
+
+/// What a git call that failed leaves: git's own error and the code it exited with.
+///
+/// A failure is a result rather than a refusal — nothing blocked the call, git ran and said no —
+/// so the row shows the exit code and the message rather than an empty answer.
+fn git_failed(
+    command: &str,
+    body: &str,
+    lost: usize,
+    finished: &Finished,
+    seconds: u64,
+) -> (Summary, String) {
+    let (output, held) = head(body, MAX_RESULT_BYTES);
+    let summary = ended_summary(&finished.ended, seconds);
+    let content = command_report(
+        command,
+        "",
+        &output,
+        held + lost,
+        finished.elapsed,
+        &summary.text,
+    );
+    (summary, content)
 }
 
 /// The body of a report without its trailing exit line, for a caller that appends its own legend
@@ -5692,6 +6166,7 @@ mod tests {
             &p,
             Some(&watcher),
             None,
+            None,
         )
         .unwrap();
         let done = started.elapsed();
@@ -5717,6 +6192,7 @@ mod tests {
             &json!({ "path": "src/lib.rs" }),
             &p,
             Some(&watcher),
+            None,
             None,
         )
         .unwrap();
@@ -5988,6 +6464,10 @@ mod tests {
             );
         };
         run(&["init", "-q"]);
+        // The identity is the repository's own, so a commit made by the tool under test is the same
+        // commit the fixture's first one is, whatever the machine running the test has configured.
+        run(&["config", "user.name", "T"]);
+        run(&["config", "user.email", "t@example.com"]);
         run(&["add", "-A"]);
         run(&[
             "-c",
@@ -6096,6 +6576,116 @@ mod tests {
         );
         let both = ran("git_log", &json!({}), &p).unwrap();
         assert_eq!(both.summary.params["count"], json!(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stage_puts_the_named_file_in_the_index_and_counts_what_the_index_holds() {
+        let (d, p) = committed_workspace(&[("a.txt", "one\n")]);
+        std::fs::write(d.path().join("a.txt"), "two\n").unwrap();
+        std::fs::write(d.path().join("b.txt"), "new\n").unwrap();
+        let staged = ran("git_stage", &json!({ "paths": ["a.txt"] }), &p).unwrap();
+        assert_eq!(staged.summary.key, Some(SummaryKey::GitStaged));
+        assert_eq!(staged.summary.params["count"], json!(1));
+        // Only what was named is staged: the file that was left alone is still unstaged.
+        let unstaged = ran("git_status", &json!({}), &p).unwrap();
+        assert!(
+            unstaged.content.contains("?? b.txt"),
+            "{}",
+            unstaged.content
+        );
+        // A path outside the workspace is refused before git is handed it.
+        let outside = ran("git_stage", &json!({ "paths": ["../elsewhere.txt"] }), &p);
+        assert!(
+            matches!(outside, Err(ToolsError::Sandbox(_))),
+            "{outside:?}"
+        );
+        // And a call that names no file at all is told what is missing.
+        let none = ran("git_stage", &json!({ "paths": [] }), &p);
+        assert!(
+            matches!(none, Err(ToolsError::InvalidArguments { .. })),
+            "{none:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_commit_writes_the_staged_change_and_names_the_commit_it_made() {
+        let (d, p) = committed_workspace(&[("a.txt", "one\n")]);
+        std::fs::write(d.path().join("a.txt"), "two\n").unwrap();
+        ran("git_stage", &json!({ "paths": ["a.txt"] }), &p).unwrap();
+        let committed = ran("git_commit", &json!({ "message": "second" }), &p).unwrap();
+        assert_eq!(committed.summary.key, Some(SummaryKey::GitCommitted));
+        let sha = committed.summary.params["sha"].as_str().unwrap();
+        assert!(!sha.is_empty(), "the row names the commit it made");
+        // The commit is a real one: the history now holds two.
+        let log = ran("git_log", &json!({}), &p).unwrap();
+        assert_eq!(log.summary.params["count"], json!(2));
+        // A commit with nothing in it says so rather than claiming a commit it did not make. Git
+        // words the refusal in its own language, so the check is the history and not the sentence.
+        let empty = ran("git_commit", &json!({ "message": "third" }), &p).unwrap();
+        let after = ran("git_log", &json!({}), &p).unwrap();
+        assert_eq!(after.summary.params["count"], json!(2));
+        assert!(
+            empty.content.to_lowercase().contains("nothing to commit")
+                || empty.content.to_lowercase().contains("нечего коммитить"),
+            "{}",
+            empty.content
+        );
+        // And a commit with no message is refused before git is asked.
+        let blank = ran("git_commit", &json!({ "message": "  " }), &p);
+        assert!(
+            matches!(blank, Err(ToolsError::InvalidArguments { .. })),
+            "{blank:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_branch_is_created_when_it_is_missing_and_switched_to_when_it_is_there() {
+        let (d, p) = committed_workspace(&[("a.txt", "one\n")]);
+        let made = ran("git_branch", &json!({ "name": "feature/one" }), &p).unwrap();
+        assert_eq!(made.summary.key, Some(SummaryKey::GitSwitched));
+        assert_eq!(made.summary.params["branch"], json!("feature/one"));
+        let head = ran("git_log", &json!({}), &p).unwrap();
+        assert!(head.content.contains("feature/one"), "{}", head.content);
+        // A second call switches to the branch that is already there.
+        ran("git_branch", &json!({ "name": "main" }), &p).unwrap();
+        let again = ran("git_branch", &json!({ "name": "feature/one" }), &p).unwrap();
+        assert_eq!(again.summary.key, Some(SummaryKey::GitSwitched));
+        // A name git would read as something other than a branch is refused here, not by git.
+        let odd = ran("git_branch", &json!({ "name": "--upload-pack=evil" }), &p);
+        assert!(
+            matches!(odd, Err(ToolsError::InvalidArguments { .. })),
+            "{odd:?}"
+        );
+        let _ = d;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_request_asks_for_a_token_rather_than_failing_on_a_call_it_never_sent() {
+        let (d, p) = committed_workspace(&[("a.txt", "one\n")]);
+        // The Privacy switch off is refused first: nothing leaves the machine.
+        let local = ran("github_pr", &json!({ "title": "a change" }), &p);
+        assert!(
+            matches!(local, Err(ToolsError::NetworkNotConfigured(_))),
+            "{local:?}"
+        );
+        // With it on, the call reaches the door and finds no token behind it.
+        let online = SandboxPolicy {
+            network_allowed: true,
+            ..p.clone()
+        };
+        let no_token = ran("github_pr", &json!({ "title": "a change" }), &online);
+        match no_token {
+            Err(ToolsError::NotConfigured(why)) => assert!(
+                why.contains("Settings") && why.contains("GitHub token"),
+                "{why}"
+            ),
+            other => panic!("a call with no token must say so, not try: {other:?}"),
+        }
+        let _ = d;
     }
 
     /// The values a runner passes on are argv entries, never shell syntax: a flag-shaped filter, a

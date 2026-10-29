@@ -36,6 +36,10 @@ pub enum StepKind {
     Linter,
     /// "Checked the repository" — a read of status, diff or log.
     Git,
+    /// "Changed the repository" — a write to it: staging, a commit, a branch, a push.
+    GitWrite,
+    /// "Pull request" — a request opened on GitHub.
+    PullRequest,
     /// "Edit file" with a +N −M pill.
     EditFile,
     /// "Create file" — a write that made a file that was not there, so every line is an addition.
@@ -79,6 +83,8 @@ impl StepKind {
             StepKind::Build => "transcript.step.build",
             StepKind::Linter => "transcript.step.linter",
             StepKind::Git => "transcript.step.git",
+            StepKind::GitWrite => "transcript.step.gitWrite",
+            StepKind::PullRequest => "transcript.step.pullRequest",
             StepKind::EditFile => "transcript.step.editFile",
             StepKind::CreateFile => "transcript.step.createFile",
             StepKind::ReadFile => "transcript.step.readFile",
@@ -120,6 +126,8 @@ pub fn all_i18n_keys() -> Vec<&'static str> {
         Build,
         Linter,
         Git,
+        GitWrite,
+        PullRequest,
         EditFile,
         CreateFile,
         ReadFile,

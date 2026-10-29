@@ -290,6 +290,8 @@ export type HostStepKind =
   | "build"
   | "linter"
   | "git"
+  | "gitWrite"
+  | "pullRequest"
   | "editFile"
   | "createFile"
   | "readFile"
@@ -946,6 +948,15 @@ export const ipc = {
   saveRemoteKey: (key: string) => invoke<boolean>("save_remote_key", { key }),
   /** Remove the saved key; answers whether one is saved now, which is always `false` on success. */
   clearRemoteKey: () => invoke<boolean>("clear_remote_key"),
+  /**
+   * Whether the Keychain holds a GitHub token. The token is only ever read by the host for the one
+   * API call the agent makes — opening a pull request — so it is never returned here either.
+   */
+  githubTokenPresent: () => invoke<boolean>("github_token_present"),
+  /** Write a pasted GitHub token to the login Keychain; answers whether one is saved now. */
+  saveGithubToken: (token: string) => invoke<boolean>("save_github_token", { token }),
+  /** Remove the saved GitHub token; answers whether one is saved now, always `false` on success. */
+  clearGithubToken: () => invoke<boolean>("clear_github_token"),
   /**
    * The free-model registry as the picker draws it. No secret rides along, because none is used: ids,
    * labels, providers, and whether the FreeCode app on this Mac is answering — which is the only way

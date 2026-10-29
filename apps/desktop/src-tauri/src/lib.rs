@@ -14,6 +14,7 @@ mod diagnostics;
 mod engine;
 mod extensions;
 mod free_models;
+mod github;
 mod knowledge;
 mod opencode;
 mod paths;
@@ -234,6 +235,35 @@ async fn clear_remote_key() -> Result<bool, String> {
     Ok(false)
 }
 
+/// Whether the Keychain holds a GitHub token. The token itself never crosses this boundary.
+#[tauri::command]
+async fn github_token_present() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(github::token_saved)
+        .await
+        .map_err(|e| format!("the keychain check stopped: {e}"))
+}
+
+/// Store a pasted GitHub token in the login Keychain. The answer is the new "a token is saved"
+/// state; the value that was handed over is not echoed back and is not written to the settings
+/// document.
+#[tauri::command]
+async fn save_github_token(token: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || github::save_token(&token))
+        .await
+        .map_err(|e| format!("the keychain write stopped: {e}"))??;
+    Ok(true)
+}
+
+/// Remove the saved GitHub token. Answering `false` is the state the UI draws, not an error: there
+/// was nothing to remove, or the credential is gone now either way.
+#[tauri::command]
+async fn clear_github_token() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(github::clear_token)
+        .await
+        .map_err(|e| format!("the keychain write stopped: {e}"))??;
+    Ok(false)
+}
+
 /// The free-model registry as the picker draws it. No secret rides along, because no route here uses
 /// one: the list carries ids, labels and whether the FreeCode app on this Mac is answering, which is
 /// the only way any of these models can be asked.
@@ -386,6 +416,12 @@ pub fn run() {
             remote_key_present,
             save_remote_key,
             clear_remote_key,
+            // The GitHub token, for the one API call the agent makes: opening a pull request. It
+            // lives in the Keychain like the provider's key, and the push needs none — git uses the
+            // credential this machine already holds for the remote.
+            github_token_present,
+            save_github_token,
+            clear_github_token,
             // The free tier's registry. It carries no secret and asks for none: the rows are answered
             // by the local service below, and nothing here reads a keychain.
             free_models_list,

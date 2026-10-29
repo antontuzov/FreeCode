@@ -17,6 +17,7 @@
 //! as `"{}"`, because the fork answers HTTP 500 otherwise (llama.cpp#112).
 
 pub mod exec;
+pub mod github;
 pub mod page;
 pub mod pixels;
 pub mod registry;
@@ -31,6 +32,7 @@ pub use exec::{
     declared_checks, execute, execute_watched, plan, write_targets, Edit, Executed, PlanItem,
     PlanStatus, Summary, SummaryKey, Watcher, MAX_PLAN_ITEMS, MAX_RESULT_BYTES,
 };
+pub use github::{GitHubToken, PullRequest};
 pub use page::{
     is_page_tool, page_op, PageHost, PageOp, MAX_CONSOLE_LINES, MAX_PAGE_TEXT, PAGE_TOOLS,
 };

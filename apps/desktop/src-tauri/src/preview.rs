@@ -918,7 +918,7 @@ fn run_page(
     policy: &SandboxPolicy,
     host: &Page,
 ) -> Result<String, String> {
-    let done = freecode_tools::execute_watched(tool, &arguments, policy, None, Some(host))
+    let done = freecode_tools::execute_watched(tool, &arguments, policy, None, Some(host), None)
         .map_err(|why| format!("{tool} did not run: {why}"))?;
     steps.push(json!({
         "tool": tool,

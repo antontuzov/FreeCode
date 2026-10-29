@@ -29,6 +29,8 @@ export type StepKind =
   | "build"
   | "linter"
   | "git"
+  | "gitWrite"
+  | "pullRequest"
   | "editFile"
   | "createFile"
   | "readFile"
@@ -54,6 +56,8 @@ const I18N_KEYS: Record<StepKind, string> = {
   build: "transcript.step.build",
   linter: "transcript.step.linter",
   git: "transcript.step.git",
+  gitWrite: "transcript.step.gitWrite",
+  pullRequest: "transcript.step.pullRequest",
   editFile: "transcript.step.editFile",
   createFile: "transcript.step.createFile",
   readFile: "transcript.step.readFile",

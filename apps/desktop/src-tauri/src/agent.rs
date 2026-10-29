@@ -140,7 +140,10 @@ pub(crate) fn run_one(
                 "{name} is not available in this build: it has no executor. The calls it can make \
                   are read_file, list_dir, glob, grep_search, write_file, edit_file and apply_patch, \
                  which reach nothing outside this workspace; git_status, git_diff and git_log, which \
-                 only read the repository; web_search and fetch_url, which reach the internet only \
+                 only read the repository; git_stage and git_branch, which change the checkout; \
+                 git_commit, which rewrites history and always asks; git_push and github_pr, which \
+                 leave the machine and need the Privacy switch on as well as an approval; \
+                 web_search and fetch_url, which reach the internet only \
                  while the Privacy switch is on; terminal, run_tests, run_build and run_linter, which \
                  run only while Terminal access is on; the browser calls, which act on the page open \
                  in the preview panel; and spawn_subagent, which delegates only while Subagents is \
@@ -161,7 +164,14 @@ pub(crate) fn run_one(
             // The page calls reach the window's preview panel through the bridge in `preview`: a host
             // that is built per call so it borrows this run's own app handle.
             let page = crate::preview::Page::new(app);
-            match execute_watched(name, &arguments, policy, watcher.as_ref(), Some(&page)) {
+            match execute_watched(
+                name,
+                &arguments,
+                policy,
+                watcher.as_ref(),
+                Some(&page),
+                Some(&crate::github::Token),
+            ) {
                 Ok(done) => {
                     // The executor's own report of what it wrote. Its paths are workspace-relative by
                     // construction, which is what makes two calls that named one file — one by its
@@ -353,7 +363,7 @@ fn run_check(app: &AppHandle, tool: &str, policy: &SandboxPolicy) {
     // A check is a command the user waits through, so it reports into the same panel a call does.
     let watcher = watcher_for(app, &row.id);
     // A host-initiated check has no preview panel of its own: the browser calls are never checks.
-    match execute_watched(tool, &arguments, policy, Some(&watcher), None) {
+    match execute_watched(tool, &arguments, policy, Some(&watcher), None, None) {
         Ok(done) => {
             let failed = done.summary.failed();
             let code = done.summary.params.get("code").and_then(Value::as_i64);
@@ -602,6 +612,54 @@ fn subject(name: &str, arguments: &Value) -> String {
         "browser_console" => return String::new(),
         _ => {}
     }
+    // The repository's own rows are named by what they acted on: the branch a switch moved to, the
+    // message a commit carried, the title a pull request was opened with. A staging row names the
+    // first path it was given, because the summary beside it carries the count.
+    match name {
+        "git_stage" => {
+            let first = arguments
+                .get("paths")
+                .and_then(Value::as_array)
+                .and_then(|paths| paths.first())
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            return first.to_string();
+        }
+        "git_commit" => {
+            return arguments
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        }
+        "git_branch" => {
+            return arguments
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        }
+        "git_push" => {
+            return arguments
+                .get("branch")
+                .and_then(Value::as_str)
+                .filter(|branch| !branch.is_empty())
+                .unwrap_or("origin")
+                .to_string()
+        }
+        "github_pr" => {
+            return arguments
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        }
+        _ => {}
+    }
     ["path", "pattern", "file", "query", "url", "command"]
         .iter()
         .find_map(|key| arguments.get(*key).and_then(Value::as_str))
@@ -622,6 +680,8 @@ pub(crate) fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
         "run_build" => StepKind::Build,
         "run_linter" => StepKind::Linter,
         "git_status" | "git_diff" | "git_log" => StepKind::Git,
+        "git_stage" | "git_commit" | "git_branch" | "git_push" => StepKind::GitWrite,
+        "github_pr" => StepKind::PullRequest,
         "web_search" => StepKind::WebSearch,
         "fetch_url" => StepKind::WebReading,
         _ if name.starts_with("browser_") => StepKind::Browser,
@@ -802,7 +862,7 @@ mod tests {
             assert_eq!(row.tool_id.as_deref(), Some(*id));
             assert_eq!(row.status, StepStatus::Running);
         }
-        assert_eq!(freecode_tools::EXECUTABLE.len(), 26);
+        assert_eq!(freecode_tools::EXECUTABLE.len(), 31);
         // The writes are the rows the pill is built from, so none can silently degrade to a generic
         // tool — and a create says create, because a row that reads "Edit file" over a file the run
         // invented would be the transcript contradicting the review under it.
@@ -863,6 +923,14 @@ mod tests {
             ("git_status", StepKind::Git),
             ("git_diff", StepKind::Git),
             ("git_log", StepKind::Git),
+            // The repository's writes are not reads of it, so they cannot open the row that says
+            // "Checked the repository" — a transcript that called a commit a check would be wrong in
+            // the one place a reader looks for what the run did.
+            ("git_stage", StepKind::GitWrite),
+            ("git_commit", StepKind::GitWrite),
+            ("git_branch", StepKind::GitWrite),
+            ("git_push", StepKind::GitWrite),
+            ("github_pr", StepKind::PullRequest),
         ] {
             assert_eq!(started_row(id, &json!({})).kind, kind, "{id}");
         }
@@ -873,6 +941,29 @@ mod tests {
         assert_eq!(
             subject("git_diff", &json!({ "path": "src/lib.rs" })),
             "src/lib.rs"
+        );
+        // The repository's own rows name what they acted on, so a chip over a commit says what was
+        // committed rather than repeating the tool's name.
+        assert_eq!(
+            subject(
+                "git_stage",
+                &json!({ "paths": ["src/lib.rs", "README.md"] })
+            ),
+            "src/lib.rs"
+        );
+        assert_eq!(
+            subject("git_commit", &json!({ "message": "Fix the guard\n\nwhy" })),
+            "Fix the guard"
+        );
+        assert_eq!(
+            subject("git_branch", &json!({ "name": "fix/guard" })),
+            "fix/guard"
+        );
+        assert_eq!(subject("git_push", &json!({ "branch": "main" })), "main");
+        assert_eq!(subject("git_push", &json!({})), "origin");
+        assert_eq!(
+            subject("github_pr", &json!({ "title": "Fix the guard" })),
+            "Fix the guard"
         );
         // Delegation has its own glyph in the inspector, so its row cannot be a generic tool.
         assert!(is_delegated("spawn_subagent"));

@@ -88,6 +88,27 @@ export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => v
     };
   }, []);
 
+  // `?tool=<id>` is the deep link to one row of this list, the way `?row=` is the deep link to a
+  // settings control: the list is long and this window cannot be scrolled or clicked by the harness.
+  // Dev-only, and it moves the page rather than changing it — the row it finds is the row the
+  // engine already decided.
+  useEffect(() => {
+    if (!inv) return;
+    const wanted = import.meta.env.DEV
+      ? new URLSearchParams(window.location.search).get("tool")
+      : null;
+    if (!wanted) return;
+    const rows = [...document.querySelectorAll<HTMLElement>(".card-row")];
+    const hit = rows.find((row) =>
+      row.querySelector(".row-desc")?.textContent?.trim().startsWith(`${wanted} —`),
+    );
+    if (!hit) return;
+    hit.scrollIntoView({ block: "center" });
+    hit.dataset.flash = "true";
+    const id = window.setTimeout(() => delete hit.dataset.flash, 1400);
+    return () => window.clearTimeout(id);
+  }, [inv]);
+
   const blocked = inv?.tools.filter((r) => r.decision === "blocked").length ?? 0;
 
   return (

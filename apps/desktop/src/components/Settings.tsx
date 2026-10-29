@@ -146,6 +146,7 @@ const CONTROLS: Record<Page, string[]> = {
     "keepRecentTurns",
     "allowRemote",
     "telemetry",
+    "githubToken",
   ],
   model: [
     "remoteSource",
@@ -257,8 +258,10 @@ export function Settings({
   const devRow = import.meta.env.DEV
     ? new URLSearchParams(window.location.search).get("row")
     : null;
-  const devRowTab =
-    devRow && (CONTROLS.appearance as string[]).includes(devRow) ? tabOf(devRow) : null;
+  // The page that holds the row, found from the same list the pages render from: a deep link names
+  // a control, and the control knows its page.
+  const devRowPage = PAGE_IDS.find((p) => (CONTROLS[p] as string[]).includes(devRow ?? ""));
+  const devRowTab = devRow && devRowPage === "appearance" ? tabOf(devRow) : null;
   const [tab, setTab] = useState<TabId>(
     () =>
       devRowTab ??
@@ -271,8 +274,8 @@ export function Settings({
   // answer to the query is the control itself, and a page that opens at its top sends the user back to
   // reading five sections to find it.
   const [jump, setJump] = useState<{ page: Page; title: string } | null>(() =>
-    devRow && devRowTab
-      ? { page: "appearance", title: translate(locale, `settings.row.${devRow}`) }
+    devRow && devRowPage
+      ? { page: devRowPage, title: translate(locale, `settings.row.${devRow}`) }
       : null,
   );
   const body = useRef<HTMLElement>(null);
@@ -1306,6 +1309,18 @@ function Agent({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
          * offer a choice the code does not honour. */}
         <Row title={t("row.telemetry")} description={t("row.telemetry.desc")}>
           <span className="pill">{t("row.telemetry.value")}</span>
+        </Row>
+      </Section>
+
+      <Section label={t("section.github")} description={t("section.github.desc")}>
+        <Row title={t("row.githubToken")} description={t("row.githubToken.desc")}>
+          <KeyRow
+            t={t}
+            prefix="row.githubToken"
+            present={ipc.githubTokenPresent}
+            save={ipc.saveGithubToken}
+            clear={ipc.clearGithubToken}
+          />
         </Row>
       </Section>
     </>
