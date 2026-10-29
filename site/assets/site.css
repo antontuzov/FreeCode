@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #0c1210;
   --bg-raise: #121a17;
   --bg-sunken: #0a100e;
@@ -8,10 +9,33 @@
   --mint: #3f7f6a;
   --mint-bright: #5cb897;
   --danger: #e0655f;
+  --deco-pill: color-mix(in srgb, #9fd3bf 24%, transparent);
+  --deco-stroke: #5cb897;
+  --deco-brackets: #6fc3d6;
+  --field-ink: #2b4139;
+  --shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.7);
   --radius: 14px;
   --font:
     ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", Inter, Roboto, "Helvetica Neue",
     sans-serif;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f4ee;
+  --bg-raise: #fffdf8;
+  --bg-sunken: #efebe1;
+  --line: #e2ddcf;
+  --fg: #14150f;
+  --quiet: #6c6c5f;
+  --mint: #2f6b58;
+  --mint-bright: #3d8a6e;
+  --danger: #b8463f;
+  --deco-pill: #ecdfb8;
+  --deco-stroke: #c49a34;
+  --deco-brackets: #3d8a8f;
+  --field-ink: #d6d1bf;
+  --shadow: 0 30px 70px -34px rgba(58, 50, 30, 0.28);
 }
 
 * {
@@ -30,6 +54,15 @@ body {
   font-size: 16px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
 
 a {
@@ -97,20 +130,233 @@ a {
   color: #fff;
 }
 
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--quiet);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.theme-toggle:hover {
+  color: var(--fg);
+  border-color: var(--mint);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--mint-bright);
+  outline-offset: 2px;
+}
+
+.theme-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+:root[data-theme="dark"] .theme-toggle .icon-moon {
+  display: none;
+}
+
+:root[data-theme="light"] .theme-toggle .icon-sun {
+  display: none;
+}
+
 /* ---------- hero ---------- */
 
 .hero {
+  position: relative;
   text-align: center;
   padding: 84px 24px 40px;
 }
 
-.hero h1 {
-  font-size: clamp(32px, 5.4vw, 54px);
-  line-height: 1.12;
+.hero-field {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: min(760px, 100%);
+  width: 100%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  -webkit-mask-image: radial-gradient(ellipse 72% 62% at 50% 34%, #000 26%, transparent 76%);
+  mask-image: radial-gradient(ellipse 72% 62% at 50% 34%, #000 26%, transparent 76%);
+}
+
+.hero > :not(.hero-field) {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-title {
+  font-size: clamp(30px, 4.8vw, 52px);
+  line-height: 1.14;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  margin: 0 auto 18px;
-  max-width: 17ch;
+  letter-spacing: -0.025em;
+  margin: 0 auto 20px;
+  max-width: 34ch;
+}
+
+.hero-title-line {
+  display: block;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The rotating second line: a verb that carries its own decoration, then the phrase it acts on.
+   Word and phrase swap together, out then in, the way the reference does. */
+
+.rotator {
+  display: block;
+  /* The second line carries decorations above the word, so it needs clearance from line 1. */
+  margin-top: 0.22em;
+}
+
+.rotator-verb {
+  position: relative;
+  display: inline-block;
+  isolation: isolate;
+}
+
+.rotator-word,
+.rotator-tail {
+  display: inline-block;
+  will-change: opacity, transform;
+}
+
+.rotator-tail {
+  margin-left: 0.3em;
+}
+
+/* The brackets hang outside the verb box, so the phrase has to clear them. */
+[data-deco="brackets"] .rotator-tail {
+  margin-left: 0.78em;
+}
+
+.deco {
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+[data-deco="pill"] .deco-pill,
+[data-deco="underline"] .deco-underline,
+[data-deco="doodle"] .deco-doodle,
+[data-deco="brackets"] .deco-brackets {
+  opacity: 1;
+}
+
+.deco-pill {
+  z-index: -1;
+  inset: -0.02em -0.24em -0.06em;
+  border-radius: 0.44em;
+  background: var(--deco-pill);
+  transform: scale(0.92);
+  transition:
+    opacity 0.22s ease,
+    transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+[data-deco="pill"] .deco-pill {
+  transform: none;
+}
+
+.deco-underline {
+  left: -0.04em;
+  right: -0.04em;
+  bottom: -0.2em;
+  height: 0.16em;
+}
+
+.deco-underline svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.deco-underline path {
+  fill: none;
+  stroke: var(--deco-stroke);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-dasharray: 230;
+  stroke-dashoffset: 230;
+}
+
+[data-deco="underline"] .deco-underline path {
+  animation: draw-stroke 0.62s cubic-bezier(0.4, 0, 0.2, 1) 0.05s forwards;
+}
+
+.deco-doodle {
+  top: -0.52em;
+  right: -0.72em;
+  width: 0.78em;
+  height: 0.62em;
+  color: var(--deco-stroke);
+  transform: rotate(-12deg);
+}
+
+.deco-doodle svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.deco-brackets {
+  inset: -0.04em -0.46em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.9em;
+  font-weight: 500;
+  color: var(--deco-brackets);
+}
+
+[data-deco="brackets"] .deco-brackets b:first-child {
+  animation: bracket-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+[data-deco="brackets"] .deco-brackets b:last-child {
+  animation: bracket-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) 0.06s both;
+}
+
+@keyframes draw-stroke {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes bracket-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .hero-sub {
@@ -194,7 +440,7 @@ a {
   overflow: hidden;
   border: 1px solid var(--line);
   background: var(--bg-sunken);
-  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.7);
+  box-shadow: var(--shadow);
 }
 
 .hero-video video {
