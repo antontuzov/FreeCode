@@ -48,7 +48,11 @@
         FreeCode
       </a>
       <nav class="nav-links">
-        <a href="#features">Features</a>
+        <a class="nav-more" href="#work">Work</a>
+        <a class="nav-more" href="#how">How it works</a>
+        <a class="nav-more" href="#features">Features</a>
+        <a class="nav-more" href="#models">Models</a>
+        <a href="#faq">FAQ</a>
         <a href="https://github.com/antontuzov/FreeCode" target="_blank" rel="noopener">GitHub</a>
         <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to light theme">
           <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
@@ -156,6 +160,150 @@
         </div>
       </section>
 
+      <section class="section work" id="work">
+        <div class="section-head">
+          <span class="eyebrow">What a run leaves behind</span>
+          <h2>Files you can open, not a transcript you have to trust</h2>
+          <p>
+            Every row below is something the agent has actually produced on this machine, in a folder
+            you picked, with the diff still on screen afterwards.
+          </p>
+        </div>
+        <div class="work-grid">
+          <article class="work-card">
+            <div class="work-art wa-game" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <h3>A game, in one file</h3>
+            <p>Tetris, snake, flappy — built, then played by the run that wrote it, to prove the score ticks.</p>
+            <code>tetris.html · one file, no build</code>
+          </article>
+
+          <article class="work-card">
+            <div class="work-art wa-page" aria-hidden="true">
+              <i></i><b></b><b></b><u></u><u></u><u></u>
+            </div>
+            <h3>The page you were putting off</h3>
+            <p>A landing page, an internal dashboard, a tracker for the team — laid out, themed, and checked in the browser.</p>
+            <code>index.html + assets/site.css</code>
+          </article>
+
+          <article class="work-card">
+            <div class="work-art wa-script" aria-hidden="true">
+              <em>$ rename + dedupe 400 files</em><em>✓ 400 renamed</em><em>✓ 0 collisions</em>
+            </div>
+            <h3>The boring Monday task</h3>
+            <p>Shell work with a plan attached: it runs the command, reads the output, and stops when the numbers say so.</p>
+            <code>terminal · live in the panel</code>
+          </article>
+
+          <article class="work-card">
+            <div class="work-art wa-patch" aria-hidden="true">
+              <del>- const v = 1</del><ins>+ const v = 2</ins><ins>+ if (!v) return</ins>
+            </div>
+            <h3>A change across five files</h3>
+            <p>One patch call, every hunk drawn in the review panel — and a revert that puts the folder back exactly as it was.</p>
+            <code>+184 −37 · 5 files</code>
+          </article>
+
+          <article class="work-card">
+            <div class="work-art wa-read" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <h3>An answer with its receipts</h3>
+            <p>It searches, opens the pages, quotes what they said, and lists them as sources you can click.</p>
+            <code>run report · 6 sources</code>
+          </article>
+
+          <article class="work-card">
+            <div class="work-art wa-check" aria-hidden="true">
+              <b class="ok">not-blank ✓</b><b class="bad">colour at 50%×50% ✗</b>
+            </div>
+            <h3>Work that got checked</h3>
+            <p>The run screenshots what it made and asserts on the pixels before it claims it is finished.</p>
+            <code>2 passed · 1 failed · 1 fixed</code>
+          </article>
+        </div>
+      </section>
+
+      <section class="section how" id="how">
+        <div class="section-head">
+          <span class="eyebrow">How a run goes</span>
+          <h2>Five things happen. You watch all five.</h2>
+        </div>
+        <ol class="how-steps">
+          <li>
+            <span class="step-num">1</span>
+            <h3>Describe</h3>
+            <p>One paragraph in the composer. No prompt template, no YAML, no account.</p>
+          </li>
+          <li>
+            <span class="step-num">2</span>
+            <h3>Plan</h3>
+            <p>The run writes its own todo list and keeps ticking it off in the transcript as it goes.</p>
+          </li>
+          <li>
+            <span class="step-num">3</span>
+            <h3>Write</h3>
+            <p>Files land in the folder you picked. Every edit is a hunk you can read before you accept it.</p>
+          </li>
+          <li>
+            <span class="step-num">4</span>
+            <h3>Run &amp; check</h3>
+            <p>It opens the page in the browser beside the chat, clicks it, photographs it, tests the pixels.</p>
+          </li>
+          <li>
+            <span class="step-num">5</span>
+            <h3>Report</h3>
+            <p>Frames, checks, sources and the diff in one card — with the whole run one press from reverted.</p>
+          </li>
+        </ol>
+
+        <div class="demo">
+          <div class="demo-bar">
+            <div class="demo-tabs" role="tablist" aria-label="What the run shows you">
+              <button class="demo-tab is-on" type="button" role="tab" aria-selected="true" data-panel="transcript">Transcript</button>
+              <button class="demo-tab" type="button" role="tab" aria-selected="false" data-panel="terminal">Terminal</button>
+              <button class="demo-tab" type="button" role="tab" aria-selected="false" data-panel="review">Review</button>
+            </div>
+            <span class="demo-file">snake.html</span>
+          </div>
+          <div class="demo-body">
+            <div class="demo-panel is-on" data-panel="transcript">
+              <p class="line"><span class="tick">✓</span> planned 4 steps</p>
+              <p class="line"><span class="tick">✓</span> read <b>src/game.js</b> <span class="dim">· 214 lines</span></p>
+              <p class="line"><span class="tick">✓</span> wrote <b>snake.html</b> <span class="add">+184</span></p>
+              <p class="line"><span class="tick">✓</span> opened preview://snake.html</p>
+              <p class="line"><span class="tick">✓</span> clicked Start, pressed ↓ ×3</p>
+              <p class="line"><span class="tick">✓</span> captured 3 frames</p>
+              <p class="line"><span class="tick">✓</span> not-blank <span class="ok">passed</span></p>
+              <p class="line"><span class="tick">✓</span> score &gt; 0 after 2s <span class="ok">passed</span></p>
+              <p class="line done">done in 41s · 9 tools · big-pickle</p>
+            </div>
+            <div class="demo-panel" data-panel="terminal">
+              <p class="line"><span class="prompt">$</span> node scripts/probe.mjs snake.html</p>
+              <p class="line out">canvas 800×600 · ctx2d ok</p>
+              <p class="line out">frame 0: score 0 · cells 1</p>
+              <p class="line out">frame 12: score 3 · cells 4</p>
+              <p class="line out">frame 24: score 7 · cells 8</p>
+              <p class="line"><span class="prompt">$</span> <span class="cursor"></span></p>
+            </div>
+            <div class="demo-panel" data-panel="review">
+              <p class="line file">snake.html</p>
+              <p class="line ctx">@@ -1,3 +1,5 @@</p>
+              <p class="line del">- const CELL = 16;</p>
+              <p class="line add">+ const CELL = 16;</p>
+              <p class="line add">+ const SPEED_START = 140;</p>
+              <p class="line add">+ const SPEED_MIN = 70;</p>
+              <p class="line ctx">  function step() {</p>
+              <p class="line del">-   if (tick++ % 6) return;</p>
+              <p class="line add">+   if (tick++ % interval()) return;</p>
+              <p class="line revert">↺ Revert this run — the folder goes back exactly as it was</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="features" id="features">
         <article class="feature">
           <div class="feature-copy">
@@ -235,6 +383,102 @@
         </article>
       </section>
 
+      <section class="section models" id="models">
+        <div class="section-head">
+          <span class="eyebrow">The free list</span>
+          <h2>Eleven models, one picker, no bill</h2>
+          <p>
+            These are the rows this build ships with, rechecked against the free tier on 27 October
+            2026. Switch mid-task — the run keeps its context and the report says which one answered.
+          </p>
+        </div>
+        <ul class="model-list">
+          <li><b>Big Pickle</b><span>FreeCode</span><em>default</em></li>
+          <li><b>GLM-5.3-Flash</b><span>GLM</span><em>free</em></li>
+          <li><b>DeepSeek V4.1 Flash</b><span>DeepSeek</span><em>free</em></li>
+          <li><b>Beam</b><span>Beam</span><em>free</em></li>
+          <li><b>Flint 40B</b><span>Flint</span><em>free</em></li>
+          <li><b>MiMo-V2.6-Flash</b><span>MiMo</span><em>free</em></li>
+          <li><b>Nemotron 3 Ultra</b><span>NVIDIA</span><em>free</em></li>
+          <li><b>Nemotron 3.5 Lightning</b><span>NVIDIA</span><em>free</em></li>
+          <li><b>Nemotron 3.5 Super VL</b><span>NVIDIA</span><em>vision</em></li>
+          <li><b>MiniMax M3.1 Flash</b><span>MiniMax</span><em>free</em></li>
+          <li><b>LongCat 2.5 Preview</b><span>LongCat</span><em>free</em></li>
+          <li class="more"><b>Whatever the tier publishes next</b><span>ships with the app</span></li>
+        </ul>
+        <p class="models-note">
+          A free tier is someone else's infrastructure, so the app does not pretend it is permanent:
+          when a model stops being free its row stops being pickable, instead of quietly billing you.
+          Want a paid model instead? Paste your own provider key in Settings and it joins the picker.
+        </p>
+      </section>
+
+      <section class="section faq" id="faq">
+        <div class="section-head">
+          <span class="eyebrow">Questions</span>
+          <h2>The honest answers</h2>
+        </div>
+        <div class="faq-list">
+          <details>
+            <summary>Is it actually free, or free until it isn't?</summary>
+            <p>
+              There is no account, no API key and no credit system in this build — nothing to turn off
+              later. The models come from a published free tier, and the app shows them as they really
+              are: when one stops being free, the row stops answering rather than sending you an invoice.
+            </p>
+          </details>
+          <details>
+            <summary>Why does macOS warn me before it opens?</summary>
+            <p>
+              The .dmg is built on a laptop, not signed and notarised by a company — that is an Apple
+              Developer account and a pipeline this project has not paid for yet. Right-click the app →
+              Open the first time and Gatekeeper leaves it alone after that.
+            </p>
+          </details>
+          <details>
+            <summary>What do I need to run it?</summary>
+            <p>
+              An Apple silicon Mac on macOS 12 or newer. It is a native Tauri app — the download is
+              9 MB and the installed app is 16 MB on disk, because it is a Rust host drawing into the
+              system's own web view rather than a bundled Chromium. Windows is next and not ready; the
+              button in the header says so rather than lying.
+            </p>
+          </details>
+          <details>
+            <summary>Can it wreck my files?</summary>
+            <p>
+              It works in a folder you picked, and nothing outside it. Every change is a hunk you can
+              read in the review panel, and a run keeps a before-image journal, so reverting puts the
+              folder back the way it was — including files it created.
+            </p>
+          </details>
+          <details>
+            <summary>Does it phone home?</summary>
+            <p>
+              No analytics, no crash reporting, no usage beacon — that row in Settings says "not built"
+              because it isn't. What leaves your machine is the text of the run, to whichever model
+              service is answering it, and the pages it opens.
+            </p>
+          </details>
+          <details>
+            <summary>Will it work on a plane?</summary>
+            <p>
+              The free models are a cloud tier, so they need a connection. The app can also run a
+              downloaded model on the machine itself — slower, dumber, entirely offline — from the same
+              picker.
+            </p>
+          </details>
+          <details>
+            <summary>Why Rust and not Electron?</summary>
+            <p>
+              Because the loop is the product. The tool runner, the patch applier, the browser bridge
+              and the diff engine are native code, so a run spends its time thinking rather than
+              redrawing a window.
+            </p>
+          </details>
+        </div>
+      </section>
+
       <section class="cta">
         <h2>Start your first run in a minute</h2>
         <p>Download, open, pick a free model, describe the task. That's the whole setup.</p>
@@ -256,22 +500,37 @@
             </svg>
             FreeCode
           </span>
-          <p>The desktop agent that runs on free models.</p>
+          <p>The desktop agent that runs on free models. Rust host, native window, no subscription.</p>
         </div>
         <div class="footer-col">
           <h4>Product</h4>
-          <a href="#download">Download</a>
+          <a href="#download">Download for macOS</a>
+          <a href="#work">What a run leaves</a>
+          <a href="#how">How a run goes</a>
           <a href="#features">Features</a>
-          <a href="https://github.com/antontuzov/FreeCode/releases">Releases</a>
+          <a href="#models">Free models</a>
+        </div>
+        <div class="footer-col">
+          <h4>Capabilities</h4>
+          <a href="#features">Agent tool loop</a>
+          <a href="#features">Browser control</a>
+          <a href="#features">Pixel checks</a>
+          <a href="#features">Live terminal</a>
+          <a href="#faq">Revert &amp; journals</a>
         </div>
         <div class="footer-col">
           <h4>Project</h4>
           <a href="https://github.com/antontuzov/FreeCode">GitHub</a>
           <a href="https://github.com/antontuzov/FreeCode/issues">Issues</a>
+          <a href="https://github.com/antontuzov/FreeCode/releases">Releases</a>
+          <a href="https://github.com/antontuzov/FreeCode/releases/latest">Latest .dmg</a>
           <a href="https://opencode.ai">Powered by OpenCode free models</a>
         </div>
       </div>
-      <p class="footer-line">© 2026 FreeCode — free as in free models.</p>
+      <p class="footer-line">
+        © 2026 FreeCode — free as in free models. Not affiliated with OpenCode, NVIDIA, DeepSeek or the
+        other makers named on this page.
+      </p>
     </footer>
 
     <script src="assets/site.js"></script>

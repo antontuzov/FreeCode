@@ -234,3 +234,75 @@
     draw(performance.now());
   });
 })();
+
+// The demo panel walks its own three tabs until a visitor takes over, so the section reads as a run
+// in progress rather than a screenshot. The first click wins and the timer is dropped.
+(function () {
+  var tabs = document.querySelectorAll(".demo-tab");
+  var panels = document.querySelectorAll(".demo-panel");
+  if (tabs.length < 2 || !panels.length) return;
+
+  function show(name) {
+    Array.prototype.forEach.call(tabs, function (tab) {
+      var on = tab.dataset.panel === name;
+      tab.classList.toggle("is-on", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    Array.prototype.forEach.call(panels, function (panel) {
+      panel.classList.toggle("is-on", panel.dataset.panel === name);
+    });
+  }
+
+  Array.prototype.forEach.call(tabs, function (tab) {
+    tab.addEventListener("click", function () {
+      stop();
+      show(tab.dataset.panel);
+    });
+  });
+
+  var timer = 0;
+  function stop() {
+    if (timer) clearInterval(timer);
+    timer = 0;
+  }
+
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  var at = 0;
+  timer = setInterval(function () {
+    if (document.hidden) return;
+    at = (at + 1) % tabs.length;
+    show(tabs[at].dataset.panel);
+  }, 5200);
+})();
+
+// Cards and steps lift in once, the first time their section is on screen. The hidden state only
+// exists while JS has said it can finish the job, so a page without IntersectionObserver simply
+// shows everything.
+(function () {
+  if (!("IntersectionObserver" in window)) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  var items = document.querySelectorAll(".work-card, .how-steps li, .model-list li");
+  if (!items.length) return;
+
+  document.documentElement.classList.add("reveal");
+  Array.prototype.forEach.call(items, function (el, i) {
+    el.style.transitionDelay = (i % 6) * 45 + "ms";
+  });
+
+  var seen = new IntersectionObserver(
+    function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("is-in");
+        seen.unobserve(entry.target);
+      });
+    },
+    { rootMargin: "0px 0px -8% 0px" },
+  );
+
+  Array.prototype.forEach.call(items, function (el) {
+    seen.observe(el);
+  });
+})();
