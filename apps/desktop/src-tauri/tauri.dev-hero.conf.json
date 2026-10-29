@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "devUrl": "http://localhost:5173/?ask=Build%20a%20one-page%20shift-work%20board%20for%20trade%20workers%20as%20a%20single%20index.html%20in%20the%20project%20folder%3A%20a%20sticky%20header%2C%20a%20hero%20holding%20a%20search%20field%2C%20six%20shift%20cards%20showing%20trade%2C%20pay%20and%20location%2C%20and%20a%20footer.%20Keep%20the%20CSS%20and%20the%20filter%20script%20inside%20that%20same%20file%2C%20and%20keep%20the%20whole%20page%20under%20about%20200%20lines."
+  }
+}
