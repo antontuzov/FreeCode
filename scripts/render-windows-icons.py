@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """Render the Windows face of the app — the Square tile set, the Store logo and icon.ico.
 
-Every icon in the bundle was derived from `source.png`, the drawn bonsai: the macOS Dock repaints
-itself with a duck at launch (`brand.rs`), but Windows has no such repaint, so a Windows user's only
-face of the app is the one baked at build time — a tree. This script bakes the duck instead:
+`pnpm icon` cuts the whole platform set from `source.png`, and it cuts the Windows tiles with the
+macOS shape: a rounded square on transparent margin. Windows masks nothing, and a tile that carries
+its own rounding shows the desktop through the corners. This script bakes the Windows shape instead:
 
-* one of the three themed logos is rolled at random — the same compositions the Dock tiles and the
+* the tile is a full-bleed square with no rounded corners;
+* the face is the forest theme — the same composition the macOS icon, the Dock tiles and the
   installer art are cut from, so a Windows user, a macOS user and the installer are looking at the
-  same brand. "Random logo" is a property of the build, said up front, because a bundled icon cannot
-  change after install;
-* the tile is the Windows shape: a full-bleed square with no rounded corners, where the macOS tiles
-  round themselves and sit on transparent margin. Windows masks nothing, and a tile that carries its
-  own rounding shows the desktop through the corners;
+  same brand. The bundle wears one face: a bundled icon cannot change after install, so the duck
+  the Dock rolls at launch is the only part of the brand that moves;
 * the ground, the spotlight and the head are `scripts/theme_logos.py`'s, drawn here at the size the
   bundle needs.
 
@@ -24,7 +22,6 @@ It writes the nine Square tiles, `StoreLogo.png` and `icon.ico` into
 """
 
 from pathlib import Path
-import random
 import sys
 
 from PIL import Image
@@ -34,6 +31,9 @@ import theme_logos
 MASCOTS = Path("apps/desktop/src/assets/mascots")
 ICONS = Path("apps/desktop/src-tauri/icons")
 PREVIEW = Path("/tmp/windows-icons-preview.png")
+# The theme the bundle wears: the forest ground the window opens on, so the tile and the window are
+# the same picture. See the docstring for why it is fixed rather than rolled.
+THEME = "forest"
 # The size the tile is drawn at once; every written size is a downsample of this, because drawing
 # the feathered edges at 16px directly would alias them into noise.
 RENDER = 1024
@@ -45,10 +45,9 @@ ICO = [16, 24, 32, 48, 64, 128, 256]
 
 def main() -> int:
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd()
-    name = random.SystemRandom().choice(list(theme_logos.THEMES))
-    spec = theme_logos.THEMES[name]
+    spec = theme_logos.THEMES[THEME]
     head = theme_logos.matte(Image.open(root / MASCOTS / f"mascot-{spec['duck']:02d}.webp"))
-    print(f"rolled the {name} logo (duck {spec['duck']})")
+    print(f"baked the {THEME} logo (duck {spec['duck']})")
 
     big = theme_logos.compose(theme_logos.ground(RENDER, spec), head)
     out = root / ICONS

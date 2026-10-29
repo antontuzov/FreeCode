@@ -1,0 +1,27 @@
+{
+  "title": "FreeCode",
+  "icon": "apps/desktop/src-tauri/icons/icon.icns",
+  "background": "apps/desktop/src-tauri/icons/dmg-background.png",
+  "icon-size": 128,
+  "window": {
+    "position": { "x": 100, "y": 100 },
+    "size": { "width": 660, "height": 400 }
+  },
+  "format": "UDZO",
+  "filesystem": "HFS+",
+  "contents": [
+    {
+      "x": 180,
+      "y": 190,
+      "type": "file",
+      "path": "target/release/bundle/macos/FreeCode.app"
+    },
+    {
+      "x": 480,
+      "y": 190,
+      "type": "link",
+      "path": "/Applications",
+      "name": "Applications"
+    }
+  ]
+}

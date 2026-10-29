@@ -3,19 +3,23 @@ name: release
 # A tag push builds the app on a macOS arm64 runner and publishes FreeCode.dmg as a GitHub release
 # asset — the name the landing page's download button points at.
 #
-# The bundle is built as a bare .app and the image is made with hdiutil rather than Tauri's DMG
+# The bundle is built as a bare .app and the image is made by dmgbuild rather than Tauri's DMG
 # step: that step drives Finder through AppleScript to lay the window out, which a headless runner
-# cannot do. Consequently the image carries no background art or icon positions; it does carry an
-# /Applications alias so the app can be dragged across.
+# cannot do. dmgbuild writes the same layout itself — the .DS_Store that positions the icons and
+# sizes the window, the background art, the /Applications alias and the volume's own icon — so the
+# mounted image opens on the app's mark and the usual drag-to-install gesture has somewhere to go.
 #
-# Two things here are load-bearing and were both missing in v0.1.2:
+# Three things here are load-bearing and were all missing in v0.1.2:
 #
 #  1. `codesign --force --deep --sign -` BEFORE the image is made. Tauri's `--bundles app` leaves the
 #     binary linker-signed with no _CodeSignature/CodeResources, and macOS then treats the bundle as
 #     damaged ("code has no resources but signature indicates they must be present"): Finder draws it
 #     crossed out and Gatekeeper refuses it. An ad-hoc signature fixes the seal. It is still not
 #     notarised, so the first launch is right-click -> Open.
-#  2. `hdiutil verify` after create. A truncated or malformed image should fail the job, not ship.
+#  2. The volume icon. A plain `hdiutil create` leaves the disk with the generic drive glyph in the
+#     window's title bar; dmgbuild writes the app's mark into the volume, so the download carries
+#     one face from the landing page's button to the app inside it.
+#  3. `hdiutil verify` after create. A truncated or malformed image should fail the job, not ship.
 
 on:
   push:
@@ -55,18 +59,16 @@ jobs:
 
       - name: make the dmg the landing page downloads
         run: |
-          APP="target/release/bundle/macos/FreeCode.app"
-          STAGE="target/release/bundle/dmg/stage"
+          python3 -m venv .dmgvenv
+          .dmgvenv/bin/pip install --quiet dmgbuild==1.6.7
           OUT="target/release/bundle/dmg/FreeCode.dmg"
-          rm -rf "$STAGE" "$OUT"
-          mkdir -p "$STAGE"
-          cp -R "$APP" "$STAGE/FreeCode.app"
-          ln -s /Applications "$STAGE/Applications"
-          hdiutil create -volname "FreeCode" -srcfolder "$STAGE" -ov -format UDZO "$OUT"
+          rm -rf "$OUT" "$OUT.sha256"
+          mkdir -p "$(dirname "$OUT")"
+          .dmgvenv/bin/python -m dmgbuild -s apps/desktop/src-tauri/dmg.json FreeCode "$OUT"
           hdiutil verify "$OUT"
           shasum -a 256 "$OUT" | awk '{print $1 "  FreeCode.dmg"}' > "$OUT.sha256"
           cat "$OUT.sha256"
-          rm -rf "$STAGE"
+          rm -rf .dmgvenv
 
       - uses: softprops/action-gh-release@v2
         with:

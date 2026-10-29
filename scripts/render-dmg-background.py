@@ -2,11 +2,12 @@
 """Render the DMG background — the first thing a new download opens on.
 
 The installer window is the app's shop front, so it carries the app: the deep forest ground the window
-opens in, the mint accent, and the same themed logo tile the Dock rolls at launch. The install window
-and the app it installs show one face, which is the whole point of the art.
+opens in, the mint accent, and the app's own mark. The install window and the app it installs show one
+face, which is the whole point of the art — and that face is the mark the volume icon and the app's
+bundle carry, not one of the mascots the Dock rolls at launch.
 
-* a rolled themed logo (tiles 15–17, the compositions `render-duck-theme-logos.py` cuts), top centre,
-  on a soft shadow so a dark ground tile keeps its outline on the dark background;
+* the app's mark (`icons/source.png`, the duck the bundle icon is cut from), top centre, on a soft
+  shadow so a dark ground tile keeps its outline on the dark background;
 * the "FreeCode" wordmark under it, in the interface's own cream;
 * the arrow on the line the two icon slots sit on, and "Drag to Applications" under them.
 
@@ -23,7 +24,6 @@ Run from the repository root:
 """
 
 from pathlib import Path
-import random
 import sys
 
 import numpy as np
@@ -31,7 +31,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 import theme_logos
 
-MASCOTS = Path("apps/desktop/src/assets/mascots")
+MARK = Path("apps/desktop/src-tauri/icons/source.png")
 OUT = Path("apps/desktop/src-tauri/icons/dmg-background.png")
 PREVIEW = Path("/tmp/dmg-background-preview.png")
 # tauri.conf.json's dmg windowSize, rendered at 2x and downsampled so the type stays crisp.
@@ -44,10 +44,9 @@ FOLDER_SLOT = (480, 190)
 # Finder's icon size in the volume window, which the bundler sets to 128; the drawn header and note
 # keep clear of the boxes `y 190±64` the two icons occupy.
 SLOT = 128
-# The logo tile: the three themed logos, rolled per run so each build ships a different face. It and
-# the wordmark have to live in the 126px band above the icons, so the tile is small enough to leave
+# The mark tile: the app's own icon, the same one the bundle carries and the volume shows. It and the
+# wordmark have to live in the 126px band above the icons, so the tile is small enough to leave
 # room for the name under it.
-LOGOS = (15, 16, 17)
 TILE = 88
 TILE_TOP = 16
 CORNER = 0.225
@@ -76,7 +75,7 @@ def font(size: int, bold: bool) -> ImageFont.FreeTypeFont:
 
 
 def logo_tile(path: Path, side: int) -> tuple[Image.Image, int]:
-    """The rolled logo as the rounded square the installer draws, its corners cut and a soft shadow
+    """The app's mark as the rounded square the installer draws, its corners cut and a soft shadow
     under it — a tile on a ground of the same family would otherwise sink into the background.
 
     Returns the plate and the transparent margin it carries, so the caller can place the *tile* where
@@ -111,8 +110,6 @@ def arrow(draw: ImageDraw.ImageDraw, x0: int, x1: int, y: int, width: int, fill)
 
 def main() -> int:
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd()
-    number = random.SystemRandom().choice(LOGOS)
-    print(f"rolled themed logo {number}")
 
     w, h = W * SS, H * SS
     ramp = np.linspace(0.0, 1.0, h)[:, None, None]
@@ -131,7 +128,7 @@ def main() -> int:
     # The face and the name, in the band above the icons. Both are placed by their top edge and sit
     # clear of the icons' boxes horizontally, so the title neither hides behind an icon nor floats off
     # the centre line.
-    tile, margin = logo_tile(root / MASCOTS / f"mascot-{number:02d}.webp", TILE * SS)
+    tile, margin = logo_tile(root / MARK, TILE * SS)
     img.alpha_composite(tile, ((w - tile.width) // 2, TILE_TOP * SS - margin))
     title = font(28 * SS, bold=True)
     name = "FreeCode"

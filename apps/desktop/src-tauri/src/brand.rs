@@ -1,9 +1,9 @@
 //! The duck this launch wears, decided once by the host and read by everyone else.
 //!
 //! The mascot already picked one of the twelve at random, but only inside the webview, so the Dock
-//! tile stayed the build-time bonsai in `icons/icon.icns`: the running app showed a duck and its own
-//! tile showed a tree. The pick therefore moved here, and the window asks the host for the number
-//! rather than rolling its own.
+//! tile stayed the one duck baked into the bundle at `icons/icon.icns`: the running app could show
+//! any of the twelve and its own tile always showed the forest one. The pick therefore moved here,
+//! and the window asks the host for the number rather than rolling its own.
 //!
 //! Settings › Appearance can pin one of the set instead of rolling, which is the same number stored
 //! in the settings document; the roll is what happens when nothing is pinned.
@@ -14,7 +14,8 @@
 //!   `setApplicationIconImage`, so it happens on macOS and nowhere else. Linux and Windows keep the
 //!   built icon.
 //! * A tile chosen at every launch cannot be baked into a bundle, so Finder's icon for the app on
-//!   disk stays the drawn bonsai. Only the running app's Dock tile is the mascot.
+//!   disk is the forest duck, not the tile this launch rolled. Only the running app's Dock tile is
+//!   the rolled mascot.
 //!
 //! The ducks are 256px round PNGs on transparent margin — the Dock clips nothing, so a square tile
 //! would show black corners among the app's own icons — and they are compiled into the binary rather
