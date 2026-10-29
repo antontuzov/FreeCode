@@ -387,9 +387,9 @@
       <section class="section models" id="models">
         <div class="section-head">
           <span class="eyebrow">The free list</span>
-          <h2>Eleven models, one picker, no bill</h2>
+          <h2>Eight models, one picker, no bill</h2>
           <p>
-            These are the rows this build ships with, rechecked against the free tier on 27 October
+            These are the rows this build ships with, rechecked against the free tier on 29 October
             2026. Switch mid-task — the run keeps its context and the report says which one answered.
           </p>
         </div>
@@ -400,17 +400,16 @@
           <li><b>Beam</b><span>Beam</span><em>free</em></li>
           <li><b>Flint 40B</b><span>Flint</span><em>free</em></li>
           <li><b>MiMo-V2.6-Flash</b><span>MiMo</span><em>free</em></li>
-          <li><b>Nemotron 3 Ultra</b><span>NVIDIA</span><em>free</em></li>
           <li><b>Nemotron 3.5 Lightning</b><span>NVIDIA</span><em>free</em></li>
           <li><b>Nemotron 3.5 Super VL</b><span>NVIDIA</span><em>vision</em></li>
-          <li><b>MiniMax M3.1 Flash</b><span>MiniMax</span><em>free</em></li>
-          <li><b>LongCat 2.5 Preview</b><span>LongCat</span><em>free</em></li>
           <li class="more"><b>Whatever the tier publishes next</b><span>ships with the app</span></li>
         </ul>
         <p class="models-note">
           A free tier is someone else's infrastructure, so the app does not pretend it is permanent:
           when a model stops being free its row stops being pickable, instead of quietly billing you.
-          Want a paid model instead? Paste your own provider key in Settings and it joins the picker.
+          The tier is served by OpenCode's local service — FreeCode starts it for you, and says so
+          plainly on a Mac that does not have OpenCode yet. Want a paid model instead? Paste your own
+          provider key in Settings and it joins the picker.
         </p>
       </section>
 
@@ -439,10 +438,12 @@
           <details>
             <summary>What do I need to run it?</summary>
             <p>
-              An Apple silicon Mac on macOS 12 or newer. It is a native Tauri app — the download is
-              9 MB and the installed app is 16 MB on disk, because it is a Rust host drawing into the
-              system's own web view rather than a bundled Chromium. Windows is next and not ready; the
-              button in the header says so rather than lying.
+              An Apple silicon Mac on macOS 12 or newer, and OpenCode — the app whose local service
+              answers the free models. FreeCode starts that service itself; if OpenCode is not
+              installed yet, the first free turn says so instead of failing silently. The download
+              here is 9 MB and the installed app is 16 MB on disk, because it is a Rust host drawing
+              into the system's own web view rather than a bundled Chromium. Windows is next and not
+              ready; the button in the header says so rather than lying.
             </p>
           </details>
           <details>
@@ -482,7 +483,7 @@
 
       <section class="cta">
         <h2>Start your first run in a minute</h2>
-        <p>Download, open, pick a free model, describe the task. That's the whole setup.</p>
+        <p>Download, open, pick a free model, describe the task. That's the whole setup — the app starts OpenCode's service for you.</p>
         <a class="btn btn-primary" href="https://github.com/antontuzov/FreeCode/releases/latest/download/FreeCode.dmg">
           Download for macOS
         </a>

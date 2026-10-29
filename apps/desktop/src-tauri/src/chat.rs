@@ -1123,7 +1123,7 @@ fn free_choice(settings: &Settings) -> Result<(&'static FreeModel, u32), String>
 /// which is what an earlier build's gateway did, and why it is gone.
 async fn free_answer(app: &AppHandle, settings: &Settings) -> Result<Answer, String> {
     let (model, max_tokens) = free_choice(settings)?;
-    if let Some(service) = opencode::ready().await {
+    if let Some(service) = opencode::ensure().await {
         // Resolved here rather than per turn, because a session keeps the folder it opened with: what
         // the run is asked to change is decided once, and the review's paths are read against it.
         // A folder that cannot be read — deleted, or never picked and the default gone — leaves the
@@ -1140,11 +1140,12 @@ async fn free_answer(app: &AppHandle, settings: &Settings) -> Result<Answer, Str
             directory,
         }));
     }
-    // The first-run state of a build that defaults onto a free model, so this says what to start
+    // The first-run state of a build that defaults onto a free model, so this says what to install
     // rather than what the registry thinks of the row.
     Err(format!(
-        "{} is served by the free-model service on this Mac, which is not answering; open the \
-         FreeCode app and try again",
+        "{} is served by OpenCode's free-model service, which is not answering on this Mac. \
+         FreeCode starts it for you; if it does not come up, install OpenCode from opencode.ai and \
+         try again",
         model.label
     ))
 }

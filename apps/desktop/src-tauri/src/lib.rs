@@ -270,7 +270,9 @@ async fn clear_github_token() -> Result<bool, String> {
 /// the only way any of these models can be asked.
 #[tauri::command]
 async fn free_models_list() -> Result<Vec<free_models::FreeModelInfo>, String> {
-    let local = opencode::status().await.available;
+    // Asked before the list is drawn so the rows a first download shows are the state the turn will
+    // find: a service that is not up yet is started here rather than after the user has picked.
+    let local = opencode::ensure().await.is_some();
     Ok(free_models::infos(local))
 }
 
@@ -500,6 +502,10 @@ pub fn run() {
             // Before this process spawns a server of its own, so a leftover's port is free to be
             // chosen again and its memory is back before the first load.
             reap_leftover_servers();
+            // Free models answer through OpenCode's daemon, which may not be up yet on a machine
+            // that has just installed this app. Starting it here means the picker's rows are live
+            // by the time the window is drawn, instead of greyed out until the first send.
+            tauri::async_runtime::spawn(opencode::ensure());
             watch_signals(app.handle().clone());
             Ok(())
         })

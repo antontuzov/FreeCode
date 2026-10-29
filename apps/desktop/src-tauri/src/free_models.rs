@@ -1,6 +1,6 @@
 //! The free cloud models the picker offers, and the one service that answers them.
 //!
-//! The list is what `opencode models` prints under the `opencode/` provider, rechecked 2026-10-27
+//! The list is what `opencode models` prints under the `opencode/` provider, rechecked 2026-10-29
 //! against the CLI the OpenCode app ships. These are that service's own free models: every row is
 //! answered by the OpenCode app running on this Mac, which is the runtime they are reserved for, and
 //! the relay talks to it over loopback — see [`crate::opencode`].
@@ -72,11 +72,6 @@ pub fn models() -> &'static [FreeModel] {
             provider: "MiMo",
         },
         FreeModel {
-            id: "nemotron-3-ultra-free",
-            label: "Nemotron 3 Ultra",
-            provider: "NVIDIA",
-        },
-        FreeModel {
             id: "nemotron-3.5-lightning-free",
             label: "Nemotron 3.5 Lightning",
             provider: "NVIDIA",
@@ -85,16 +80,6 @@ pub fn models() -> &'static [FreeModel] {
             id: "nemotron-3.5-super-vl-free",
             label: "Nemotron 3.5 Super VL",
             provider: "NVIDIA",
-        },
-        FreeModel {
-            id: "minimax-m3.1-flash-free",
-            label: "MiniMax M3.1 Flash",
-            provider: "MiniMax",
-        },
-        FreeModel {
-            id: "longcat-2.5-preview-free",
-            label: "LongCat 2.5 Preview",
-            provider: "LongCat",
         },
     ]
 }
@@ -139,10 +124,10 @@ mod tests {
                 "{label} twice"
             );
         }
-        // What `opencode models` prints under the opencode/ provider, and nothing else: three rows
-        // the registry used to carry (Exo, MiMo 2.5, JEV) are not offered by the service and would
-        // have been rows that can only fail. LongCat left with them and came back, which is why the
-        // list is checked against the running service rather than kept from memory.
+        // What `opencode models` prints under the opencode/ provider, and nothing else: rows the
+        // service has stopped listing (Exo, MiMo 2.5, JEV, Nemotron 3 Ultra, MiniMax M3.1, LongCat
+        // 2.5) are rows that can only fail, so the list is checked against the running service
+        // rather than kept from memory.
         assert_eq!(
             ids,
             [
@@ -152,11 +137,8 @@ mod tests {
                 "beam-free",
                 "flint-40b-free",
                 "mimo-v2.6-flash-free",
-                "nemotron-3-ultra-free",
                 "nemotron-3.5-lightning-free",
                 "nemotron-3.5-super-vl-free",
-                "minimax-m3.1-flash-free",
-                "longcat-2.5-preview-free",
             ]
         );
     }

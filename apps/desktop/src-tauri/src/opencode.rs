@@ -11,6 +11,12 @@
 //! [`Service`] for the life of that turn, and is never logged, filed, returned over IPC, or written
 //! back. The state file is untrusted input: only a loopback address is accepted, because sending that
 //! password anywhere else would hand a local credential to whatever the file names.
+//!
+//! The daemon is started by OpenCode's own CLI when the app opens and wants to send something.
+//! Waiting for the user to launch a second app first was the whole failure of a first download: the
+//! free rows were there, disabled, with no control that could enable them. [`ensure`] runs the CLI
+//! that owns the service when the state file is missing or stale, which is the same thing the
+//! desktop app does at its own launch.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,6 +33,16 @@ pub const PROVIDER: &str = "opencode";
 /// How long a probe may wait. The daemon answers `/api/info` in a millisecond or two on a live
 /// machine; this bound only decides how long a status poll waits when it is not there at all.
 const PROBE_TIMEOUT: Duration = Duration::from_millis(900);
+
+/// How long the CLI may spend starting the daemon before it is called failed.
+const START_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long to keep looking for the state file the CLI writes once it has been run. The CLI starts
+/// a daemon and exits; the file appears within a second of that exit on this machine.
+const START_WAIT: Duration = Duration::from_secs(8);
+
+/// Where a user (or a test) points this module at a CLI that is not in any of the usual places.
+const CLI_ENV: &str = "FREECODE_OPENCODE_CLI";
 
 /// How long the service may take to acknowledge a prompt before the turn is called failed.
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -133,8 +149,9 @@ pub fn service() -> Result<Service, String> {
     let path = state_file()
         .ok_or("this machine has no home directory to find the free-model service in")?;
     let raw = std::fs::read_to_string(&path).map_err(|_| {
-        "the free-model service on this Mac is not running, so the free models are not reachable. \
-         Start it once from the free-models app, or pick another free model."
+        "the free-model service on this Mac is not running yet, so the free models are not \
+         reachable. FreeCode starts it for you; if the rows stay greyed out, install OpenCode from \
+         opencode.ai and try again."
             .to_string()
     })?;
     parse_state(&raw)
@@ -154,6 +171,129 @@ pub async fn ready() -> Option<Service> {
     };
     REACHABLE.store(answered, Ordering::Relaxed);
     answered.then_some(service)
+}
+
+/// The service, starting it when it is not up yet.
+///
+/// This is what a free turn and the picker's row state go through. Probing first keeps the ordinary
+/// "it is already running" case at one round trip; only a missing daemon pays for the CLI. One
+/// caller starts it at a time — the status poll and a send can arrive together — and the others wait
+/// on the same state file rather than racing a second daemon.
+pub async fn ensure() -> Option<Service> {
+    if let Some(service) = ready().await {
+        return Some(service);
+    }
+    if STARTING.swap(true, Ordering::SeqCst) {
+        return wait_for_service().await;
+    }
+    let outcome = match command_line() {
+        Some(cli) => start(&cli).await,
+        None => Err(
+            "OpenCode is not installed on this Mac, and it is the runtime the free models are \
+             served to. Install it from opencode.ai, then pick a free model again."
+                .to_string(),
+        ),
+    };
+    if let Err(why) = outcome {
+        eprintln!("the free-model service did not start: {why}");
+    }
+    let service = wait_for_service().await;
+    STARTING.store(false, Ordering::SeqCst);
+    service
+}
+
+/// Whether a start is already running, so two callers do not launch two daemons.
+static STARTING: AtomicBool = AtomicBool::new(false);
+
+/// Where OpenCode's CLI is normally found, in the order the app looks.
+///
+/// The desktop application ships the CLI inside its bundle and does not put it on `PATH`, so a user
+/// who installed OpenCode the normal way has a working free tier without a terminal.
+fn cli_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(path) = std::env::var_os(CLI_ENV).filter(|value| !value.is_empty()) {
+        candidates.push(PathBuf::from(path));
+    }
+    candidates.push(PathBuf::from(
+        "/Applications/OpenCode.app/Contents/Resources/opencode-cli",
+    ));
+    if let Some(home) = std::env::var_os("HOME").filter(|value| !value.is_empty()) {
+        let home = PathBuf::from(home);
+        candidates.push(home.join("Applications/OpenCode.app/Contents/Resources/opencode-cli"));
+        candidates.push(home.join(".opencode").join("bin").join("opencode"));
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        candidates.extend(std::env::split_paths(&path).map(|dir| dir.join("opencode")));
+    }
+    candidates
+}
+
+fn command_line() -> Option<PathBuf> {
+    first_file(cli_candidates())
+}
+
+fn first_file(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+/// Run the CLI's own `service start`, the command the desktop app runs at launch.
+///
+/// Its output goes to a file rather than a pipe: the daemon it spawns may inherit the handle, and a
+/// piped stdout would then be held open after the CLI has exited, hanging the wait that follows.
+async fn start(cli: &Path) -> Result<(), String> {
+    let log = std::env::temp_dir().join("freecode-opencode-service.log");
+    let sink = std::fs::File::create(&log)
+        .map_err(|why| format!("could not open {}: {why}", log.display()))?;
+    let status = tokio::time::timeout(
+        START_TIMEOUT,
+        tokio::process::Command::new(cli)
+            .args(["service", "start"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::from(sink))
+            .kill_on_drop(true)
+            .status(),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "{} did not finish starting the free-model service within {}s",
+            cli.display(),
+            START_TIMEOUT.as_secs()
+        )
+    })?
+    .map_err(|why| format!("could not run {}: {why}", cli.display()))?;
+    if status.success() {
+        return Ok(());
+    }
+    let detail = std::fs::read_to_string(&log).unwrap_or_default();
+    let detail: String = detail
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty())
+        .unwrap_or_default()
+        .chars()
+        .take(300)
+        .collect();
+    Err(if detail.is_empty() {
+        format!("{} exited with {status}", cli.display())
+    } else {
+        format!("{} exited with {status}: {detail}", cli.display())
+    })
+}
+
+/// Poll until the CLI's state file answers, or the start window closes.
+async fn wait_for_service() -> Option<Service> {
+    let deadline = Instant::now() + START_WAIT;
+    loop {
+        if let Some(service) = ready().await {
+            return Some(service);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// Ask whether the service answers, and answer with its version when it does.
@@ -914,6 +1054,28 @@ pub async fn stream_turn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cli_is_the_first_candidate_that_is_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let absent = dir.path().join("not-installed");
+        let present = dir.path().join("opencode");
+        std::fs::write(&present, b"#!/bin/sh\n").unwrap();
+        assert_eq!(
+            first_file(vec![absent, present.clone()]),
+            Some(present.clone())
+        );
+        assert_eq!(first_file(Vec::new()), None);
+    }
+
+    #[test]
+    fn the_desktop_app_bundle_is_one_of_the_places_looked_in() {
+        let bundle = PathBuf::from("/Applications/OpenCode.app/Contents/Resources/opencode-cli");
+        assert!(
+            cli_candidates().contains(&bundle),
+            "the copy inside OpenCode.app is the one a normal install leaves"
+        );
+    }
 
     #[test]
     fn the_state_file_must_point_at_this_machine() {

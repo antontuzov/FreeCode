@@ -18,7 +18,7 @@ the service or the host actually measured.
 
 | Route | Who answers | What it needs |
 | --- | --- | --- |
-| **Free — OpenCode** (default) | The eleven free models OpenCode publishes, Big Pickle first | The OpenCode app installed and running on this Mac |
+| **Free — OpenCode** (default) | The eight free models OpenCode publishes, Big Pickle first | OpenCode installed on this Mac; FreeCode starts its service |
 | **Local — PrismML Bonsai** | Ternary Bonsai 1.7B, 4B and 27B | Apple Silicon; the engine and weights are downloaded in the app |
 | **Remote** (optional) | Any OpenAI-compatible endpoint | An HTTPS base URL and a key, both chosen in Settings |
 
@@ -31,10 +31,12 @@ to this machine: a route that is not available refuses the turn and says what is
 OpenCode's free models are served only to OpenCode's own runtime. FreeCode is that runtime's client,
 not a way around it: the turn is relayed through the daemon the OpenCode app keeps on loopback, using
 the handshake its gateway expects. Nothing is scraped, no credential is invented, and the app does not
-bundle OpenCode — it uses the copy already on the Mac.
+bundle OpenCode — it uses the copy already on the Mac, and runs that copy's `service start` when its
+daemon is not up yet. A machine without OpenCode gets a refusal that names the one download it needs,
+not a set of free rows that can never answer.
 
 The list is what `opencode models` prints under its own provider — read from the CLI the installed app
-ships (v2.1.3) on 2026-10-27. The service hands out the list, so it moves without an app update, and a
+ships (v2.2.0) on 2026-10-29. The service hands out the list, so it moves without an app update, and a
 release can add rows the pinned registry does not carry yet.
 
 | Model id | Label | Carrier |
@@ -45,11 +47,8 @@ release can add rows the pinned registry does not carry yet.
 | `beam-free` | Beam | Beam |
 | `flint-40b-free` | Flint 40B | Flint |
 | `mimo-v2.6-flash-free` | MiMo-V2.6-Flash | MiMo |
-| `nemotron-3-ultra-free` | Nemotron 3 Ultra | NVIDIA |
 | `nemotron-3.5-lightning-free` | Nemotron 3.5 Lightning | NVIDIA |
 | `nemotron-3.5-super-vl-free` | Nemotron 3.5 Super VL | NVIDIA |
-| `minimax-m3.1-flash-free` | MiniMax M3.1 Flash | MiniMax |
-| `longcat-2.5-preview-free` | LongCat 2.5 Preview | LongCat |
 
 **The default is free.** A settings document that never picked a model — and had not already chosen a
 remote provider — is migrated onto Big Pickle once; a new conversation opens on it, and a free turn
@@ -154,8 +153,8 @@ endpoint has neither, so its own defaults apply.
 - macOS on Apple Silicon. CI, Metal, the pinned engine asset and the hardware detection were all built
   and verified here; the lock records Intel, Windows and Linux targets, but nothing has been run on
   them.
-- The [OpenCode](https://opencode.ai) app for the free route. FreeCode checks for its service and says
-  when it is not answering.
+- The [OpenCode](https://opencode.ai) app for the free route. FreeCode starts its service itself and
+  says when OpenCode is not installed.
 - Rust stable with `rustfmt` and `clippy`.
 - Node 22 or newer, and pnpm 11 through corepack (`packageManager` is pinned in the root manifest).
 
@@ -166,7 +165,8 @@ pnpm install
 pnpm app:dev
 ```
 
-Start OpenCode once; the free tier is the default and the first prompt is answered on Big Pickle. For
+Install OpenCode once; the free tier is the default and the first prompt is answered on Big Pickle —
+the app starts the service for you. For
 the local route, start the server from the engine card, download a pack, and pick it in the
 composer's model pill. To build the app bundle: `pnpm app:build`.
 
