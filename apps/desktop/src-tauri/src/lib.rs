@@ -26,6 +26,7 @@ mod shell;
 mod status;
 mod storage;
 mod undo;
+mod update;
 pub mod verify_native;
 mod weights;
 
@@ -401,6 +402,8 @@ pub fn run() {
             storage_report,
             // Which machine that is, and which build is running on it.
             diagnostics_report,
+            // Whether a newer build of the app has been published. Asked for, never polled.
+            update::check_for_update,
             install_engine,
             download_weights,
             load_appearance,

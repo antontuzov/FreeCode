@@ -907,6 +907,20 @@ export type DiagnosticsReport = {
   blocker: ModelStatus["blocked"];
 };
 
+/** The published release next to the running build's own version. */
+export type UpdateState = {
+  /** The version of the running bundle. */
+  current: string;
+  /** The version of the published release. */
+  latest: string;
+  /** Whether the published release is newer than this build. */
+  available: boolean;
+  /** Where the newer build is downloaded from. */
+  url: string;
+  /** When the release was published, when the feed says so. */
+  publishedAt: string | null;
+};
+
 export const ipc = {
   modelStatus: () => invoke<ModelStatus>("model_status"),
   /** Every model and packing the catalog pins, with the ones on this machine marked. */
@@ -918,6 +932,13 @@ export const ipc = {
   storageReport: () => invoke<StorageReport>("storage_report"),
   /** Which machine this is and which build is on it, assembled by the same probe the status card reads. */
   diagnosticsReport: () => invoke<DiagnosticsReport>("diagnostics_report"),
+  /**
+   * Whether a newer build of the app has been published.
+   *
+   * One request, made when the user asks for it: the host polls nothing, and the request carries
+   * the running version and nothing else.
+   */
+  checkForUpdate: () => invoke<UpdateState>("check_for_update"),
   /** Fetch and unpack the pinned fork engine. Progress arrives on `onEngineInstall`. */
   installEngine: () => invoke<InstallOutcome>("install_engine"),
   onEngineInstall: (onProgress: (progress: EngineInstallProgress) => void): Promise<() => void> =>

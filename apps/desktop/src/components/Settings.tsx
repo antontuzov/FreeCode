@@ -1,7 +1,7 @@
 // Settings, laid out control-for-control against docs/reference-ui/01-03: a searchable grouped nav
 // on the left, and one page of labelled cards on the right. Every row here binds to a field the
 // host actually persists — a setting with no storage is not rendered.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   AccentSwatch,
@@ -19,6 +19,7 @@ import {
   Toggle,
 } from "./controls";
 import { Icon, type IconName } from "./icons";
+import { ExternalLink } from "./ExternalLink";
 import { MASCOT_TILES, MascotMark, launchTile } from "./BrandMark";
 import { has, translate, type Locale } from "../i18n";
 import { version } from "../../package.json";
@@ -31,8 +32,10 @@ import {
   type StorageArea,
   type StorageReport,
   type TrashedSession,
+  type UpdateState,
 } from "../lib/ipc";
 import { SHORTCUTS, shortcutLabel } from "../lib/shortcuts";
+import { updateDescription } from "../lib/update";
 import { useModel } from "../state/model";
 import { useOnboarding } from "../state/onboarding";
 import { effortReachesRoute, useSettings } from "../state/settings";
@@ -198,6 +201,7 @@ const CONTROLS: Record<Page, string[]> = {
     "diagModel",
     "diagEngine",
     "diagPacking",
+    "checkUpdate",
   ],
 };
 
@@ -1903,6 +1907,9 @@ function Diagnostics({ locale, t }: { locale: Locale; t: T }) {
   const [report, setReport] = useState<DiagnosticsReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
+  const [update, setUpdate] = useState<UpdateState | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
   const page = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1927,6 +1934,29 @@ function Diagnostics({ locale, t }: { locale: Locale; t: T }) {
     const id = window.setTimeout(() => setCopied("idle"), 1800);
     return () => window.clearTimeout(id);
   }, [copied]);
+
+  // One request, made when the user asks for it. The host polls nothing: this button is the only
+  // thing that sends anything, and what it sends is the running version and nothing else.
+  const check = useCallback(async () => {
+    setChecking(true);
+    setUpdateError(null);
+    try {
+      setUpdate(await ipc.checkForUpdate());
+    } catch (reason) {
+      setUpdate(null);
+      setUpdateError(String(reason));
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  // The development trigger behind `?update=1`: it asks once on mount, so a capture can show the
+  // answer on a machine where a click cannot be injected.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (new URLSearchParams(window.location.search).get("update") !== "1") return;
+    void check();
+  }, [check]);
 
   if (error) {
     return (
@@ -2011,6 +2041,31 @@ function Diagnostics({ locale, t }: { locale: Locale; t: T }) {
         {row("diagVersion", report.appVersion)}
         {row("diagSystem", report.system)}
         {pathRow("diagRoot", report.root)}
+      </Section>
+
+      <Section label={t("section.diagUpdates")} description={t("section.diagUpdates.desc")}>
+        <Row title={t("row.checkUpdate")} description={t("row.checkUpdate.desc")}>
+          <button type="button" className="field" disabled={checking} onClick={() => void check()}>
+            {checking ? t("update.checking") : t("update.check")}
+          </button>
+        </Row>
+        {update && (
+          <Row title={t("update.published")} description={updateDescription(update, t, locale)}>
+            {update.available && (
+              <ExternalLink
+                url={update.url}
+                locale={locale}
+                label={t("update.get", { version: update.latest })}
+              />
+            )}
+          </Row>
+        )}
+        {updateError && (
+          <Row
+            title={t("update.published")}
+            description={t("update.failed", { error: updateError })}
+          />
+        )}
       </Section>
 
       <Section label={t("section.diagMachine")} description={t("section.diagMachine.desc")}>
