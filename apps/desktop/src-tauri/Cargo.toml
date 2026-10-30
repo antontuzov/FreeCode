@@ -1,6 +1,6 @@
 [package]
 name = "freecode-desktop"
-description = "FreeCode desktop host: the Tauri v2 shell that exposes the Rust catalog, engine guard and agent core to the React UI"
+description = "FreeCode desktop host: the Tauri v2 shell that exposes the free-model registry and agent core to the React UI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,7 +18,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 freecode-config = { workspace = true }
-freecode-models = { workspace = true }
 freecode-llama = { workspace = true }
 freecode-core = { workspace = true }
 # The tool round runs the registry's read-only executors, so the host needs the sandbox policy and

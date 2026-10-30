@@ -66,7 +66,6 @@ const STARTED: AgentEvent = {
   runId: "run-1",
   modelLabel: "Bonsai",
   local: true,
-  engine: true,
   maxRounds: 4,
   plan: false,
 };

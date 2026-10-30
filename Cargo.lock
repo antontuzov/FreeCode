@@ -1211,7 +1211,6 @@ dependencies = [
  "freecode-config",
  "freecode-core",
  "freecode-llama",
- "freecode-models",
  "freecode-tools",
  "keyring",
  "objc2",

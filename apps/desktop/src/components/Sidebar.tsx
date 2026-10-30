@@ -369,8 +369,6 @@ export type SidebarActions = {
   newTask: () => void;
   /** Put the search over the shell. */
   openPalette: () => void;
-  /** Open the Knowledge Center: the catalog and this machine's share of it. */
-  openKnowledge: () => void;
   /** Open the Extensions page: the tools the agent is offered, and which of them this build runs. */
   openExtensions: () => void;
 };
@@ -610,15 +608,9 @@ export function Sidebar({
         <span className="flex-1" />
         {/* Folded, the row loses its words but not its face: the mascot is the one glyph in the rail
             that says which app this window belongs to. */}
-        <button
-          type="button"
-          aria-label={translate(locale, "sidebar.localUser")}
-          title={translate(locale, "sidebar.knowledgeAbout")}
-          className="icon-btn"
-          onClick={() => actions.openKnowledge()}
-        >
+        <span className="icon-btn" title={translate(locale, "sidebar.localUser")}>
           <MascotMark size={20} />
-        </button>
+        </span>
         <button
           type="button"
           aria-label={translate(locale, "sidebar.settings")}
@@ -783,15 +775,10 @@ export function Sidebar({
 
       <div className="flex items-center gap-1 border-t border-line p-[var(--space-2)]">
         {/* The reference's footer is an identity row, and pressing it opens the menu rather than a
-            page: the six appearance decisions live one click from wherever the person is, and the two
-            rows that leave the menu — the catalog this machine holds, and the full Settings page — are
-            both destinations this build has. The face on the row is the mascot the window and the Dock
-            wear, which Appearance can pin. */}
-        <IdentityMenu
-          locale={locale}
-          onOpenSettings={onOpenSettings}
-          onOpenKnowledge={() => actions.openKnowledge()}
-        />
+            page: the six appearance decisions live one click from wherever the person is, and the
+            one row that leaves the menu is the full Settings page. The face on the row is the mascot
+            the window and the Dock wear, which Appearance can pin. */}
+        <IdentityMenu locale={locale} onOpenSettings={onOpenSettings} />
         <button
           type="button"
           aria-label={translate(locale, "sidebar.settings")}

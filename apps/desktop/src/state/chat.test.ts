@@ -206,7 +206,6 @@ describe("the event channel", () => {
       runId: "r1",
       modelLabel: "Bonsai",
       local: true,
-      engine: true,
       maxRounds: 2,
       plan: false,
     });

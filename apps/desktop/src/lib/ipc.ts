@@ -21,27 +21,13 @@ export const hostMascot: number | null = (() => {
     : null;
 })();
 
-/** A packing the app can offer, as chosen for this machine by the catalog + hardware probe. */
-export type PackView = {
-  key: string;
-  file: string;
-  bitsPerWeight: number;
-  sizeGb: number;
-  selected: boolean;
-  viable: boolean;
-  reason: string;
-};
-
+/**
+ * Which route answers the next prompt, as the host resolves it. Two routes exist: the free tier
+ * served by OpenCode's service on this Mac, and — only when the user selected it — a remote provider.
+ * There is no local engine, so there is no packing, load or release row.
+ */
 export type ModelStatus = {
-  catalogId: string;
-  displayName: string;
-  repoId: string;
-  backend: string;
-  engineTag: string;
-  engineInstalled: boolean;
-  weightsPresent: boolean;
-  local: boolean;
-  /** Set when Remote is the selected source; the local engine rows are then not what answers. */
+  /** Set when Remote is the selected source; the free tier is then not what answers. */
   remote: {
     baseUrl: string;
     model: string;
@@ -51,7 +37,7 @@ export type ModelStatus = {
     /** Whether the address and model are present. A turn also needs consent and a saved key. */
     configured: boolean;
   } | null;
-  /** Set when a free model is the selected source; the local engine rows are then not what answers. */
+  /** Set when the free tier answers; `null` would mean no pick and no remote source. */
   free: {
     id: string;
     label: string;
@@ -62,21 +48,6 @@ export type ModelStatus = {
    * a probe of this machine, not a setting: the picker's rows go live when it is true.
    */
   opencode: { available: boolean; version: string | null };
-  packing: string;
-  sizeGb: number;
-  warnings: string[];
-  /** Caveats whose condition the host could not evaluate, so they may not apply to this machine. */
-  uncheckedWarnings: string[];
-  packs: PackView[];
-  /** Set when the load-guard refuses to run: the refusal's code plus the one action that clears it. */
-  blocked:
-    | (BlockedInfo & {
-        /** The host can clear this refusal itself by fetching the pinned engine. */
-        installable: boolean;
-        /** The host can clear this refusal itself by downloading the chosen pack. */
-        downloadable: boolean;
-      })
-    | null;
 };
 
 /**
@@ -98,48 +69,6 @@ export type OpenCodeStatus = {
   available: boolean;
   version: string | null;
 };
-
-/**
- * The engine the host fetched and unpacked, and where the launcher must point.
- * Mirrors `freecode_desktop_lib::engine::InstallOutcome`.
- */
-export type InstallOutcome = {
-  tag: string;
-  targetKey: string;
-  asset: string;
-  sha256: string;
-  serverPath: string;
-};
-
-/** `freecode_llama::install::Phase`, emitted on the `engine-install` event while an install runs. */
-export type EngineInstallProgress =
-  | { phase: "downloading"; transferredBytes: number; totalBytes: number }
-  | { phase: "unpacking" }
-  | { phase: "done"; installed: InstallOutcome & { dir: string } };
-
-/**
- * The pack that ended up on disk. Mirrors `freecode_desktop_lib::weights::Downloaded`.
- * `path` is where the load guard will read the weights from, so it is shown rather than assumed.
- */
-export type WeightsDownloaded = {
-  catalogId: string;
-  packing: string;
-  file: string;
-  sha256: string;
-  path: string;
-  sizeBytes: number;
-  /**
-   * The vision projector that came down with this pack, by name. Absent when the model publishes none
-   * and when this machine already had it — a picture cannot be answered without the file, so a press
-   * that fetched it says so instead of leaving the user to work out which of the two the button did.
-   */
-  projector?: string;
-};
-
-/** `freecode_desktop_lib::weights::Phase`, emitted on the `weights-download` event. */
-export type WeightsProgress =
-  | { phase: "downloading"; transferredBytes: number; totalBytes: number }
-  | { phase: "done"; downloaded: WeightsDownloaded };
 
 export type ThemeMode = "light" | "dark" | "system";
 /** The interface styles, in the order the Appearance page cards them. One list rather than four:
@@ -204,12 +133,6 @@ export type AppearanceState = {
    * The host owns the Dock tile, so the pin lives on the wire rather than only in the page. */
   appIcon: number | null;
 };
-
-/** Host event carrying `EngineInstallProgress`; must match `engine::PROGRESS_EVENT` in Rust. */
-export const ENGINE_INSTALL_EVENT = "engine-install";
-
-/** Host event carrying `WeightsProgress`; must match `weights::PROGRESS_EVENT` in Rust. */
-export const WEIGHTS_DOWNLOAD_EVENT = "weights-download";
 
 /* ---- the live engine and its streamed replies ---- */
 
@@ -402,10 +325,6 @@ export type AgentEvent =
       runId: string;
       modelLabel: string;
       local: boolean;
-      /** The supervised local engine answers this run. A remote provider and the OpenCode service run
-       * on this machine too, so `local` is true for them as well; this is the flag that says a server
-       * has to be started before the first token. */
-      engine: boolean;
       maxRounds: number;
       plan: boolean;
     }
@@ -732,79 +651,6 @@ export type RevertResult = {
   why?: string;
 };
 
-/* ---- the Knowledge Center: the pinned catalog, and this machine's share of it ---- */
-
-/**
- * One packing the catalog pins, plus whether its file is in the weights directory. Mirrors
- * `knowledge::PackRow`. `onDisk` is a size check rather than a hash, for the reason given there.
- */
-export type CatalogPack = {
-  key: string;
-  file: string;
-  quantType: string;
-  bitsPerWeight: number;
-  sizeGb: number;
-  sizeBytes: number;
-  onDisk: boolean;
-  notes: string;
-};
-
-/**
- * A projector file the card publishes for images. Mirrors `knowledge::VisionRow`. It carries no
- * bits-per-weight because it is not a quantisation of the language model — it is the separate
- * network that maps picture embeddings in, so the catalog keeps it out of `CatalogPack`.
- */
-export type CatalogVisionPack = {
-  key: string;
-  file: string;
-  quantType: string;
-  sizeGb: number;
-  sizeBytes: number;
-  /** The card's own pick, which is a claim about the pack rather than a state of this machine. */
-  recommended: boolean;
-  onDisk: boolean;
-};
-
-/**
- * A known issue the model card records, quoted rather than judged: the host does not evaluate the
- * condition against this machine here, which is what separates this page from the status strip.
- * Mirrors `knowledge::CaveatRow`.
- */
-export type CatalogCaveat = {
-  condition: string;
-  symptom: string;
-  workaround: string;
-  severity: "moderate" | "severe" | "fatal";
-};
-
-/** Mirrors `knowledge::ModelCard`. */
-export type CatalogModel = {
-  id: string;
-  name: string;
-  repoId: string;
-  repoUrl: string;
-  license: string;
-  baseModel: string;
-  architecture: string;
-  contextLength: number;
-  packs: CatalogPack[];
-  /** The projector files for image input, empty for a model whose card publishes none. */
-  vision: CatalogVisionPack[];
-  caveats: CatalogCaveat[];
-  /** The catalog's own sizes summed over the packs marked present, so the figure cannot disagree
-   * with the rows above it. */
-  heldBytes: number;
-};
-
-/** Mirrors `knowledge::Center`. */
-export type KnowledgeCenter = {
-  catalogUpdated: string;
-  weightsDir: string;
-  engineTag: string;
-  engineInstalled: boolean;
-  models: CatalogModel[];
-};
-
 /* ---- the Extensions page: the tool registry as the agent is handed it ---- */
 
 /**
@@ -854,13 +700,10 @@ export type StorageArea = {
   present: boolean;
 };
 
-/** Mirrors `storage::Report`. `root` is the directory the free figure was read on — where the next pack would be written. */
+/** Mirrors `storage::Report`. `root` is the directory the app owns on this machine. */
 export type StorageReport = {
-  weights: StorageArea;
-  engine: StorageArea;
   sessions: StorageArea;
   totalBytes: number;
-  freeBytes: number;
   root: string;
 };
 
@@ -868,24 +711,7 @@ export type StorageReport = {
 export type DiagnosticsReport = {
   appVersion: string;
   system: string;
-  backend: string;
-  /** What the GPU probe named, when it reached one. */
-  chip: string | null;
-  totalRamBytes: number;
-  /** Absent on unified-memory machines, where `totalRamBytes` is also what the GPU sees. */
-  gpuRamBytes: number | null;
-  /** The vector set an x86 probe settled on; null where the question is not asked. */
-  simd: string | null;
   root: string;
-  engineTag: string;
-  engineInstalled: boolean;
-  model: string;
-  repoId: string;
-  packing: string;
-  sizeGb: number;
-  warnings: string[];
-  uncheckedWarnings: string[];
-  blocker: ModelStatus["blocked"];
 };
 
 /** The published release next to the running build's own version. */
@@ -904,14 +730,11 @@ export type UpdateState = {
 
 export const ipc = {
   modelStatus: () => invoke<ModelStatus>("model_status"),
-  /** Every model and packing the catalog pins, with the ones on this machine marked. */
-  knowledgeCenter: () => invoke<KnowledgeCenter>("knowledge_center"),
   /** Every tool the agent is offered, with the current approvals and sandbox applied to each row. */
   extensionsInventory: () => invoke<ExtensionInventory>("extensions_inventory"),
-  /** The three directories this app writes into, measured from the files on disk, plus the room the
-   * volume has left. The walk is over gigabytes, so the page asks once and shows what comes back. */
+  /** The conversations this app has filed, measured from the files on disk. */
   storageReport: () => invoke<StorageReport>("storage_report"),
-  /** Which machine this is and which build is on it, assembled by the same probe the status card reads. */
+  /** Which machine this is and which build is on it. */
   diagnosticsReport: () => invoke<DiagnosticsReport>("diagnostics_report"),
   /**
    * Whether a newer build of the app has been published.
@@ -920,14 +743,6 @@ export const ipc = {
    * the running version and nothing else.
    */
   checkForUpdate: () => invoke<UpdateState>("check_for_update"),
-  /** Fetch and unpack the pinned fork engine. Progress arrives on `onEngineInstall`. */
-  installEngine: () => invoke<InstallOutcome>("install_engine"),
-  onEngineInstall: (onProgress: (progress: EngineInstallProgress) => void): Promise<() => void> =>
-    listen<EngineInstallProgress>(ENGINE_INSTALL_EVENT, (event) => onProgress(event.payload)),
-  /** Fetch the packing the status strip chose. Progress arrives on `onWeightsDownload`. */
-  downloadWeights: () => invoke<WeightsDownloaded>("download_weights"),
-  onWeightsDownload: (onProgress: (progress: WeightsProgress) => void): Promise<() => void> =>
-    listen<WeightsProgress>(WEIGHTS_DOWNLOAD_EVENT, (event) => onProgress(event.payload)),
   loadAppearance: () => invoke<AppearanceState>("load_appearance"),
   /** The host answers with what it stored, including a refreshed `resolvedMode`. */
   saveAppearance: (appearance: AppearanceState) =>

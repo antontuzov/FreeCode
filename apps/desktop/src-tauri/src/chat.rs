@@ -1646,9 +1646,6 @@ pub async fn chat_send(
             // turn talks only to this machine's OpenCode service, and a remote one only to the
             // address the user configured.
             local: answer.is_local(),
-            // Nothing is paged into memory on either route: there is no supervised server left to
-            // start, and the service is already running.
-            engine: false,
             // Zero says this run has no rounds to spend, which is what the step pill reads as "do not
             // draw me" — a plain chat does not have a budget, and a pill saying `Step 0 / 0` over it
             // would be a counter of something that cannot happen. The service's route is the other one

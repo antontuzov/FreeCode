@@ -51,7 +51,6 @@ const PATHS = {
      not stacked at its middle with air above and below. */
   checklist: "M4 4h4.75v4.75H4zM12 6.4h8M12 11.7h8M4 15l2 2.2 4.1-4.8M12 17.3h8",
   workspace: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
-  knowledge: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 3v17",
   sites: "M3 5h18v14H3zM3 10h18M8 5v5",
   automations:
     "M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",

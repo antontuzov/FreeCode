@@ -337,10 +337,9 @@ function TurnRow({
       ) : waiting ? (
         <p className="flex items-center gap-2 text-fine text-muted">
           <span className="dot-running" aria-hidden />
-          {/* Only the supervised engine spends this wait loading weights. A remote provider and the
-              OpenCode service answer a request that is already on the wire, and saying otherwise
-              would blame this machine for a wait that is not its. */}
-          {translate(locale, turn.engine === false ? "chat.waiting" : "chat.starting")}
+          {/* Every route answers a request that is already on the wire, so this wait is the round
+              trip and never a load. */}
+          {translate(locale, "chat.waiting")}
         </p>
       ) : null}
       {turn.stopped && (

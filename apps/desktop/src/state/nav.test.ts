@@ -23,11 +23,8 @@ describe("the stack", () => {
   it("walks back and forward along what was opened", () => {
     const nav = useNav.getState();
     nav.push({ kind: "settings", page: "appearance" });
-    nav.push({ kind: "knowledge", model: "ternary-bonsai-1-7b" });
-    expect(currentView(useNav.getState())).toEqual({
-      kind: "knowledge",
-      model: "ternary-bonsai-1-7b",
-    });
+    nav.push({ kind: "extensions" });
+    expect(currentView(useNav.getState())).toEqual({ kind: "extensions" });
 
     expect(useNav.getState().back()).toBe(true);
     expect(currentView(useNav.getState())).toEqual({ kind: "settings", page: "appearance" });
@@ -38,10 +35,7 @@ describe("the stack", () => {
     expect(useNav.getState().forward()).toBe(true);
     expect(currentView(useNav.getState())).toEqual({ kind: "settings", page: "appearance" });
     expect(useNav.getState().forward()).toBe(true);
-    expect(currentView(useNav.getState())).toEqual({
-      kind: "knowledge",
-      model: "ternary-bonsai-1-7b",
-    });
+    expect(currentView(useNav.getState())).toEqual({ kind: "extensions" });
     expect(useNav.getState().forward()).toBe(false);
   });
 
@@ -59,21 +53,21 @@ describe("the stack", () => {
   it("forgets the branch ahead when a new link is followed from behind it", () => {
     useNav.getState().push({ kind: "settings", page: "appearance" });
     useNav.getState().back();
-    useNav.getState().push({ kind: "knowledge", model: "m" });
+    useNav.getState().push({ kind: "extensions" });
 
     expect(useNav.getState().history).toHaveLength(2);
-    expect(currentView(useNav.getState())).toEqual({ kind: "knowledge", model: "m" });
+    expect(currentView(useNav.getState())).toEqual({ kind: "extensions" });
     expect(useNav.getState().forward()).toBe(false);
   });
 
   it("caps the stack without losing the way back to where the window is", () => {
-    for (let i = 0; i < 50; i += 1) useNav.getState().push({ kind: "knowledge", model: `m${i}` });
+    for (let i = 0; i < 50; i += 1) useNav.getState().push({ kind: "settings", page: `p${i}` });
 
     const state = useNav.getState();
     expect(state.history).toHaveLength(40);
     expect(state.cursor).toBe(39);
-    expect(currentView(state)).toEqual({ kind: "knowledge", model: "m49" });
-    expect(state.history[0]).toEqual({ kind: "knowledge", model: "m10" });
+    expect(currentView(state)).toEqual({ kind: "settings", page: "p49" });
+    expect(state.history[0]).toEqual({ kind: "settings", page: "p10" });
   });
 });
 
@@ -119,23 +113,13 @@ describe("deep links", () => {
     expect(state.cursor).toBe(1);
   });
 
-  it("opens a model's knowledge page", async () => {
-    const state = await seeded("?knowledge=ternary-bonsai-1-7b");
-    expect(currentView(state)).toEqual({ kind: "knowledge", model: "ternary-bonsai-1-7b" });
-  });
-
-  it("reads ?knowledge=1 as the landing page rather than as a model named 1", async () => {
-    const state = await seeded("?knowledge=1");
-    expect(currentView(state)).toEqual({ kind: "knowledge", model: "" });
-  });
-
   it("opens the Extensions surface", async () => {
     const state = await seeded("?extensions=1");
     expect(currentView(state)).toEqual({ kind: "extensions" });
   });
 
   it("lets a settings capture win over the other surfaces in the same URL", async () => {
-    const state = await seeded("?settings=appearance&knowledge=ternary-bonsai-1-7b");
+    const state = await seeded("?settings=appearance&extensions=1");
     expect(currentView(state)).toEqual({ kind: "settings", page: "appearance" });
     expect(state.history).toHaveLength(2);
   });

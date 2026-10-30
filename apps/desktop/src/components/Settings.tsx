@@ -23,7 +23,7 @@ import { ExternalLink } from "./ExternalLink";
 import { MASCOT_TILES, MascotMark, launchTile } from "./BrandMark";
 import { has, translate, type Locale } from "../i18n";
 import { version } from "../../package.json";
-import { formatBytes, formatMemory } from "../lib/bytes";
+import { formatBytes } from "../lib/bytes";
 import {
   ipc,
   INTERFACE_STYLES,
@@ -38,7 +38,7 @@ import { SHORTCUTS, shortcutLabel } from "../lib/shortcuts";
 import { updateDescription } from "../lib/update";
 import { useModel } from "../state/model";
 import { useOnboarding } from "../state/onboarding";
-import { effortReachesRoute, useSettings } from "../state/settings";
+import { useSettings } from "../state/settings";
 
 const PAGE_IDS = [
   "appearance",
@@ -152,19 +152,7 @@ const CONTROLS: Record<Page, string[]> = {
     "githubToken",
   ],
   model: ["remoteSource", "remoteBaseUrl", "remoteModel", "remoteContext", "remoteKey"],
-  reasoning: [
-    "effort",
-    "nonThinking",
-    "maxTokens",
-    "contextTokens",
-    "temperature",
-    "topP",
-    "topK",
-    "minP",
-    "presencePenalty",
-    "repetitionPenalty",
-    "systemPrompt",
-  ],
+  reasoning: ["maxTokens", "systemPrompt"],
   shortcuts: [
     "shortcutNewTask",
     "shortcutPalette",
@@ -175,21 +163,8 @@ const CONTROLS: Record<Page, string[]> = {
     "shortcutReview",
     "shortcutEscape",
   ],
-  storage: ["storageWeights", "storageEngine", "storageSessions", "storageFree"],
-  diagnostics: [
-    "diagVersion",
-    "diagSystem",
-    "diagRoot",
-    "diagBackend",
-    "diagChip",
-    "diagMemory",
-    "diagGpuMemory",
-    "diagSimd",
-    "diagModel",
-    "diagEngine",
-    "diagPacking",
-    "checkUpdate",
-  ],
+  storage: ["storageSessions"],
+  diagnostics: ["diagVersion", "diagSystem", "diagRoot", "checkUpdate"],
 };
 
 // The list is the ipc module's, because the footer's Theme submenu sells exactly these eight.
@@ -522,7 +497,7 @@ function Help({ t }: { t: T }) {
             <>
               <dt className="text-faint">{t("help.model")}</dt>
               <dd className="mb-[var(--space-2)] text-fg">
-                {status.remote?.model || status.free?.label || status.displayName}
+                {status.remote?.model || status.free?.label}
               </dd>
               <dt className="text-faint">{t("help.route")}</dt>
               <dd className="mb-[var(--space-2)] text-fg">
@@ -1533,33 +1508,9 @@ function Model({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
 
 function Reasoning({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
   const s = doc.sampling;
-  const active = s.nonThinkingMode ? s.instruct : s.thinking;
   return (
     <>
       <Section label={t("section.reasoning")}>
-        <Row
-          title={t("row.effort")}
-          // The listed routes answer without this field, so the page must not describe a choice
-          // the next run will keep when it cannot.
-          description={t(effortReachesRoute(doc) ? "row.effort.desc" : "row.effort.descNonLocal")}
-        >
-          <Select
-            label={t("row.effort")}
-            value={s.effort}
-            options={(["auto", "low", "medium", "xhigh", "none"] as const).map((v) => ({
-              value: v,
-              label: t(`opt.${v}`),
-            }))}
-            onChange={(v) => set((d) => void (d.sampling.effort = v))}
-          />
-        </Row>
-        <Row title={t("row.nonThinking")} description={t("row.nonThinking.desc")}>
-          <Toggle
-            on={s.nonThinkingMode}
-            label={t("row.nonThinking")}
-            onChange={(v) => set((d) => void (d.sampling.nonThinkingMode = v))}
-          />
-        </Row>
         <Row title={t("row.maxTokens")} description={t("row.maxTokens.desc")}>
           <NumberField
             label={t("row.maxTokens")}
@@ -1570,52 +1521,6 @@ function Reasoning({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
             onChange={(v) => set((d) => void (d.sampling.budget.maxTokens = v))}
           />
         </Row>
-        <Row title={t("row.contextTokens")} description={t("row.contextTokens.desc")}>
-          <NumberField
-            label={t("row.contextTokens")}
-            value={s.budget.contextTokens}
-            min={4096}
-            max={262144}
-            step={1024}
-            onChange={(v) => set((d) => void (d.sampling.budget.contextTokens = v))}
-          />
-        </Row>
-      </Section>
-
-      <Section
-        label={t("section.sampling")}
-        description={t("section.sampling.desc", {
-          mode: t(s.nonThinkingMode ? "opt.instruct" : "opt.thinking"),
-        })}
-      >
-        {(
-          [
-            ["temperature", 0.01],
-            ["topP", 0.01],
-            ["topK", 1],
-            ["minP", 0.01],
-            ["presencePenalty", 0.1],
-            ["repetitionPenalty", 0.05],
-          ] as const
-        ).map(([key, step]) => (
-          <Row key={key} title={t(`row.${key}`)} description={t(`row.${key}.desc`)}>
-            <NumberField
-              label={t(`row.${key}`)}
-              value={active[key]}
-              min={0}
-              max={key === "topK" ? 200 : 40}
-              step={step}
-              onChange={(v) =>
-                set((d) => {
-                  const profile = d.sampling.nonThinkingMode
-                    ? d.sampling.instruct
-                    : d.sampling.thinking;
-                  profile[key] = v;
-                })
-              }
-            />
-          </Row>
-        ))}
       </Section>
 
       <Section label={t("section.systemPrompt")}>
@@ -1632,14 +1537,12 @@ function Reasoning({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
 }
 
 /**
- * What this app has put on the machine, and what the volume behind it has left.
+ * What this app has put on the machine.
  *
  * The one Settings page that reads nothing from the settings document, because none of these figures
- * are preferences: they are the filesystem, measured by the host as the page opens. And the one page
- * with no control on it. A "Clear weights" button would act on a directory the app does not own — the
- * Model page lets a path be typed into `modelDir`, and whatever sits there may be the user's own
- * files — so the page states what is there rather than offering to change it. The free-space figure is
- * the same probe a download is refused by, which makes it the one number here a user would act on.
+ * are preferences: they are the filesystem, measured by the host as the page opens. The app downloads
+ * no model files — every answer comes from the free route — so the only directory worth reporting is
+ * the one holding the conversations it filed.
  */
 function Storage({ t }: { t: T }) {
   const [report, setReport] = useState<StorageReport | null>(null);
@@ -1688,23 +1591,11 @@ function Storage({ t }: { t: T }) {
         label={t("section.storageFiles")}
         description={t("section.storageFiles.desc", { size: formatBytes(report.totalBytes) })}
       >
-        <Row title={t("row.storageWeights")} description={report.weights.dir}>
-          {figure(held(report.weights))}
-        </Row>
-        <Row title={t("row.storageEngine")} description={report.engine.dir}>
-          {figure(held(report.engine))}
-        </Row>
         <Row
           title={t("row.storageSessions")}
           description={report.sessions.dir || t("row.storageSessions.noDir")}
         >
           {figure(held(report.sessions))}
-        </Row>
-      </Section>
-
-      <Section label={t("section.storageFree")}>
-        <Row title={t("row.storageFree")} description={t("row.storageFree.desc")}>
-          {figure(formatBytes(report.freeBytes))}
         </Row>
       </Section>
 
@@ -1913,19 +1804,6 @@ function Diagnostics({ locale, t }: { locale: Locale; t: T }) {
     <Row key={key} title={t(`row.${key}`)} description={path} />
   );
 
-  // The unchecked ones are marked here rather than hidden: this is the surface a user reads before
-  // pasting the report into a bug thread, and a caveat about another machine is still a caveat about
-  // the pin, which is what the thread is about.
-  const notices = [
-    ...(report.blocker
-      ? [
-          `${translate(locale, `blocker.${report.blocker.code}.title`)} — ${report.blocker.technical}`,
-        ]
-      : []),
-    ...report.warnings,
-    ...report.uncheckedWarnings.map((w) => `${w} (${t("diag.unverified")})`),
-  ];
-
   async function copy() {
     const root = page.current;
     if (!root || !report) return;
@@ -1946,7 +1824,6 @@ function Diagnostics({ locale, t }: { locale: Locale; t: T }) {
         [
           `${t("diag.heading", { version: report.appVersion })} · ${new Date().toLocaleString()}`,
           ...facts,
-          ...notices,
         ].join("\n"),
       );
       setCopied("done");
@@ -1988,41 +1865,6 @@ function Diagnostics({ locale, t }: { locale: Locale; t: T }) {
             description={t("update.failed", { error: updateError })}
           />
         )}
-      </Section>
-
-      <Section label={t("section.diagMachine")} description={t("section.diagMachine.desc")}>
-        {row("diagBackend", report.backend)}
-        {row("diagChip", report.chip ?? t("row.diagChip.none"))}
-        {row("diagMemory", formatMemory(report.totalRamBytes))}
-        {row(
-          "diagGpuMemory",
-          report.gpuRamBytes === null
-            ? t("row.diagGpuMemory.shared")
-            : formatMemory(report.gpuRamBytes),
-        )}
-        {row("diagSimd", report.simd ?? t("row.diagSimd.none"))}
-      </Section>
-
-      <Section label={t("section.diagRun")} description={t("section.diagRun.desc")}>
-        {row("diagModel", `${report.model} · ${report.repoId}`)}
-        {row("diagEngine", report.engineInstalled ? report.engineTag : t("row.diagEngine.missing"))}
-        {row("diagPacking", `${report.packing} · ${report.sizeGb.toFixed(2)} GB`)}
-      </Section>
-
-      <Section label={t("section.diagNotices")} description={t("section.diagNotices.desc")}>
-        <div className="diag-notices">
-          {notices.length === 0 ? (
-            <p className="text-quiet text-muted">{t("diag.nothing")}</p>
-          ) : (
-            <ul className="flex flex-col gap-[var(--space-2)]">
-              {notices.map((notice) => (
-                <li key={notice} className="text-quiet text-warning">
-                  {notice}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
       </Section>
 
       <button

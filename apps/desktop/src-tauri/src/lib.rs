@@ -1,9 +1,9 @@
 //! FreeCode's Tauri host.
 //!
 //! The crate's only jobs are to expose the Rust side to React and to keep that surface honest: the
-//! UI never computes a packing choice, an engine path or a refusal — it asks, and this host answers
-//! from `freecode-models` / `freecode-llama` / `freecode-config`. Commands are `async` so the blocking
-//! hardware probe and header parse run on the async runtime instead of the event-loop thread.
+//! UI never computes a route or a refusal — it asks, and this host answers from `freecode-config`
+//! and the free-model registry. Commands are `async` so the blocking probes run on the async runtime
+//! instead of the event-loop thread.
 
 mod agent;
 mod appearance;
@@ -11,11 +11,9 @@ mod brand;
 mod chat;
 mod clipboard;
 mod diagnostics;
-mod engine;
 mod extensions;
 mod free_models;
 mod github;
-mod knowledge;
 mod opencode;
 mod paths;
 mod preview;
@@ -27,17 +25,12 @@ mod status;
 mod storage;
 mod undo;
 mod update;
-pub mod verify_native;
-mod weights;
-
-use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager, Theme};
 use tauri_plugin_dialog::DialogExt;
 
 use appearance::AppearanceView;
 use freecode_config::Settings;
-use knowledge::Center;
 use status::ModelStatusView;
 
 /// `System` asks the webview; a fixed Light/Dark is honoured even if the OS disagrees.
@@ -47,20 +40,12 @@ fn os_prefers_light(app: &AppHandle) -> bool {
         .is_some_and(|theme| matches!(theme, Theme::Light))
 }
 
-pub(crate) fn root_and_settings(app: &AppHandle) -> Result<(PathBuf, Settings), String> {
-    let root = paths::workspace_root(Some(app))?;
-    Ok((root, appearance::load_settings()?))
-}
-
 #[tauri::command]
-async fn model_status(app: AppHandle) -> Result<ModelStatusView, String> {
-    let (root, settings) = root_and_settings(&app)?;
-    // Multi-GB directories and `sysctl` probes belong off the event loop.
-    let mut view = tauri::async_runtime::spawn_blocking(move || status::build(&root, &settings))
-        .await
-        .map_err(|e| format!("model status probe failed: {e}"))??;
+async fn model_status() -> Result<ModelStatusView, String> {
+    let settings = appearance::load_settings()?;
+    let mut view = status::build(&settings);
     // The local OpenCode service is the one thing on this card that is neither in the settings nor in
-    // the catalog: it is a process, so it is asked, and the answer rides on the status the window
+    // the registry: it is a process, so it is asked, and the answer rides on the status the window
     // already polls. A probe that fails is "not running", which is what the card says.
     let service = opencode::status().await;
     view.opencode = status::OpenCodeView {
@@ -70,51 +55,34 @@ async fn model_status(app: AppHandle) -> Result<ModelStatusView, String> {
     Ok(view)
 }
 
-/// The catalog as a page: every model and packing the pins name, and which of those files this
-/// machine holds. The Knowledge Center's only source.
-#[tauri::command]
-async fn knowledge_center(app: AppHandle) -> Result<Center, String> {
-    let (root, settings) = root_and_settings(&app)?;
-    tauri::async_runtime::spawn_blocking(move || Center::build(&root, &settings))
-        .await
-        .map_err(|e| format!("catalog listing failed: {e}"))?
-}
-
 /// The Extensions page: the tool registry as the agent is handed it, with the current approval dial
 /// and sandbox applied to every row by the same engine that decides a call mid-run.
 #[tauri::command]
 async fn extensions_inventory(app: AppHandle) -> Result<extensions::Inventory, String> {
     let settings = appearance::load_settings()?;
     // The folder a run's file calls are confined to, which is the project picked in Settings and not
-    // necessarily the directory this host unpacks its engine into.
+    // necessarily the directory this host keeps its own data in.
     let root = paths::project_root(Some(&app), &settings)?;
     tauri::async_runtime::spawn_blocking(move || extensions::Inventory::build(&root, &settings))
         .await
         .map_err(|e| format!("tool inventory failed: {e}"))
 }
 
-/// The Storage page: the three directories this host writes into, measured from the files on disk,
-/// and the room the volume behind them has left. The walk reads gigabytes of weights directory, so it
-/// is off the event loop for the same reason the hardware probe is.
+/// The Storage page: the conversations this host has filed, measured from the files on disk.
 #[tauri::command]
 async fn storage_report(app: AppHandle) -> Result<storage::Report, String> {
-    let (root, settings) = root_and_settings(&app)?;
-    tauri::async_runtime::spawn_blocking(move || storage::Report::build(&root, &settings))
+    let root = paths::workspace_root(Some(&app))?;
+    tauri::async_runtime::spawn_blocking(move || storage::Report::build(&root))
         .await
-        .map_err(|e| format!("storage report failed: {e}"))?
+        .map_err(|e| format!("storage report failed: {e}"))
 }
 
-/// The Diagnostics page: which machine this is and which build is running on it. Assembled the same
-/// way `model_status` is, so the two surfaces cannot report different figures for one probe.
+/// The Diagnostics page: which machine this is and which build is running on it.
 #[tauri::command]
 async fn diagnostics_report(app: AppHandle) -> Result<diagnostics::Report, String> {
-    let (root, settings) = root_and_settings(&app)?;
+    let root = paths::workspace_root(Some(&app))?;
     let version = app.package_info().version.to_string();
-    tauri::async_runtime::spawn_blocking(move || {
-        diagnostics::Report::build(&root, &settings, &version)
-    })
-    .await
-    .map_err(|e| format!("diagnostics report failed: {e}"))?
+    Ok(diagnostics::Report::build(&root, &version))
 }
 
 #[tauri::command]
@@ -124,21 +92,6 @@ async fn load_appearance(app: AppHandle) -> Result<AppearanceView, String> {
         &settings.appearance,
         os_prefers_light(&app),
     ))
-}
-
-/// Fetch the pinned fork engine and unpack it into `engines/`. Progress arrives on the
-/// `engine-install` event and the answer is the final state. One of the two fetches this app makes
-/// on the local-model path, and it only happens because the user pressed Install.
-#[tauri::command]
-async fn install_engine(app: AppHandle) -> Result<engine::InstallOutcome, String> {
-    engine::install_engine(&app).await
-}
-
-/// Download the packing the status strip chose into `models/`, resuming whatever is already in
-/// flight. Progress arrives on the `weights-download` event; the answer is the file that landed.
-#[tauri::command]
-async fn download_weights(app: AppHandle) -> Result<weights::Downloaded, String> {
-    weights::download_weights(&app).await
 }
 
 /// Persists the shell's controls and echoes what the host now believes, so the UI never keeps a
@@ -373,18 +326,14 @@ pub fn run() {
         .append_invoke_initialization_script(brand::init_script())
         .invoke_handler(tauri::generate_handler![
             model_status,
-            // What the catalog pins and what this machine has of it, for the Knowledge Center.
-            knowledge_center,
             // What the agent can reach and what this build runs, for the Extensions page.
             extensions_inventory,
-            // What this app has put on the machine, and what the machine has left.
+            // What this app has put on the machine.
             storage_report,
             // Which machine that is, and which build is running on it.
             diagnostics_report,
             // Whether a newer build of the app has been published. Asked for, never polled.
             update::check_for_update,
-            install_engine,
-            download_weights,
             load_appearance,
             save_appearance,
             load_settings,

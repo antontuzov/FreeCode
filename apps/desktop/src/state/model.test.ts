@@ -12,23 +12,9 @@ vi.mock("../lib/ipc", () => ({
 const mock = vi.mocked(ipc);
 
 const STATUS: ModelStatus = {
-  catalogId: "ternary-bonsai-1-7b",
-  displayName: "Ternary Bonsai 1.7B",
-  repoId: "prism-ml/Ternary-Bonsai-1.7B-gguf",
-  backend: "Metal",
-  engineTag: "prism-b10787-73bfe6c",
-  engineInstalled: true,
-  weightsPresent: true,
-  local: false,
   remote: null,
   free: { id: "big-pickle", label: "Big Pickle", provider: "OpenCode" },
   opencode: { available: true, version: "2.2.0" },
-  packing: "PQ2_0",
-  sizeGb: 0.46,
-  warnings: [],
-  uncheckedWarnings: [],
-  packs: [],
-  blocked: null,
 };
 
 describe("the model store", () => {

@@ -7,11 +7,7 @@
 // conversation two presses behind it.
 import { create } from "zustand";
 
-export type View =
-  | { kind: "chat" }
-  | { kind: "settings"; page: string }
-  | { kind: "knowledge"; model: string }
-  | { kind: "extensions" };
+export type View = { kind: "chat" } | { kind: "settings"; page: string } | { kind: "extensions" };
 
 /**
  * What the right-hand column is holding: the run's report, or the change it made. Shot 06 has the
@@ -26,8 +22,6 @@ function keyOf(view: View): string {
   switch (view.kind) {
     case "settings":
       return `settings:${view.page}`;
-    case "knowledge":
-      return `knowledge:${view.model}`;
     default:
       return view.kind;
   }
@@ -119,9 +113,9 @@ function query(name: string): string | null {
   return new URLSearchParams(window.location.search).get(name);
 }
 
-/** The deep links the native captures go through (`?settings=model`, `?knowledge=<id>`,
- * `?extensions=1`, `?sidebar=collapsed`, `?review=1`) seed the stack with the conversation underneath
- * them, which is where Esc from that capture would have gone. */
+/** The deep links the native captures go through (`?settings=model`, `?extensions=1`,
+ * `?sidebar=collapsed`, `?review=1`) seed the stack with the conversation underneath them, which is
+ * where Esc from that capture would have gone. */
 function seed(): {
   history: View[];
   cursor: number;
@@ -133,10 +127,7 @@ function seed(): {
 } {
   const history: View[] = [{ kind: "chat" }];
   const settings = query("settings");
-  const knowledge = query("knowledge");
   if (settings !== null) history.push({ kind: "settings", page: settings });
-  else if (knowledge !== null)
-    history.push({ kind: "knowledge", model: knowledge === "1" ? "" : knowledge });
   else if (query("extensions") !== null) history.push({ kind: "extensions" });
   return {
     history,

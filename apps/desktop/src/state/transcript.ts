@@ -222,9 +222,6 @@ export type Turn = {
   stopped?: boolean;
   /** The refusal badge on an answer that never came: the "Local" badge says what the run was. */
   local?: boolean;
-  /** The supervised local engine answers this run, so the wait is a load rather than a round trip.
-   * Absent on rows that were not announced, and on a reopened conversation, which draws no wait. */
-  engine?: boolean;
   /**
    * The run that wrote this answer was in plan mode: it read the workspace and proposed, and could
    * not write. A mode is not visible after the run ends unless the answer says so, and an answer that
@@ -741,7 +738,6 @@ function reduce(rows: Row[], event: AgentEvent): Row[] {
           text: "",
           streaming: true,
           local: event.local,
-          engine: event.engine,
           plan: event.plan || undefined,
         },
       ];

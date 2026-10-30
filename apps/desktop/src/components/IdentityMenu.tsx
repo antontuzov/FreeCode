@@ -59,11 +59,9 @@ type Group = {
 export function IdentityMenu({
   locale,
   onOpenSettings,
-  onOpenKnowledge,
 }: {
   locale: Locale;
   onOpenSettings: () => void;
-  onOpenKnowledge: () => void;
 }) {
   const a = useAppearance();
   const t = (key: string) => translate(locale, key);
@@ -189,20 +187,7 @@ export function IdentityMenu({
           </button>
         ))}
         <div className="menu-sep" />
-        {/* The two rows that leave the menu: both are pages this build has, which is why the
-            reference's "Changelog" and "Get the mobile app" have no counterparts here. */}
-        <button
-          type="button"
-          role="menuitem"
-          className="menu-row"
-          onClick={() => {
-            setOpen(false);
-            onOpenKnowledge();
-          }}
-        >
-          <Icon name="knowledge" size={14} className="shrink-0 text-muted" />
-          <span className="menu-label truncate">{t("sidebar.knowledge")}</span>
-        </button>
+        {/* The one row that leaves the menu: Settings is a page this build has. */}
         <button
           type="button"
           role="menuitem"

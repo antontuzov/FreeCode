@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 
 import { Extensions } from "./components/Extensions";
 import { Inspector } from "./components/Inspector";
-import { Knowledge } from "./components/Knowledge";
 import { ModelStatus } from "./components/ModelStatus";
 import { Onboarding } from "./components/Onboarding";
 import { Palette } from "./components/Palette";
@@ -45,8 +44,8 @@ export default function App() {
   const newTask = useChat((s) => s.newTask);
   // Which surface the window shows is the top of the navigation stack rather than a set of booleans:
   // the header's arrows move along it, a surface's own sub-page travels with its entry, and Esc leaves
-  // one step at a time. The deep links the captures go through (`?settings=model`, `?knowledge=<id>`,
-  // `?extensions=1`) seed the same stack in `state/nav.ts`, with the conversation underneath them.
+  // one step at a time. The deep links the captures go through (`?settings=model`, `?extensions=1`)
+  // seed the same stack in `state/nav.ts`, with the conversation underneath them.
   const view = useNav(currentView);
   const push = useNav((s) => s.push);
   const back = useNav((s) => s.back);
@@ -145,7 +144,6 @@ export default function App() {
     if (forcedSetup !== null || fixture) return;
     if (
       query("settings") !== null ||
-      query("knowledge") !== null ||
       query("extensions") !== null ||
       query("ask") !== null ||
       query("preview") !== null ||
@@ -378,20 +376,6 @@ export default function App() {
     );
   }
 
-  if (view.kind === "knowledge") {
-    return (
-      <>
-        <Knowledge
-          locale={locale}
-          page={view.model}
-          onOpen={(model) => push({ kind: "knowledge", model })}
-          onBack={back}
-        />
-        {setup}
-      </>
-    );
-  }
-
   if (view.kind === "extensions") {
     return (
       <>
@@ -412,7 +396,6 @@ export default function App() {
             actions={{
               newTask: () => void newTask(),
               openPalette: showPalette,
-              openKnowledge: () => push({ kind: "knowledge", model: "" }),
               openExtensions: () => push({ kind: "extensions" }),
             }}
           />
