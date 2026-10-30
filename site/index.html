@@ -14,6 +14,8 @@
       content="A Rust-native desktop agent on free models. It builds, it checks, it plays."
     />
     <meta property="og:type" content="website" />
+    <link rel="canonical" href="https://antontuzov.github.io/FreeCode/" />
+    <meta property="og:url" content="https://antontuzov.github.io/FreeCode/" />
     <meta name="theme-color" content="#0c1210" />
     <script>
       // Runs before the stylesheet so the chosen theme paints on the first frame. With no stored
@@ -464,9 +466,9 @@
           <details>
             <summary>Will it work on a plane?</summary>
             <p>
-              The free models are a cloud tier, so they need a connection. The app can also run a
-              downloaded model on the machine itself — slower, dumber, entirely offline — from the same
-              picker.
+              No. Every route in this build answers over the network: the free models are a cloud
+              tier, and a key you paste in Settings points at a remote endpoint too. There is no
+              downloaded model to fall back on — this build has none.
             </p>
           </details>
           <details>
