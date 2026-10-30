@@ -812,8 +812,10 @@ fn failure_words(reason: &str) -> String {
         || lower.contains("socket connection was closed")
         || lower.contains("socket hang up");
     if hung_up {
-        return "the free-model service's provider closed the connection before answering, so the \
-                free quota may be used up; try again later or pick another free model"
+        // No model is named here on purpose: measured across three of the registry's free models,
+        // the same reset arrived from each, so the pick is not what the user should change.
+        return "the free-model service's provider closed the connection before answering; its free \
+                capacity may be used up, so try again in a little while"
             .into();
     }
     reason.to_string()
@@ -1206,7 +1208,7 @@ mod tests {
                    information, pass `verbose: true` in the second argument to fetch()";
         let said = failure_words(raw);
         assert!(!said.contains("fetch()"));
-        assert!(said.contains("free quota"));
+        assert!(said.contains("free capacity"));
         assert_eq!(failure_words("rate limit reached"), "rate limit reached");
     }
 
