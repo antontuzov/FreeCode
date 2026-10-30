@@ -151,20 +151,7 @@ const CONTROLS: Record<Page, string[]> = {
     "telemetry",
     "githubToken",
   ],
-  model: [
-    "remoteSource",
-    "remoteBaseUrl",
-    "remoteModel",
-    "remoteContext",
-    "remoteKey",
-    "packing",
-    "modelDir",
-    "hfTokenEnv",
-    "offloadAllLayers",
-    "flashAttention",
-    "visionLazyLoad",
-    "dedicatedServerSlots",
-  ],
+  model: ["remoteSource", "remoteBaseUrl", "remoteModel", "remoteContext", "remoteKey"],
   reasoning: [
     "effort",
     "nonThinking",
@@ -534,14 +521,12 @@ function Help({ t }: { t: T }) {
           {status ? (
             <>
               <dt className="text-faint">{t("help.model")}</dt>
-              <dd className="mb-[var(--space-2)] text-fg">{status.displayName}</dd>
-              <dt className="text-faint">{t("help.engine")}</dt>
-              <dd className="mb-[var(--space-2)] font-mono text-fg">
-                {status.engineInstalled ? status.engineTag : t("help.engineMissing")}
+              <dd className="mb-[var(--space-2)] text-fg">
+                {status.remote?.model || status.free?.label || status.displayName}
               </dd>
-              <dt className="text-faint">{t("help.packing")}</dt>
-              <dd className="mb-[var(--space-2)] font-mono text-fg">
-                {status.packing} · {status.sizeGb} GB
+              <dt className="text-faint">{t("help.route")}</dt>
+              <dd className="mb-[var(--space-2)] text-fg">
+                {status.remote ? t("help.route.remote") : t("help.route.free")}
               </dd>
             </>
           ) : (
@@ -549,7 +534,7 @@ function Help({ t }: { t: T }) {
           )}
           <dt className="text-faint">{t("help.egress")}</dt>
           <dd className="text-muted">
-            {status?.local ? t("help.egress.local") : t("help.egress.remote")}
+            {status?.remote ? t("help.egress.remote") : t("help.egress.free")}
           </dd>
         </dl>
       )}
@@ -1478,17 +1463,7 @@ function KeyRow({
 }
 
 function Model({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
-  const m = doc.localModel;
   const remote = doc.remoteProvider;
-  const status = useModel((s) => s.status);
-  const packing = typeof m.packing === "string" ? "auto" : m.packing.forced;
-  const packOptions = [
-    { value: "auto", label: t("opt.auto") },
-    ...(status?.packs ?? []).map((p) => ({
-      value: p.key,
-      label: p.viable ? `${p.key} · ${p.sizeGb} GB` : `${p.key} — ${p.reason}`,
-    })),
-  ];
   return (
     <>
       <Section label={t("section.remote")} description={t("section.remote.desc")}>
@@ -1497,7 +1472,7 @@ function Model({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
             label={t("row.remoteSource")}
             value={remote.source}
             options={[
-              { value: "local", label: t("opt.local") },
+              { value: "local", label: t("opt.free") },
               { value: "remote", label: t("opt.remote") },
             ]}
             onChange={(v) =>
@@ -1551,59 +1526,6 @@ function Model({ doc, set, t }: { doc: SettingsDoc; set: SetFn; t: T }) {
             </Row>
           </>
         )}
-      </Section>
-
-      <Section label={t("section.packing")}>
-        <Row title={t("row.packing")} description={t("row.packing.desc")}>
-          <Select
-            label={t("row.packing")}
-            value={packing}
-            options={packOptions}
-            onChange={(v) =>
-              set((d) => void (d.localModel.packing = v === "auto" ? "auto" : { forced: v }))
-            }
-          />
-        </Row>
-        <Row title={t("row.modelDir")} description={t("row.modelDir.desc")}>
-          <TextField
-            mono
-            label={t("row.modelDir")}
-            value={m.modelDir ?? ""}
-            placeholder={t("row.modelDir.placeholder")}
-            onChange={(v) => set((d) => void (d.localModel.modelDir = v === "" ? null : v))}
-          />
-        </Row>
-        <Row title={t("row.hfTokenEnv")} description={t("row.hfTokenEnv.desc")}>
-          <TextField
-            mono
-            label={t("row.hfTokenEnv")}
-            value={m.hfTokenEnv ?? ""}
-            onChange={(v) => set((d) => void (d.localModel.hfTokenEnv = v === "" ? null : v))}
-          />
-        </Row>
-      </Section>
-
-      <Section label={t("section.engine")}>
-        {(
-          [
-            ["offloadAllLayers", m.offloadAllLayers],
-            ["flashAttention", m.flashAttention],
-            ["visionLazyLoad", m.visionLazyLoad],
-            ["dedicatedServerSlots", m.dedicatedServerSlots],
-          ] as const
-        ).map(([key, on]) => (
-          <Row key={key} title={t(`row.${key}`)} description={t(`row.${key}.desc`)}>
-            <Toggle
-              on={on}
-              label={t(`row.${key}`)}
-              onChange={(v) =>
-                set((d) => {
-                  d.localModel[key] = v;
-                })
-              }
-            />
-          </Row>
-        ))}
       </Section>
     </>
   );

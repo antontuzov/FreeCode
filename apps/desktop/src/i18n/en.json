@@ -330,7 +330,7 @@
   "settings.section.github": "GitHub",
   "settings.section.github.desc": "The agent's route to a repository. A commit and a branch stay on this machine; a push and a pull request leave it, so they need the Privacy switch on and an approval of their own.",
   "settings.section.remote": "Remote provider",
-  "settings.section.remote.desc": "Where prompts are answered: this machine's engine, or an OpenAI-compatible provider. A key is held in the macOS Keychain and never written to this file.",
+  "settings.section.remote.desc": "Where prompts are answered: the free models served by OpenCode on this Mac, or an OpenAI-compatible provider. A key is held in the macOS Keychain and never written to this file.",
   "settings.section.packing": "Packing",
   "settings.section.engine": "Engine",
   "settings.section.reasoning": "Reasoning",
@@ -450,7 +450,7 @@
   "settings.row.allowRemote": "Allow remote providers",
   "settings.row.allowRemote.desc": "On: a run with tools may search Wikipedia and read one web page back, every lookup stands in the transcript, and the remote provider below may answer. Off: web tools are withheld and a selected remote provider is refused, not rerouted — a free model picked in the composer still answers, because it is not the address below.",
   "settings.row.remoteSource": "Answer with",
-  "settings.row.remoteSource.desc": "Remote sends every prompt to the provider below and never falls back to this machine's engine. It needs this Privacy switch and a saved key; without either, the run is refused.",
+  "settings.row.remoteSource.desc": "Free models answer on this Mac's OpenCode service and need no key. Remote sends every prompt to the provider below instead and never falls back; it needs the Privacy switch and a saved key, and without either the run is refused.",
   "settings.row.remoteBaseUrl": "Base URL",
   "settings.row.remoteBaseUrl.desc": "An OpenAI-compatible endpoint. HTTPS is required; plain HTTP is allowed only for an address on this machine. The app appends /v1/chat/completions.",
   "settings.row.remoteBaseUrl.placeholder": "https://api.example.com/v1",
@@ -870,5 +870,10 @@
   "settings.section.setup.desc": "The first-run questions again, without losing any answer you already gave.",
   "settings.row.setup": "Setup assistant",
   "settings.row.setup.desc": "Walk through the welcome, where runs work, and which route answers again.",
-  "settings.row.setup.action": "Run setup"
+  "settings.row.setup.action": "Run setup",
+  "settings.opt.free": "Free models",
+  "settings.help.route": "Route",
+  "settings.help.route.free": "OpenCode's free-model service on this Mac",
+  "settings.help.route.remote": "The remote provider above",
+  "settings.help.egress.free": "Prompts reach OpenCode's free-model service on this Mac, which sends them on to OpenCode's gateway"
 }

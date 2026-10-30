@@ -14,7 +14,6 @@ use serde::Serialize;
 use freecode_config::{ModelSource, PackingChoice, Settings};
 use freecode_llama::load_guard::{self, Blocker, FileState, GuardReport, GuardRequest};
 use freecode_llama::{models_root, EngineBinary};
-use freecode_models::catalog::CatalogDefaults;
 use freecode_models::{
     gguf, recommend, EngineLock, HostHardware, IntegrityStatus, ModelEntry, Pack, Recommendation,
     DEFAULT_HEADROOM_BYTES,
@@ -33,9 +32,6 @@ pub struct Assembly {
     pub engine: Option<EngineBinary>,
     pub report: GuardReport,
     pub weights_absent: bool,
-    /// `[defaults]` from the catalog. `LaunchRequest` takes it by reference, so the launcher needs
-    /// the same parsed catalog the guard already read rather than a second, possibly newer one.
-    pub defaults: CatalogDefaults,
 }
 
 impl Assembly {
@@ -120,6 +116,11 @@ impl Assembly {
         let free = settings
             .free_model
             .as_deref()
+            // The free tier is the built-in route, so a document with no pick still names the model
+            // the next prompt will reach — the card and the footer would otherwise describe weights
+            // this build no longer runs. A selected remote provider is the one source that stands
+            // in front of it.
+            .or_else(|| (!remote_selected).then_some(freecode_config::DEFAULT_FREE_MODEL_ID))
             .and_then(crate::free_models::find)
             .map(|model| FreeView {
                 id: model.id.to_string(),
@@ -224,7 +225,6 @@ pub fn assemble(root: &Path, settings: &Settings) -> Result<Assembly, String> {
         engine,
         report,
         weights_absent,
-        defaults: catalog.defaults.clone(),
     })
 }
 

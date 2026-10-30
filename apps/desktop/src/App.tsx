@@ -40,7 +40,6 @@ export default function App() {
   const setContextUsed = useTranscript((s) => s.setContextUsed);
   const setRunDiff = useTranscript((s) => s.setRunDiff);
   const setRunRounds = useTranscript((s) => s.setRunRounds);
-  const refreshEngine = useChat((s) => s.refresh);
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
   const newTask = useChat((s) => s.newTask);
@@ -157,16 +156,13 @@ export default function App() {
     openSetup(0);
   }, [fixture, forcedSetup, settingsDoc, openSetup]);
 
-  // The engine row has to agree with the server that is actually up, so the window asks once it
-  // opens — the event channel itself is wired at module scope in main.tsx, outside StrictMode's
-  // dev double-mount. The sidebar's rows are conversations the host filed on a previous run, so the
-  // window has to ask for those too. The fixture does not: it draws its own workspace list to
-  // compare against docs/reference-ui, and a real list arriving underneath it would be a second
-  // truth.
+  // The sidebar's rows are conversations the host filed on a previous run, so the window asks once it
+  // opens — the event channel itself is wired at module scope in main.tsx, outside StrictMode's dev
+  // double-mount. The fixture does not: it draws its own workspace list to compare against
+  // docs/reference-ui, and a real list arriving underneath it would be a second truth.
   useEffect(() => {
-    void refreshEngine();
     if (!fixture) void refreshFiled();
-  }, [fixture, refreshEngine, refreshFiled]);
+  }, [fixture, refreshFiled]);
 
   // `?fixture=1` renders the shell with a scripted run so the layout can be compared against
   // docs/reference-ui. Nothing sets it by default: an empty transcript is honest, an invented one

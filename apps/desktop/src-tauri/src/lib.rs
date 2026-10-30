@@ -292,31 +292,10 @@ fn wear_icon(app: &AppHandle, pinned: Option<u8>) {
     brand::set_dock_tile(app);
 }
 
-/// The supervised server is a child process, and nothing on macOS makes a child die with its parent,
-/// so releasing it is this process's job on every way out of the run.
-fn release_engine(app: &AppHandle) {
-    let state = app.state::<chat::ChatState>();
-    chat::release_engine(&state);
-}
-
-/// The other half of [`release_engine`], for the way out that runs none of this process's code.
-///
-/// A `SIGKILL` — what a force quit, a crash and `tauri dev`'s restart send — stops the host where it
-/// stands, and its server goes on holding gigabytes of weights under a pid nothing remembers. Each
-/// launch records that pid beside the host's own, so the next run can tell a stranded server from one
-/// a live window is still watching. Observed 2026-10-14: three dev restarts left three servers behind.
-fn reap_leftover_servers() {
-    let Some(path) = paths::server_pid_registry() else {
-        return;
-    };
-    freecode_llama::reap_orphaned_servers(&path);
-}
-
 /// SIGTERM, SIGINT and SIGHUP never reach [`RunEvent::Exit`]: their default action stops the process
-/// where it stands, which is how a supervised server is orphaned (observed 2026-10-13 — `kill -TERM`
-/// to the host left `llama-server` holding its port and its weights). Registering a listener takes
-/// those signals over, so the server dies first and the process then exits with the status the signal
-/// would have produced anyway.
+/// where it stands, which would leave the terminal's shell running after the window is gone.
+/// Registering a listener takes those signals over, so the shell dies first and the process then
+/// exits with the status the signal would have produced anyway.
 ///
 /// `std::process::exit` rather than `AppHandle::exit`: a graceful teardown is precisely the thing that
 /// might not return, and the one promise this path makes is that the child does not outlive the host.
@@ -335,7 +314,6 @@ fn watch_signals(app: AppHandle) {
             let Ok(mut stream) = signal(kind) else { return };
             if stream.recv().await.is_some() {
                 shell::shutdown(&app);
-                release_engine(&app);
                 std::process::exit(status);
             }
         });
@@ -360,8 +338,7 @@ pub fn run() {
     brand::prefer(pinned);
 
     let app = tauri::Builder::default()
-        // The supervised server and the conversation it is answering from. One window, one engine:
-        // the state is here so a second `start_engine` cannot begin a second 6 GB load.
+        // The conversation the next request is built from, and the one-answer-at-a-time flag.
         .manage(chat::ChatState::default())
         // The panel's own shell, kept across lines so `cd` and an exported variable survive from one
         // command to the next. One shell: the panel has one prompt, and a second one would be a
@@ -457,9 +434,6 @@ pub fn run() {
             preview::page_check,
             // The development check behind `?pagecheck=1`; it refuses outside a probe launch.
             preview::agent_page_probe,
-            chat::start_engine,
-            chat::stop_engine,
-            chat::engine_status,
             chat::chat_send,
             chat::chat_stop,
             // The review's undo: the text each write replaced, held for the conversation that saw it
@@ -501,7 +475,6 @@ pub fn run() {
             paths::migrate_legacy_app_dir();
             // Before this process spawns a server of its own, so a leftover's port is free to be
             // chosen again and its memory is back before the first load.
-            reap_leftover_servers();
             // Free models answer through OpenCode's daemon, which may not be up yet on a machine
             // that has just installed this app. Starting it here means the picker's rows are live
             // by the time the window is drawn, instead of greyed out until the first send.
@@ -521,7 +494,6 @@ pub fn run() {
             // The shell dies with the window: it is a process in the project folder, and one left
             // behind is one still holding the folder after the app is gone.
             shell::shutdown(app_handle);
-            release_engine(app_handle);
         }
         _ => {}
     });

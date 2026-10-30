@@ -1,49 +1,32 @@
-// The live engine: one supervised fork server, and the prompt path that streams an answer from it.
-// The transcript owns what a run looks like; this store owns the two facts only the host has —
-// whether a server is up, and whether a reply is in flight.
+// The prompt path: the seam where a command failure becomes either a transcript row or a card error,
+// and the one fact only the host has — whether a reply is in flight.
 import { create } from "zustand";
 
-import { ipc, type EngineView } from "../lib/ipc";
+import { ipc } from "../lib/ipc";
 import { fileable, useSessions } from "./sessions";
 import { useTerminal } from "./terminal";
 import { useTranscript } from "./transcript";
 
 type ChatStore = {
-  engine: EngineView | null;
   sending: boolean;
-  /** A server start is in flight: the load takes seconds, and a card that shows nothing looks frozen. */
-  starting: boolean;
-  /** A failure the transcript has no row for: a status poll that could not be answered, a release
-   * the host refused. A send's own failure belongs to the transcript, and only to it. */
+  /** A failure the transcript has no row for: a stop or new task the host refused. A send's own
+   * failure belongs to the transcript, and only to it. */
   error: string | null;
   /** Set once the host has announced anything about the current send. */
   announced: boolean;
-  refresh: () => Promise<void>;
   /** A picture is a `data:` URL the composer shrank; a prompt may be nothing but one. Every prompt is
    * an agent prompt: the workspace tools go with it, because this app is an agent rather than a chat
    * window. What a run may *change* is the approval policy's answer, and the shell and the subagents
    * are Settings switches, so the tools offered are the ones the machine has actually agreed to. */
   send: (text: string, image?: string) => Promise<void>;
   stop: () => Promise<void>;
-  start: () => Promise<void>;
-  release: () => Promise<void>;
   newTask: () => Promise<void>;
 };
 
 export const useChat = create<ChatStore>((set, get) => ({
-  engine: null,
   sending: false,
-  starting: false,
   error: null,
   announced: false,
-  refresh: async () => {
-    try {
-      set({ engine: (await ipc.engineStatus()).engine });
-    } catch (error) {
-      // A host that cannot answer has no server; the store must not keep claiming one.
-      set({ engine: null, error: String(error) });
-    }
-  },
   send: async (text, image) => {
     const trimmed = text.trim();
     // A picture alone is a question: "what is in this?" needs no words.
@@ -66,7 +49,6 @@ export const useChat = create<ChatStore>((set, get) => ({
     } finally {
       set({ sending: false });
       useTranscript.getState().setRunning(false);
-      void get().refresh();
       // The host files each turn as it happens, so the run that just closed is the moment the filed
       // list stops matching the sidebar. Refreshed after the send rather than on an event because the
       // turn is only on disk once the command has returned.
@@ -86,41 +68,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     } catch (error) {
       set({ error: String(error) });
     }
-    // No engine refresh: the server is the same process it was before the click, and the run's own
-    // `runFinished` is what closes the answer out in the transcript.
-  },
-  /**
-   * Put the weights back, from the status card's own control. The host answers with the server it
-   * started, so the card needs no second poll to know the address it is about to print.
-   */
-  start: async () => {
-    set({ error: null, starting: true });
-    try {
-      set({ engine: await ipc.startEngine() });
-    } catch (error) {
-      // A load the machine refused — no pack, a window too large for the memory behind it — is the
-      // card's sentence to say, and the composer is where the card's failures already land.
-      set({ error: String(error) });
-    } finally {
-      set({ starting: false });
-    }
-  },
-  /**
-   * Release the weights, from the status card's own control. The next message starts a fresh server,
-   * which is the price of the click and the reason this is not what Stop does.
-   */
-  release: async () => {
-    set({ error: null });
-    try {
-      await ipc.stopEngine();
-    } catch (error) {
-      set({ error: String(error) });
-      return;
-    }
-    // The window the last run filled is gone with the server that held it, so the meter has nothing
-    // left to report.
-    useTranscript.getState().setContextUsed(null);
-    await get().refresh();
+    // The run's own `runFinished` is what closes the answer out in the transcript.
   },
   newTask: async () => {
     set({ error: null });

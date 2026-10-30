@@ -21,8 +21,6 @@ pub const ROOT_ENV: &str = "FREECODE_ROOT";
 /// The directory this app wrote under its previous name. Read once by `migrate_legacy_app_dir`;
 /// nothing else in the build refers to it.
 const LEGACY_APP_DIR: &str = "smollm-studio";
-/// The file mirroring the pids of the supervised servers, one line per launch.
-const SERVER_PIDS: &str = "servers.pid";
 const CONTRACT: [&str; 2] = [
     freecode_models::CATALOG_REL,
     freecode_models::ENGINE_LOCK_REL,
@@ -65,10 +63,6 @@ fn migrate_dir(old: &Path, new: &Path) -> std::io::Result<()> {
 /// Where the server pid registry lives: beside `settings.json`, in the directory the app already
 /// owns and which outlives a crash. `None` when the platform has no such directory, which leaves the
 /// registry in memory only.
-pub(crate) fn server_pid_registry() -> Option<PathBuf> {
-    app_data_dir().map(|dir| dir.join(SERVER_PIDS))
-}
-
 /// The directory holding `catalog/`, `engines/` and `models/` — the one the host writes in.
 pub fn workspace_root(app: Option<&AppHandle>) -> Result<PathBuf, String> {
     root_from(std::env::var_os(ROOT_ENV), candidates(app), app_data_dir())

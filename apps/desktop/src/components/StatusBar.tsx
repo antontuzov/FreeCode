@@ -1,6 +1,5 @@
 import { translate, type Locale } from "../i18n";
 import { shortcutLabel } from "../lib/shortcuts";
-import { useChat } from "../state/chat";
 import { useModel } from "../state/model";
 import { useTerminal } from "../state/terminal";
 import { useTranscript } from "../state/transcript";
@@ -36,17 +35,15 @@ function ticksUsed(used: number | null): number {
  */
 export function StatusBar({ locale }: { locale: Locale }) {
   const status = useModel((s) => s.status);
-  const engine = useChat((s) => s.engine);
   const contextUsed = useTranscript((s) => s.contextUsed);
   const terminalOpen = useTerminal((s) => s.open);
   const terminalRuns = useTerminal((s) => s.runs.length);
   const toggleTerminal = useTerminal((s) => s.toggle);
 
-  // A selected provider makes the local engine's packing and backend beside the point, and a badge
-  // reading "Remote" would hide the two refusals that can stop a prompt before it leaves: consent and
-  // an unconfigured address. Those are named here, and the key is the card's to report. A free pick
-  // is the third source the badge names; it sends without the consent switch, so only its route can
-  // refuse it.
+  // The badge names the route the next prompt takes. There are two: the free tier, answered by the
+  // service on this Mac, and — only when the user selected it — a remote provider. A badge reading
+  // "Remote" hides the two refusals that can stop a prompt before it leaves: consent and an
+  // unconfigured address. Those are named here, and the key is the card's to report.
   const remote = status?.remote ?? null;
   const free = status?.free ?? null;
 
@@ -56,30 +53,19 @@ export function StatusBar({ locale }: { locale: Locale }) {
       : !remote.configured
         ? translate(locale, "model.badge.notSetUp")
         : translate(locale, "model.badge.remote")
-    : free
-      ? status?.opencode.available
-        ? translate(locale, "model.badge.free")
-        : translate(locale, "model.badge.noService")
-      : status?.blocked
-        ? translate(locale, "model.badge.notRunning")
-        : status?.local
-          ? translate(locale, "model.badge.local")
-          : translate(locale, "model.badge.remote");
+    : status?.opencode.available
+      ? translate(locale, "model.badge.free")
+      : status
+        ? translate(locale, "model.badge.noService")
+        : translate(locale, "model.badge.free");
 
-  // While a server is up, this pair describes the run rather than the machine. The status' backend is
-  // what this host *could* decode on, so it goes on saying "Metal" after layer offload is switched
-  // off and every layer is being decoded on the CPU.
   const runLine = remote
     ? `${remote.model || translate(locale, "model.remote.untitled")} · ${
         remote.baseUrl.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/\/.*$/, "") || "—"
       }`
     : free
       ? `${free.label} · ${free.provider}`
-      : engine
-        ? `${engine.packing} · ${engine.backend}`
-        : status
-          ? `${status.packing} · ${status.backend}`
-          : null;
+      : null;
 
   // The meter shows what the last finished run measured and nothing before that. A real run reports
   // its own token count, so the figure is the server's, not an estimate made from the text.

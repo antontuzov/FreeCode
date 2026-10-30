@@ -202,12 +202,10 @@ describe("the effort dial", () => {
     expect(nextEffort(effort)).toBe("auto");
   });
 
-  it("says which routes take the saved level, in the host's own order", () => {
+  it("says neither route takes the saved level", () => {
     const doc = document_();
-    // With neither a free pick nor a remote source, the next run is the local engine's and it takes
-    // the field.
-    expect(effortReachesRoute(doc)).toBe(true);
-    // A remote provider answers without one.
+    expect(effortReachesRoute(doc)).toBe(false);
+    // A remote provider answers without one either.
     doc.remoteProvider.source = "remote";
     expect(effortReachesRoute(doc)).toBe(false);
     // A free pick is checked before the remote source, and neither of the transports behind it

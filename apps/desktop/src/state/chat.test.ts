@@ -1,9 +1,9 @@
-// The chat store owns the two facts the transcript cannot see — whether a server is up and whether a
-// reply is in flight — and it is the seam where a command failure becomes either a transcript row or
-// a card error. These tests hold those boundaries, not the host's answers.
+// The chat store owns the fact the transcript cannot see — whether a reply is in flight — and it is
+// the seam where a command failure becomes either a transcript row or a card error. These tests hold
+// those boundaries, not the host's answers.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ipc, type AgentEvent, type EngineView, type RunReport } from "../lib/ipc";
+import { ipc, type AgentEvent, type RunReport } from "../lib/ipc";
 import { connectAgentEvents, useChat } from "./chat";
 import { useSessions } from "./sessions";
 import { useTranscript } from "./transcript";
@@ -12,9 +12,6 @@ vi.mock("../lib/ipc", () => ({
   ipc: {
     chatSend: vi.fn(),
     chatStop: vi.fn(),
-    startEngine: vi.fn(),
-    stopEngine: vi.fn(),
-    engineStatus: vi.fn(),
     newTask: vi.fn(),
     fileRows: vi.fn(),
     onAgentEvent: vi.fn(),
@@ -25,17 +22,6 @@ vi.mock("../lib/ipc", () => ({
 }));
 
 const mock = vi.mocked(ipc);
-
-const ENGINE: EngineView = {
-  baseUrl: "http://127.0.0.1:8080",
-  backend: "Metal",
-  engineTag: "prism-b10787-73bfe6c",
-  packing: "PQ2_0",
-  modelFile: "Ternary-Bonsai-1.7B-PQ2_0.gguf",
-  contextTokens: 32_768,
-  layersOffloaded: 99,
-  command: "llama-server --port 8080",
-};
 
 const REPORT: RunReport = {
   generatedTokens: 12,
@@ -73,7 +59,6 @@ beforeEach(() => {
   useSessions.setState(useSessions.getInitialState());
   mock.listSessions.mockResolvedValue([]);
   mock.fileRows.mockResolvedValue(undefined);
-  mock.engineStatus.mockResolvedValue({ running: false, engine: null });
 });
 
 describe("sending", () => {
@@ -120,7 +105,6 @@ describe("sending", () => {
     expect(mock.chatSend).toHaveBeenCalledWith("hello", "data:image/png;base64,AA", true);
     expect(useChat.getState().sending).toBe(false);
     expect(useTranscript.getState().running).toBe(false);
-    expect(mock.engineStatus).toHaveBeenCalled();
     expect(mock.listSessions).toHaveBeenCalled();
     expect(mock.fileRows).toHaveBeenCalledTimes(1);
 
@@ -156,7 +140,7 @@ describe("sending", () => {
 });
 
 describe("stopping", () => {
-  it("reports a stop the host refused and leaves the server alone when one succeeds", async () => {
+  it("reports a stop the host refused and sends one that succeeds", async () => {
     mock.chatStop.mockRejectedValueOnce(new Error("nothing is streaming"));
     await useChat.getState().stop();
     expect(useChat.getState().error).toContain("nothing is streaming");
@@ -164,55 +148,7 @@ describe("stopping", () => {
     vi.clearAllMocks();
     mock.chatStop.mockResolvedValueOnce(undefined);
     await useChat.getState().stop();
-    expect(mock.engineStatus).not.toHaveBeenCalled();
     expect(mock.chatStop).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("the server", () => {
-  it("keeps the card in its starting state until the host answers", async () => {
-    const gate = deferred<EngineView>();
-    mock.startEngine.mockReturnValueOnce(gate.promise);
-    const start = useChat.getState().start();
-    expect(useChat.getState().starting).toBe(true);
-
-    gate.resolve(ENGINE);
-    await start;
-    expect(useChat.getState().engine).toBe(ENGINE);
-    expect(useChat.getState().starting).toBe(false);
-    expect(useChat.getState().error).toBeNull();
-  });
-
-  it("puts a refused start on the card without claiming an engine", async () => {
-    mock.startEngine.mockRejectedValueOnce(new Error("no weights"));
-    await useChat.getState().start();
-    expect(useChat.getState().engine).toBeNull();
-    expect(useChat.getState().starting).toBe(false);
-    expect(useChat.getState().error).toContain("no weights");
-  });
-
-  it("clears the meter when the weights are released, and keeps it when the release fails", async () => {
-    useTranscript.setState({ contextUsed: 40 });
-    mock.stopEngine.mockResolvedValueOnce(undefined);
-    await useChat.getState().release();
-    expect(useTranscript.getState().contextUsed).toBeNull();
-    expect(mock.engineStatus).toHaveBeenCalled();
-
-    useTranscript.setState({ contextUsed: 40 });
-    vi.clearAllMocks();
-    mock.stopEngine.mockRejectedValueOnce(new Error("server is busy"));
-    await useChat.getState().release();
-    expect(useChat.getState().error).toContain("server is busy");
-    expect(useTranscript.getState().contextUsed).toBe(40);
-    expect(mock.engineStatus).not.toHaveBeenCalled();
-  });
-
-  it("clears the server when a status poll cannot be answered", async () => {
-    useChat.setState({ engine: ENGINE });
-    mock.engineStatus.mockRejectedValueOnce(new Error("host is gone"));
-    await useChat.getState().refresh();
-    expect(useChat.getState().engine).toBeNull();
-    expect(useChat.getState().error).toContain("host is gone");
   });
 });
 

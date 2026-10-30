@@ -214,25 +214,6 @@ export const WEIGHTS_DOWNLOAD_EVENT = "weights-download";
 /* ---- the live engine and its streamed replies ---- */
 
 /**
- * `freecode_desktop_lib::chat::EngineView`: the supervised `llama-server` as the host reports it.
- * `command` is the argument vector that actually went to the binary. No control shows it — the
- * reference layout has nowhere for a command line — so it is what a failure can quote rather than
- * what the window claims.
- */
-export type EngineView = {
-  baseUrl: string;
-  backend: string;
-  engineTag: string;
-  packing: string;
-  modelFile: string;
-  contextTokens: number;
-  layersOffloaded: number;
-  command: string;
-};
-
-export type EngineStatus = { running: boolean; engine: EngineView | null };
-
-/**
  * A load-guard refusal plus the one action that clears it. Mirrors `freecode_core::BlockedInfo`.
  *
  * `code` is `freecode_llama::load_guard::BlockerCode` in its kebab-case wire spelling, and it names two
@@ -1062,10 +1043,6 @@ export const ipc = {
    * silently overwritten.
    */
   revertChanges: (paths: string[]) => invoke<RevertResult[]>("revert_changes", { paths }),
-  /** Launch the supervised fork server, or refuse with the load guard's own reason. */
-  startEngine: () => invoke<EngineView>("start_engine"),
-  stopEngine: () => invoke<void>("stop_engine"),
-  engineStatus: () => invoke<EngineStatus>("engine_status"),
   /**
    * Send one prompt and stream the answer on `agent-event`. The promise settles when the run is
    * over, with the finished text — so a listener that missed a delta can still close the turn.
@@ -1152,10 +1129,7 @@ export const ipc = {
   restoreTrashed: (name: string) => invoke<SessionSummary>("restore_trashed", { name }),
   /** The press that means it: take a trashed conversation's file off the machine. */
   purgeTrashed: (name: string) => invoke<void>("purge_trashed", { name }),
-  /**
-   * Stop the reply that is streaming. The engine keeps its weights loaded, so the next message costs
-   * nothing — `stopEngine` is the one that releases them, and the composer's Stop is not that.
-   */
+  /** Stop the reply that is streaming. The next message opens a fresh turn on the same route. */
   chatStop: () => invoke<void>("chat_stop"),
   /**
    * Open the panel's own shell in the project folder, or answer why it will not. Refused while the

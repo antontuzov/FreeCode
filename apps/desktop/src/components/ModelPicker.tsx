@@ -1,106 +1,57 @@
-// The composer's model pill: which of the catalog's models answers the next prompt.
+// The composer's model pill: which free model answers the next prompt.
 //
-// A picker rather than a jump to Settings, because the choice belongs to the moment that notices the
-// answer is not what was asked for. It is also the other half of the attach button: only a model whose
-// card publishes a projector can read a picture, so a prompt carrying an image is a weights decision as
-// much as a wording one, and the row that says "reads pictures" is what makes that visible before the
-// send rather than in a refusal after it.
-//
-// Every number on a row is the catalog's own — the same figures the Knowledge Center quotes — and the
-// only thing added here is which of those files are already on this machine, which is the host's to
-// know. Nothing is estimated: the packs a model offers are shown as the range they span.
+// The app has one built-in route — the free tier served by OpenCode on this Mac — so this panel is
+// the list that service publishes, plus the remote provider when the user has selected one. A picker
+// rather than a jump to Settings, because the choice belongs to the moment that notices the answer is
+// not what was asked for, and the pill names the model rather than the word "Model".
 import { useEffect, useState } from "react";
 
 import { Icon } from "./icons";
 import { ModelMark } from "./ModelMark";
 import { translate, type Locale } from "../i18n";
-import { ipc, type CatalogModel, type FreeModelInfo, type KnowledgeCenter } from "../lib/ipc";
+import { ipc, type FreeModelInfo } from "../lib/ipc";
 import { useModel } from "../state/model";
 import { useSettings } from "../state/settings";
 
 /** `?picker=open` stands in for the click this panel needs and the native window cannot be given. */
 const SEEDED = new URLSearchParams(window.location.search).get("picker") === "open";
 
-/** The model's own packs, as the span they offer rather than a pick from them: which one this machine
- * gets is the host's resolution, and it is printed on the status strip below. */
-function spanOf(model: CatalogModel): string {
-  const sizes = model.packs.map((pack) => pack.sizeGb);
-  const low = Math.min(...sizes);
-  const high = Math.max(...sizes);
-  return low === high ? `${low.toFixed(2)} GB` : `${low.toFixed(2)}–${high.toFixed(2)} GB`;
-}
-
 export function ModelPicker({
   locale,
   onOpenSettings,
 }: {
   locale: Locale;
-  /** The Settings page's model section, where the rest of the launch knobs live. */
+  /** The Settings page's model section, where the remote provider is configured. */
   onOpenSettings: () => void;
 }) {
   const status = useModel((s) => s.status);
-  // A remote provider has no pack, no download and no catalog row here: its model id is free text in
-  // Settings, so this panel can only say which provider answers and offer the page that changes it.
+  // A remote provider has no registry row of its own: its model id is free text in Settings, so this
+  // panel can only say which provider answers and offer the page that changes it.
   const remote = status?.remote ?? null;
-  // A free pick is the third source the pill names: it has a registry row here, and all of them are
-  // answered by the free-model service on this Mac rather than by a key in Settings.
   const free = status?.free ?? null;
   const [open, setOpen] = useState(SEEDED);
-  const [center, setCenter] = useState<KnowledgeCenter | null>(null);
   const [freeList, setFreeList] = useState<FreeModelInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const t = (key: string, params?: Record<string, string | number>) =>
     translate(locale, `modelPicker.${key}`, params);
 
-  // Read the first time the panel opens rather than at every launch: the pill names its own model
-  // without the catalog, and the center's answer walks the weights directory to be got. A selected
-  // provider never reads it at all — walking this machine for packs cannot answer a remote prompt.
-  useEffect(() => {
-    if (!open || remote || center || error) return;
-    void ipc
-      .knowledgeCenter()
-      .then(setCenter)
-      .catch((e: unknown) => setError(String(e)));
-  }, [open, remote, center, error]);
-
   // The registry is a small fixed list the host holds in memory, so it is read with the panel and
-  // not cached: the "Free" group is the one part of this panel a provider selection still shows.
+  // not cached: the free group is the one part of this panel a remote selection still shows.
   useEffect(() => {
     if (!open || freeList) return;
     void ipc
       .freeModelsList()
       .then(setFreeList)
-      .catch(() => setFreeList([]));
+      .catch((e: unknown) => setError(String(e)));
   }, [open, freeList]);
-
-  const choose = async (id: string) => {
-    setOpen(false);
-    if (!status) return;
-    // Picking the model that is already picked is a no-op — unless a free model is the one
-    // answering, in which case the same click means "back to local".
-    if (id === status.catalogId && !free) return;
-    const settings = useSettings.getState();
-    if (!settings.loaded) await settings.load();
-    await useSettings.getState().update((doc) => {
-      doc.localModel.catalogId = id;
-      // A forced packing is a claim about the model it was chosen for, so it does not travel with the
-      // choice: the new model gets the same detection the first one did.
-      doc.localModel.packing = "auto";
-      // The catalog pick is the local pick: a free model chosen earlier does not ride along.
-      doc.freeModel = null;
-    });
-    // No engine control is pressed from here. The host compares the weights the live server loaded
-    // against what the settings now name, and starts another one when the next prompt arrives.
-    await useModel.getState().refresh();
-  };
 
   const chooseFree = async (id: string) => {
     const settings = useSettings.getState();
     if (!settings.loaded) await settings.load();
     const entry = freeList?.find((m) => m.id === id);
-    // A row answers when the free-model service on this Mac is answering, which is the only route the
-    // registry has. A row without it is listed and not pickable: the host would refuse the turn
-    // anyway, and a row that looks pickable but can only fail is the bug a silent no-op would hide.
+    // A row answers when the service on this Mac is answering, which is the only route the registry
+    // has. A row without it is listed and not pickable: the host would refuse the turn anyway, and a
+    // row that looks pickable but can only fail is the bug a silent no-op would hide.
     if (!entry || !entry.local) return;
     setOpen(false);
     if (id === status?.free?.id) return;
@@ -125,16 +76,12 @@ export function ModelPicker({
         aria-expanded={open}
         className="flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2 py-1 text-fine text-muted hover:bg-hover hover:text-fg"
       >
-        <Icon name={remote ? "globe" : free ? "bolt" : "cube"} size={13} />
-        {/* The pill carries the model's name rather than the word "Model": which weights answer is the
+        <Icon name={remote ? "globe" : "bolt"} size={13} />
+        {/* The pill carries the model's name rather than the word "Model": which model answers is the
             fact a user reads off it, and the label only matters once the panel is open. A remote
             provider may have no model id yet, and then the pill names the source instead. */}
         <span className="max-w-[16ch] truncate">
-          {remote
-            ? remote.model || t("remote")
-            : free
-              ? free.label
-              : (status?.displayName ?? t("title"))}
+          {remote ? remote.model || t("remote") : (free?.label ?? t("title"))}
         </span>
         <Icon name="chevronDown" size={12} />
       </button>
@@ -176,7 +123,7 @@ export function ModelPicker({
                 </p>
               </>
             )}
-            {!remote && !center && (
+            {!freeList && (
               <p
                 role={error ? "alert" : undefined}
                 className="px-[var(--space-3)] py-[var(--space-2)] text-fine text-muted"
@@ -184,34 +131,6 @@ export function ModelPicker({
                 {error ?? t("loading")}
               </p>
             )}
-            {!remote &&
-              center?.models.map((model) => {
-                const held = model.packs.filter((pack) => pack.onDisk).length;
-                const current = model.id === status?.catalogId;
-                return (
-                  <button
-                    key={model.id}
-                    type="button"
-                    data-current={current || undefined}
-                    className="picker-row"
-                    onClick={() => void choose(model.id)}
-                  >
-                    <ModelMark provider={model.repoId.split("/")[0] ?? ""} />
-                    <span className="row-copy min-w-0">
-                      <span className="model-name truncate">{model.name}</span>
-                      <span className="row-desc truncate">
-                        {`${t("packs", { held, total: model.packs.length })} · ${spanOf(model)}`}
-                      </span>
-                    </span>
-                    {/* The two chips a choice between models actually turns on: can it see the picture
-                      in the composer, and is it already the one answering. */}
-                    {model.vision.length > 0 && (
-                      <span className="pill shrink-0">{t("vision")}</span>
-                    )}
-                    {current && <span className="pill shrink-0">{t("current")}</span>}
-                  </button>
-                );
-              })}
             {/* The free tier: the list the service publishes, answered by the FreeCode app on this
                 Mac. A row is pickable exactly when that service is answering; one with nothing behind
                 it is listed and marked, and picking it is refused in the same breath — the host would
@@ -253,7 +172,7 @@ export function ModelPicker({
             <div className="border-t border-line px-[var(--space-3)] py-[var(--space-2)]">
               {!remote && (
                 <p className="text-fine text-faint">
-                  {t(free ? (status?.opencode.available ? "freeNoteApp" : "freeNote") : "note")}
+                  {t(status?.opencode.available ? "freeNoteApp" : "freeNote")}
                 </p>
               )}
               <button
