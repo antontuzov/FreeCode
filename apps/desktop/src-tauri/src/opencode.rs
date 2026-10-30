@@ -801,6 +801,24 @@ fn event_retry(event: &Value) -> Option<(u64, String)> {
     ))
 }
 
+/// The service's reason, in words a person can act on.
+///
+/// A provider that hangs up reaches the app as the transport's own sentence — a socket error with a
+/// `fetch()` hint — which names nothing the user can change. That case is said in the app's words;
+/// every other reason goes out as the service gave it, because it usually names what was refused.
+fn failure_words(reason: &str) -> String {
+    let lower = reason.to_ascii_lowercase();
+    let hung_up = lower.contains("econnreset")
+        || lower.contains("socket connection was closed")
+        || lower.contains("socket hang up");
+    if hung_up {
+        return "the free-model service's provider closed the connection before answering, so the \
+                free quota may be used up; try again later or pick another free model"
+            .into();
+    }
+    reason.to_string()
+}
+
 /// What became of one write the service asked about.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Fate {
@@ -992,7 +1010,7 @@ pub async fn stream_turn(
                     let why = event_failure(&event).unwrap_or_else(|| {
                         "the free-model service could not answer this turn".into()
                     });
-                    return Err(why);
+                    return Err(failure_words(&why));
                 }
                 // The provider refused and the service is asking again. The first attempts may be a
                 // blip; past the cap the same answer is coming, so the turn ends with the reason the
@@ -1000,7 +1018,7 @@ pub async fn stream_turn(
                 "session.retry.scheduled" => {
                     if let Some((attempt, why)) = event_retry(&event) {
                         if attempt >= RETRY_LIMIT {
-                            return Err(why);
+                            return Err(failure_words(&why));
                         }
                     }
                 }
@@ -1180,6 +1198,16 @@ mod tests {
         let (attempt, why) = event_retry(&event).expect("the event names an attempt");
         assert_eq!(attempt, 1);
         assert!(!why.is_empty());
+    }
+
+    #[test]
+    fn a_hung_up_provider_is_said_in_words_a_person_can_act_on() {
+        let raw = "ECONNRESET: The socket connection was closed unexpectedly. For more \
+                   information, pass `verbose: true` in the second argument to fetch()";
+        let said = failure_words(raw);
+        assert!(!said.contains("fetch()"));
+        assert!(said.contains("free quota"));
+        assert_eq!(failure_words("rate limit reached"), "rate limit reached");
     }
 
     #[test]
