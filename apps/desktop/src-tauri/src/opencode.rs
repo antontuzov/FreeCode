@@ -54,6 +54,12 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 /// How often the wait loop looks at the Stop flag while no event is arriving.
 const STOP_POLL: Duration = Duration::from_millis(250);
 
+/// How many times the service may retry a provider call that keeps failing before the turn is called
+/// failed. The daemon retries a refused call on its own schedule and announces each attempt on the
+/// stream, which keeps the stream alive: without a cap the window waits on a turn that cannot finish,
+/// because a quota refusal is the same answer however many times it is asked.
+const RETRY_LIMIT: u64 = 3;
+
 /// The title a session opened from here carries in OpenCode's own session list.
 const TITLE: &str = "freecode";
 
@@ -780,6 +786,21 @@ fn event_failure(event: &Value) -> Option<String> {
     Some(message.to_string())
 }
 
+/// How many attempts the service says it has made, and the reason it is retrying.
+///
+/// A retry event is not a failure: the service is asking the provider again. But it is the only place
+/// a refusal is named — a quota error never reaches `session.step.failed` — so the turn reads it to
+/// decide when asking again is pointless.
+fn event_retry(event: &Value) -> Option<(u64, String)> {
+    let data = event.get("data")?;
+    let attempt = data.get("attempt").and_then(Value::as_u64)?;
+    Some((
+        attempt,
+        event_failure(event)
+            .unwrap_or_else(|| "the free-model service could not answer this turn".into()),
+    ))
+}
+
 /// What became of one write the service asked about.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Fate {
@@ -973,6 +994,16 @@ pub async fn stream_turn(
                     });
                     return Err(why);
                 }
+                // The provider refused and the service is asking again. The first attempts may be a
+                // blip; past the cap the same answer is coming, so the turn ends with the reason the
+                // service gave rather than spinning on a retry schedule the window cannot see.
+                "session.retry.scheduled" => {
+                    if let Some((attempt, why)) = event_retry(&event) {
+                        if attempt >= RETRY_LIMIT {
+                            return Err(why);
+                        }
+                    }
+                }
                 // The service's own question before a write lands. `ask` is the ruleset that keeps the
                 // tool and still confines it, so this arm is where the app applies its sandbox to a
                 // route that does not run through its tool loop.
@@ -1126,6 +1157,29 @@ mod tests {
             event_failure(&event).as_deref(),
             Some("the gateway refused it")
         );
+    }
+
+    #[test]
+    fn a_retry_names_its_attempt_and_reason() {
+        let event = json!({
+            "type": "session.retry.scheduled",
+            "data": {
+                "attempt": 5,
+                "error": {"type": "provider.transport", "message": "ECONNRESET: the gateway hung up"}
+            }
+        });
+        assert_eq!(
+            event_retry(&event),
+            Some((5, "ECONNRESET: the gateway hung up".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_retry_without_a_reason_still_names_the_attempt() {
+        let event = json!({"type": "session.retry.scheduled", "data": {"attempt": 1}});
+        let (attempt, why) = event_retry(&event).expect("the event names an attempt");
+        assert_eq!(attempt, 1);
+        assert!(!why.is_empty());
     }
 
     #[test]
