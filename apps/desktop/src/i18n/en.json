@@ -762,5 +762,8 @@
   "settings.help.route": "Route",
   "settings.help.route.free": "OpenCode's free-model service on this Mac",
   "settings.help.route.remote": "The remote provider above",
-  "settings.help.egress.free": "Prompts reach OpenCode's free-model service on this Mac, which sends them on to OpenCode's gateway"
+  "settings.help.egress.free": "Prompts reach OpenCode's free-model service on this Mac, which sends them on to OpenCode's gateway",
+  "update.newer": "A newer build is published: {{latest}}. This window is {{current}}.",
+  "update.same": "This is the newest published build, {{latest}}.",
+  "update.publishedOn": "Published {{date}}."
 }

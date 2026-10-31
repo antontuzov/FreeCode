@@ -762,5 +762,8 @@
   "settings.help.route": "Маршрут",
   "settings.help.route.free": "Бесплатные модели OpenCode на этом Mac",
   "settings.help.route.remote": "Удалённый провайдер выше",
-  "settings.help.egress.free": "Запросы идут в сервис бесплатных моделей OpenCode на этом Mac, а он отправляет их дальше в шлюз OpenCode"
+  "settings.help.egress.free": "Запросы идут в сервис бесплатных моделей OpenCode на этом Mac, а он отправляет их дальше в шлюз OpenCode",
+  "update.newer": "Опубликована новая сборка: {{latest}}. Это окно — {{current}}.",
+  "update.same": "Это самая свежая опубликованная сборка, {{latest}}.",
+  "update.publishedOn": "Опубликовано {{date}}."
 }
