@@ -21,19 +21,17 @@
 //! would show black corners among the app's own icons — and they are compiled into the binary rather
 //! than bundled as resources: `NSImage` decodes the bytes it is handed, so no path has to be resolved
 //! at runtime. Round costs alpha and alpha costs PNG: the twelve are 1.1 MB here where the same
-//! crops as opaque JPEG weighed 151 KB. The two brand tiles are rounded squares rather than discs,
-//! which is the shape macOS itself uses, and they weigh 52 KB between them because the sheet they are
-//! cut from is one mark on one ground rather than twelve photographs.
+//! crops as opaque JPEG weighed 151 KB. The two wave tiles are cut at the same measure, so the set
+//! stays one set, and weigh about 60 KB between them because each is one mark on one flat ground
+//! rather than a painted head.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// The tiles, numbered the way `?mascot=<1..17>` names them: the twelve ducks, cut from the sheet by
-/// `scripts/render-mascot-logos.py` alongside the webp set the webview loads; the brand mark on the
-/// two grounds a Dock can have, cut by `scripts/render-brand-tiles.py`; and the three themed logos —
-/// one face and one style-family ground each, the head rising out of the tile's bottom edge — cut by
-/// `scripts/render-duck-theme-logos.py`.
+/// The tiles, numbered the way `?mascot=<1..14>` names them: the twelve ducks, cut from the sheet by
+/// `scripts/render-mascot-logos.py` alongside the webp set the webview loads, then the wave mark on
+/// the two grounds a Dock can have, cut by `scripts/render-wave-marks.py`.
 const TILES: &[&[u8]] = &[
     include_bytes!("../mascots/mascot-01.png"),
     include_bytes!("../mascots/mascot-02.png"),
@@ -49,9 +47,6 @@ const TILES: &[&[u8]] = &[
     include_bytes!("../mascots/mascot-12.png"),
     include_bytes!("../mascots/mascot-13.png"),
     include_bytes!("../mascots/mascot-14.png"),
-    include_bytes!("../mascots/mascot-15.png"),
-    include_bytes!("../mascots/mascot-16.png"),
-    include_bytes!("../mascots/mascot-17.png"),
 ];
 
 /// The mascot for this process, one-based so the number the Dock was drawn from is the number the

@@ -261,13 +261,20 @@ export function Settings({
 
   useEffect(() => {
     if (!jump || jump.page !== active) return;
+    const box = body.current;
+    if (!box) return;
+    // A control that is a grid of tiles rather than a row carries the stem it is reached by, so the
+    // jump can centre it as well as the rows it finds by their titles.
+    const named = devRow ? box.querySelector<HTMLElement>(`[data-jump="${devRow}"]`) : null;
     // Read off the rendered title rather than from an id every row would have to carry: the row the
     // query matched is already on screen under this page, labelled in this language by the same catalog
     // key the nav item shows.
-    const rows = body.current ? [...body.current.querySelectorAll<HTMLElement>(".card-row")] : [];
-    const hit = rows.find((row) =>
-      row.querySelector(".row-title")?.textContent?.trim().startsWith(jump.title),
-    );
+    const rows = [...box.querySelectorAll<HTMLElement>(".card-row")];
+    const hit =
+      named ??
+      rows.find((row) =>
+        row.querySelector(".row-title")?.textContent?.trim().startsWith(jump.title),
+      );
     if (!hit) return;
     hit.scrollIntoView({ block: "center" });
     hit.dataset.flash = "true";
@@ -275,7 +282,7 @@ export function Settings({
     return () => window.clearTimeout(id);
     // `doc` is a dependency because the page renders its rows only once the settings document has
     // arrived; a jump that ran against the loading placeholder would find nothing and say nothing.
-  }, [jump, active, doc]);
+  }, [jump, active, doc, devRow]);
 
   const t = (key: string, params?: Record<string, string | number>) =>
     translate(locale, `settings.${key}`, params);
@@ -733,7 +740,7 @@ function ThemeTab({ doc, set, t, locale }: { doc: SettingsDoc; set: SetFn; t: T;
           the Dock tile is drawn by the host, which cannot see what the page decides — so the number
           travels through the settings document and the host repaints the tile the moment it lands. */}
       <Section label={t("section.appIcon")}>
-        <div className="px-[var(--space-4)] pt-[var(--space-4)]">
+        <div data-jump="appIcon" className="px-[var(--space-4)] pt-[var(--space-4)]">
           <p className="mb-[var(--space-2)] text-quiet text-muted">{t("row.appIcon")}</p>
           <div className="grid grid-cols-4 gap-[var(--space-3)] sm:grid-cols-6">
             {MASCOT_TILES.map((source, i) => (

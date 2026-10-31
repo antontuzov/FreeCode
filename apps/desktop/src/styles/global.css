@@ -589,6 +589,12 @@ button.run-pill[aria-expanded="true"] {
   animation: checkpoint-flash 1.4s var(--ease-standard);
 }
 
+/* A control that is a grid of tiles rather than a row is named by its stem instead, and is held for
+ * the same beat when the jump lands on it. */
+[data-jump][data-flash="true"] {
+  animation: checkpoint-flash 1.4s var(--ease-standard);
+}
+
 /* The file an edit row's chip jumped to, for the same beat: the column scrolled, and the section it
  * landed on is the one the press asked about. */
 .review-file[data-flash="true"] {
