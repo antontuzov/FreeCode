@@ -807,6 +807,14 @@ export const ipc = {
    */
   openFile: (path: string) => invoke<void>("open_file", { path }),
   /**
+   * Hand a page on the web to the desktop's default browser — the panel's own way out for a tab
+   * showing one.
+   *
+   * The host checks the scheme and lets only `http` and `https` through, so the address the panel
+   * holds cannot become a `file://` or a `javascript:` one on the way out.
+   */
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
+  /**
    * Show the project folder in the desktop's file manager — the palette's "Open workspace files".
    *
    * The host takes no path: the folder is the one settings names, which is what keeps this from

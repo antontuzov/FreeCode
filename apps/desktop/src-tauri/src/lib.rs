@@ -365,6 +365,9 @@ pub fn run() {
             // Handing a file this run changed back to the desktop's default handler. Confined to the
             // workspace by the same sandbox a `read_file` goes through — see `reveal`.
             reveal::open_file,
+            // The way out for a page on the web: the panel's own control hands the address to the
+            // desktop's browser, and the host lets only `http` and `https` through — see `reveal`.
+            reveal::open_url,
             // The same door for the folder itself, which is the palette's "Open workspace files".
             // It takes no path from the window: the root settings names is the only one it can show.
             reveal::reveal_workspace,

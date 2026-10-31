@@ -3,7 +3,7 @@
 // standing on does nothing, and an arrow with nowhere to go is a no-op.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { currentView, previewPage, previewPathOf, previewTab, useNav } from "./nav";
+import { currentView, previewPage, previewPathOf, previewTab, useNav, webUrlOf } from "./nav";
 
 beforeEach(() => {
   window.history.replaceState({}, "", "/");
@@ -142,6 +142,21 @@ describe("deep links", () => {
     expect(state.previewTabs).toHaveLength(1);
     expect(state.previewActive).toBe(0);
     expect(previewPage(previewTab(state))).toBeNull();
+  });
+
+  it("opens the browser on a page on the web for a capture", async () => {
+    const state = await seeded("?browser=https%3A%2F%2Fantontuzov.github.io%2FFreeCode%2F");
+    expect(state.previewTabs).toHaveLength(1);
+    expect(previewPage(previewTab(state))).toEqual({
+      url: "https://antontuzov.github.io/FreeCode/",
+      path: "https://antontuzov.github.io/FreeCode/",
+    });
+  });
+
+  it("opens no browser for an address it cannot frame", async () => {
+    const state = await seeded("?browser=file%3A%2F%2F%2Fetc%2Fpasswd");
+    expect(state.previewTabs).toHaveLength(0);
+    expect(state.previewActive).toBe(-1);
   });
 
   it("starts on the conversation with the right column folded", async () => {
@@ -300,7 +315,7 @@ describe("the address field", () => {
     expect(previewPathOf("preview://localhost/my%20game.html")).toBe("my game.html");
   });
 
-  it("refuses a web address, which this panel cannot frame", () => {
+  it("refuses a web address as a project path, which it is not", () => {
     expect(previewPathOf("https://example.com")).toBeNull();
     expect(previewPathOf("HTTP://example.com")).toBeNull();
     expect(previewPathOf("file:///etc/passwd")).toBeNull();
@@ -310,5 +325,22 @@ describe("the address field", () => {
   it("reads an empty field as no page at all", () => {
     expect(previewPathOf("")).toBeNull();
     expect(previewPathOf("   ")).toBeNull();
+  });
+
+  it("reads a web address as the address it is", () => {
+    expect(webUrlOf("https://antontuzov.github.io/FreeCode/")).toBe(
+      "https://antontuzov.github.io/FreeCode/",
+    );
+    expect(webUrlOf("  http://example.com/page  ")).toBe("http://example.com/page");
+    expect(webUrlOf("HTTPS://example.com")).toBe("https://example.com/");
+  });
+
+  it("reads anything that is not a web address as none", () => {
+    expect(webUrlOf("tetris/index.html")).toBeNull();
+    expect(webUrlOf("preview://localhost/tetris/index.html")).toBeNull();
+    expect(webUrlOf("file:///etc/passwd")).toBeNull();
+    expect(webUrlOf("javascript:alert(1)")).toBeNull();
+    expect(webUrlOf("https://")).toBeNull();
+    expect(webUrlOf("")).toBeNull();
   });
 });

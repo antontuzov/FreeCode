@@ -65,12 +65,31 @@ export function previewPage(tab: PreviewTab | null): PreviewPage | null {
 }
 
 /**
+ * The web address an entry names, or null when it names none.
+ *
+ * The panel frames two kinds of page: the project's own, which the `preview` scheme serves from the
+ * folder, and a page on the web. The second has to be written out — a bare host is a path in the
+ * project folder, and this browser does not guess which of the two the reader meant.
+ */
+export function webUrlOf(address: string): string | null {
+  const raw = address.trim();
+  if (!/^https?:\/\//i.test(raw)) return null;
+  try {
+    const url = new URL(raw);
+    if (!url.host) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The project path an address means, or null when it names nothing this panel can show.
  *
  * The field takes the path the review names *and* the `preview://` address the same open control
- * hands the frame, because they are one page said two ways. A web address is neither: the panel reads
- * the project folder, and framing the wider web would be a claim the scheme cannot keep. An empty
- * field is not a page either — Enter on it asks for nothing.
+ * hands the frame, because they are one page said two ways. A web address is neither: it is framed
+ * as itself, so it is read by `webUrlOf` before the path is looked for. An empty field is not a page
+ * either — Enter on it asks for nothing.
  */
 export function previewPathOf(address: string): string | null {
   const raw = address.trim();
@@ -100,13 +119,21 @@ const blankTab = (): PreviewTab => ({ trail: [], cursor: -1, reloads: 0 });
 /**
  * The strip a capture starts on.
  *
- * `?browser=blank` opens the browser on a page-less tab, which is the press the plus makes. The
- * native window takes no injected clicks, so a state only a press reaches — the empty tab, and the
- * Start browser control under it — is a state a capture can never show without a door like this.
+ * `?browser=blank` opens the browser on a page-less tab, which is the press the plus makes, and
+ * `?browser=<address>` opens it on a page on the web. The native window takes no injected clicks, so
+ * a state only a press reaches — the empty tab, the Start browser control under it, and a page the
+ * address field was given — is a state a capture can never show without a door like this.
  */
 function seedPreview(): Pick<NavStore, "previewTabs" | "previewActive"> {
-  if (query("browser") !== "blank") return { previewTabs: [], previewActive: -1 };
-  return { previewTabs: [blankTab()], previewActive: 0 };
+  const asked = query("browser");
+  if (asked === null) return { previewTabs: [], previewActive: -1 };
+  if (asked === "blank") return { previewTabs: [blankTab()], previewActive: 0 };
+  const url = webUrlOf(asked);
+  if (url === null) return { previewTabs: [], previewActive: -1 };
+  return {
+    previewTabs: [{ trail: [{ url, path: url }], cursor: 0, reloads: 0 }],
+    previewActive: 0,
+  };
 }
 
 function query(name: string): string | null {
@@ -135,14 +162,14 @@ function seed(): {
     collapsed: query("sidebar") === "collapsed",
     // The column starts folded: the conversation is the window, and the run's report is one press
     // away on the header. A capture that needs the column in the frame asks for it — `?right=1`,
-    // `?review=1`, `?file=` or `?browser=blank` — because the native window takes no injected
-    // clicks; `?right=hidden` keeps naming the folded strip the header's own toggle folds.
+    // `?review=1`, `?file=` or `?browser=` — because the native window takes no injected clicks;
+    // `?right=hidden` keeps naming the folded strip the header's own toggle folds.
     rightOpen:
       query("right") !== "hidden" &&
       (query("right") === "1" ||
         query("review") === "1" ||
         query("file") !== null ||
-        query("browser") === "blank"),
+        query("browser") !== null),
     statusOpen: query("status") !== "hidden",
     // `?review=1` puts the change in the right column: the press that opens it is a click on the
     // pill, which the native window cannot be given, so the panel would otherwise never be seen.

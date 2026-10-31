@@ -58,6 +58,47 @@ fn opener(path: &Path) -> std::process::Command {
     command
 }
 
+/// A web address the desktop may be asked to open, or the reason it may not.
+///
+/// Only `http` and `https` pass: the panel can show a page on the web, and this is the door that
+/// lets such a page leave for the user's own browser. A `file://` or a `javascript:` address must
+/// never reach the desktop, so the scheme is checked here rather than in the window that asks.
+pub(crate) fn web_address(url: &str) -> Result<&str, String> {
+    let trimmed = url.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err(format!(
+            "{trimmed} is not a web address, so the desktop was not asked to open it."
+        ));
+    }
+    let rest = trimmed
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or_default();
+    if rest.is_empty() || rest.starts_with('/') {
+        return Err(format!(
+            "{trimmed} names no host, so there is nothing to open."
+        ));
+    }
+    Ok(trimmed)
+}
+
+/// Hand a page on the web to the desktop's default browser.
+///
+/// The address is checked before it is handed over, so the window cannot widen this door by asking
+/// for something the desktop should not be asked to launch.
+#[tauri::command]
+pub async fn open_url(url: String) -> Result<(), String> {
+    let address = web_address(&url)?;
+    let status = opener(Path::new(address))
+        .status()
+        .map_err(|why| format!("nothing was asked of the desktop for {address}: {why}"))?;
+    if !status.success() && !cfg!(windows) {
+        return Err(format!("the desktop would not open {address}."));
+    }
+    Ok(())
+}
+
 /// Hand the file over, and report only what this side can honestly see.
 fn launch(path: &Path) -> Result<(), String> {
     let shown = path.display().to_string();
@@ -205,5 +246,47 @@ mod tests {
         assert_eq!(args, vec![std::ffi::OsStr::new(path)]);
         #[cfg(target_os = "macos")]
         assert_eq!(command.get_program(), "open");
+    }
+
+    /// The panel may show a page on the web, and this is the door that lets such a page leave for
+    /// the user's own browser. Only the two web schemes pass it.
+    #[test]
+    fn a_web_address_is_allowed_out() {
+        assert_eq!(
+            web_address("https://antontuzov.github.io/FreeCode/").unwrap(),
+            "https://antontuzov.github.io/FreeCode/"
+        );
+        assert_eq!(
+            web_address("  http://example.com/page  ").unwrap(),
+            "http://example.com/page"
+        );
+    }
+
+    /// Everything else is refused: a `file://` or a `javascript:` address that reached the desktop
+    /// would be a capability the webview's own opener is scoped away from on purpose.
+    #[test]
+    fn an_address_that_is_not_a_web_one_is_refused() {
+        for address in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "ftp://example.com",
+            "preview://localhost/index.html",
+            "/etc/passwd",
+            "example.com",
+            "",
+        ] {
+            let why = web_address(address).unwrap_err();
+            assert!(
+                why.contains("not a web address"),
+                "the refusal should say why: {why}"
+            );
+        }
+    }
+
+    /// A scheme with no host names nothing to open, and the desktop is not asked.
+    #[test]
+    fn an_address_without_a_host_is_refused() {
+        let why = web_address("https://").unwrap_err();
+        assert!(why.contains("no host"), "{why}");
     }
 }

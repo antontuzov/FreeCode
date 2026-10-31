@@ -106,6 +106,20 @@ async function ask(
 }
 
 /**
+ * The calls that need the page's own script.
+ *
+ * The `preview` scheme injects a script into every page it serves, and that script is what answers
+ * these. A page on the web has no such script — the host does not inject itself into someone else's
+ * document — so these calls can only act on the project's own pages.
+ */
+const SCRIPTED = new Set(["read", "click", "type", "press", "console", "wait"]);
+
+/** Whether a page is one of the project's own, which the `preview` scheme serves with a script. */
+function isProjectPage(url: string): boolean {
+  return url.startsWith("preview://localhost/");
+}
+
+/**
  * Open a page in the panel and answer with what it shows: the panel is the store's, so opening is
  * the same press the review's control makes, and the frame that follows is the one every later call
  * acts on.
@@ -116,6 +130,12 @@ async function open(fields: Record<string, unknown>): Promise<Record<string, unk
   if (!url) throw new Error("the browser was handed no address to open");
   useNav.getState().openPreview(url, path);
   const target = await mounted(url);
+  if (!isProjectPage(url)) {
+    throw new Error(
+      `the browser panel can show ${url}, but it can only read the project's own pages, which the ` +
+        `preview scheme serves.`,
+    );
+  }
   const body = await ask(target, "read", {}, Date.now() + REPLY_MS);
   return { ...body, url: body.url || url };
 }
@@ -157,6 +177,12 @@ async function perform(op: string, fields: Record<string, unknown>): Promise<unk
     throw new Error(
       "the browser panel is closed in this window. browser_open opens a page and the panel with it, " +
         "and the other browser calls act on that page.",
+    );
+  }
+  if (SCRIPTED.has(op) && !isProjectPage(shown.url)) {
+    throw new Error(
+      `the browser panel is showing ${shown.url}, a page on the web. The agent's page calls speak to ` +
+        `the project's own pages, which the preview scheme serves.`,
     );
   }
   if (op === "capture") return capture(shown);

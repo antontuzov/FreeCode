@@ -3,12 +3,21 @@ import { useEffect, useRef, useState } from "react";
 import { translate, type Locale } from "../i18n";
 import { ipc } from "../lib/ipc";
 import { attachPage } from "../lib/page";
-import { previewPage, previewPathOf, previewTab, useNav } from "../state/nav";
+import { previewPage, previewPathOf, previewTab, useNav, webUrlOf } from "../state/nav";
 import { Icon } from "./icons";
 
 /** The name a tab wears: the page's own file name, which is the part of the path that tells two
- * pages apart without spending the strip on a directory both of them share. */
+ * pages apart without spending the strip on a directory both of them share. A page on the web has no
+ * file name, so the tab wears the host it was read from. */
 function nameOf(path: string): string {
+  const web = webUrlOf(path);
+  if (web) {
+    try {
+      return new URL(web).host;
+    } catch {
+      return path;
+    }
+  }
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
@@ -17,8 +26,10 @@ function nameOf(path: string): string {
  *
  * It frames the `preview://` addresses the host serves from the project folder, so the game or page
  * a run built plays beside the conversation instead of taking over the window or being handed to the
- * desktop. The chrome is the reference's: a strip of tabs over a toolbar with the few things this
- * browser can honestly do — a new tab, the tab's own history, a reload, the address the tab is
+ * desktop, and it frames a page on the web when the address field names one — the site's own
+ * landing page, a document a run found — so the column is a browser and not only a mirror of the
+ * project folder. The chrome is the reference's: a strip of tabs over a toolbar with the few things
+ * this browser can honestly do — a new tab, the tab's own history, a reload, the address the tab is
  * standing on, and the way out to the default browser. A tab with no page is the reference's empty
  * state in this build's words: what the panel reads, and Start browser for the project's own index
  * page. The reference also draws download, edit-page and send glyphs; this build has no answer for
@@ -66,6 +77,14 @@ export function Preview({ locale }: { locale: Locale }) {
     // Enter in an empty field asks for nothing, so it is not answered with the refusal a web address
     // earns: there is no address there to refuse.
     if (!raw.trim()) return;
+    // A page on the web is framed as itself: the host serves the project's own pages, and this
+    // address is not one of them.
+    const web = webUrlOf(raw);
+    if (web) {
+      setRefused(null);
+      navigate(web, web);
+      return;
+    }
     const path = previewPathOf(raw);
     if (path === null) {
       setRefused(translate(locale, "preview.outside"));
@@ -84,7 +103,10 @@ export function Preview({ locale }: { locale: Locale }) {
     if (!page) return;
     setRefused(null);
     try {
-      await ipc.openFile(page.path);
+      // A page on the web leaves for the desktop as the address it is; a project's own page leaves as
+      // the file it is, which the host confines to the workspace.
+      if (webUrlOf(page.url)) await ipc.openUrl(page.url);
+      else await ipc.openFile(page.path);
     } catch (why) {
       setRefused(translate(locale, "preview.externalFailed", { why: String(why) }));
     }
@@ -263,6 +285,13 @@ export function Preview({ locale }: { locale: Locale }) {
           key={`${page.url}#${tab?.reloads ?? 0}`}
           src={page.url}
           title={nameOf(page.path)}
+          // A page on the web is framed in a sandbox of its own: the project's own pages are served
+          // by this app and need the window they are in, while a page from the web is a guest in it.
+          sandbox={
+            webUrlOf(page.url)
+              ? "allow-scripts allow-same-origin allow-forms allow-popups"
+              : undefined
+          }
           className="min-h-0 w-full flex-1 border-0 bg-white"
         />
       ) : (
