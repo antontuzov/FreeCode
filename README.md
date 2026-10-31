@@ -1,40 +1,49 @@
 # FreeCode
 
-A desktop coding agent that runs on **free models**. FreeCode ships pointed at the free tier
-[OpenCode](https://opencode.ai) serves — a real agent loop, no account, no API key, no bill — with
-Big Pickle as the model it starts on.
+**A desktop coding agent that runs on free models.** No account, no API key, no bill.
 
-There is no local model in this build: no weights to download, no server to start, no engine to
-install. A third route — any OpenAI-compatible provider — is available as an explicit opt-in.
+[![Release](https://img.shields.io/github/v/release/antontuzov/FreeCode?label=release)](https://github.com/antontuzov/FreeCode/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![macOS](https://img.shields.io/badge/platform-macOS%20%7C%20Apple%20silicon-lightgrey)](#requirements)
 
-Tauri v2 shell, Rust host, React interface, and a three-column workbench: transcript in the middle,
-workspace on the left, the run's report on the right. Every tool call leaves a row, every refusal
-names its reason in the language the interface is read in, and every number in the inspector is one
-the service or the host actually measured.
+FreeCode is a native macOS workbench — Rust host, Tauri v2, React interface — pointed at the free
+tier [OpenCode](https://opencode.ai) publishes. It is a real agent loop: it reads your project,
+writes files, runs your checks, drives a browser, and shows every step it took.
 
-## The two routes
+**[Download for macOS →](https://github.com/antontuzov/FreeCode/releases/latest/download/FreeCode.dmg)**
+· [Landing page](https://antontuzov.github.io/FreeCode/) · [Issues](https://github.com/antontuzov/FreeCode/issues)
 
-| Route | Who answers | What it needs |
-| --- | --- | --- |
-| **Free — OpenCode** (default) | The free models OpenCode publishes, Big Pickle first | OpenCode installed on this Mac; FreeCode starts its service |
-| **Remote** (optional) | Any OpenAI-compatible endpoint | An HTTPS base URL and a key, both chosen in Settings |
+> The build is not signed or notarised yet. On first launch, right-click the app → **Open**, then
+> confirm once; Gatekeeper leaves it alone after that.
 
-The composer's model pill picks the route for the next turn, and the status strip names the one that
-answered. "Remote" never falls back to the free tier: a route that is not available refuses the turn
-and says what is missing.
+## What it is
 
-## Free models: OpenCode's tier
+A three-column workbench: conversations on the left, the transcript in the middle, the run's report
+on the right. The transcript is not a chat log — every tool call is a row with its own result, every
+refusal names the reason in your interface language, and the inspector reports only numbers the
+service or the host actually measured.
 
-OpenCode's free models are served only to OpenCode's own runtime. FreeCode is that runtime's client,
-not a way around it: the turn is relayed through the daemon the OpenCode app keeps on loopback, using
-the handshake its gateway expects. Nothing is scraped, no credential is invented, and the app does not
-bundle OpenCode — it uses the copy already on the Mac, and runs that copy's `service start` when its
-daemon is not up yet. A machine without OpenCode gets a refusal that names the one download it needs,
-not a set of free rows that can never answer.
+- **A real agent loop.** The model reads and searches the project, creates and edits files, applies
+  patches, and runs the workspace's own tests, build and linter through argv. Each round is narrated
+  in the transcript.
+- **A browser the agent can use.** It opens the page it built in a panel beside the chat, clicks and
+  types in it, screenshots it, and can look at that screenshot with a vision model.
+- **A terminal beside the chat.** Watch every shell command a run executes, or open your own shell in
+  the project folder and re-run the check by hand. Commands pass the same approval policy, and the
+  panel can run a Python REPL in the project folder as well.
+- **Review before you trust.** Every change lands in a diff panel with line numbers and a find
+  control. A run keeps a before-image journal, so revert puts the folder back the way it was —
+  including files the run created.
+- **Plan mode.** The same run as a read-only proposer, marked so it cannot be mistaken for a change
+  that already happened.
+- **Light and dark, eight interface styles, English and Russian.**
 
-The list is what `opencode models` prints under its own provider — read from the CLI the installed app
-ships (v2.2.0) on 2026-10-29. The service hands out the list, so it moves without an app update, and a
-release can add rows the pinned registry does not carry yet.
+## Free models
+
+The free models are served only to OpenCode's own runtime. FreeCode is that runtime's client, not a
+way around it: a turn is relayed through the daemon the OpenCode app keeps on loopback, using the
+handshake its gateway expects. Nothing is scraped and no credential is invented. The app does not
+bundle OpenCode — it uses the copy already on your Mac and starts its service when it is not up.
 
 | Model id | Label | Carrier |
 | --- | --- | --- |
@@ -47,174 +56,131 @@ release can add rows the pinned registry does not carry yet.
 | `nemotron-3.5-lightning-free` | Nemotron 3.5 Lightning | NVIDIA |
 | `nemotron-3.5-super-vl-free` | Nemotron 3.5 Super VL | NVIDIA |
 
-**The default is free.** A settings document that never picked a model — and had not already chosen a
-remote provider — is migrated onto Big Pickle once; a new conversation opens on it, and a free turn
-needs neither the Privacy switch nor a key.
+The list is what OpenCode's service publishes, not a list baked into this repo, so it moves without
+an app update: when a model stops being free its row stops answering rather than quietly billing you.
+Switch models mid-task — the run keeps its context and the report says which one answered.
 
-**One route, and no key.** That service is the only thing that answers a free row. Earlier builds also
-carried an optional OpenRouter key as a fallback and walked a failed turn down its own list; that route
-is gone, because its ids were this app's guess at a mirror of OpenCode's list rather than a route
-OpenCode publishes, and a row naming DeepSeek or NVIDIA while asking a third party for it said
-something about those makers that was not true. So **when the service is not running**, every free row
-is listed and not pickable, and a turn sent anyway is refused with that reason — never moved to a model
-nobody chose.
+**Free means cloud.** A free-model prompt leaves your Mac and is answered by OpenCode's provider under
+their terms. The optional remote route is the only other way to answer a prompt. There is no local
+model in this build — no weights to download, no server to start, no engine to install.
 
-**Free means cloud.** A free-model prompt leaves this Mac and is answered by OpenCode's provider,
-under their terms. The optional remote route is the only other way to answer a prompt.
+### Remote providers (optional)
 
-## What the agent does
+Settings → Model → Remote provider can send prompts to any OpenAI-compatible endpoint instead. It is
+opt-in twice: the *Allow remote providers* switch must be on, and the source must be set to Remote.
+The key lives in the macOS Keychain — never in the settings file, IPC answers, logs or process
+arguments — and is sent as `Authorization: Bearer` only while a request is being built. The base URL
+must be `https://…` (plain `http://` only on loopback). No sampler values or reasoning field are sent;
+an arbitrary endpoint has neither, so its own defaults apply.
 
-Every prompt is an agent prompt. The model reads and searches the project, creates files, edits them
-and applies whole-file patches, and narrates each round in the transcript. Each change lands in a
-review panel with its diff, line numbers and a find control, and a press on its file row hands the
-page to the desktop's own handler.
+## Install
 
-On the free route the relay sees a write only once the service reports it, after the file has changed,
-so it holds no before-image and the review panel refuses a revert it cannot prove rather than
-restoring a state it does not have.
+**Download** the `.dmg` from [Releases](https://github.com/antontuzov/FreeCode/releases/latest),
+drag FreeCode to Applications, right-click → Open on first launch.
 
-- **The workspace is bounded.** Reads and writes are confined to the project folder chosen in
-  Settings → Agent → Project. A folder that has since moved refuses the run by name rather than
-  falling back somewhere else.
-- **On the free route** the OpenCode session carries its own read, search, edit and patch tools. Every
-  path it would write is checked against the same sandbox, and the permission request it raises is
-  answered synchronously: inside the folder under the approval dial's policy, refused outside it.
-  The shell, web fetch and browser tools are denied for a free-model run whatever the switches say —
-  those belong to the remote route, which prices them through their own controls.
-- **Plan only** turns the same run into a proposer: read-only calls, a plan-shaped answer, and a Plan
-  mark so it cannot be read as a change that already happened.
-- **Nothing asks mid-run.** The approval dial is read when the prompt is sent; a call it refuses comes
-  back as a blocked row naming the policy. There is no prompt a run could wait on in this build.
+**Or build it:**
+
+```sh
+pnpm install
+pnpm app:dev        # the app with a live dev frontend
+pnpm app:build      # a .app and a .dmg under target/release/bundle/
+```
+
+Both routes need [OpenCode](https://opencode.ai) installed for the free models. FreeCode starts its
+service itself and says plainly when OpenCode is missing.
+
+## Requirements
+
+- macOS 12 or newer on Apple silicon. Every native build and capture was made here. Windows and
+  Linux are not built or tested; the Windows button says "in the works" rather than linking a file
+  that does not exist.
+- [OpenCode](https://opencode.ai) — the app whose local service answers the free models.
+- Rust stable with `rustfmt` and `clippy`, Node 22 or newer, and pnpm 11 through corepack
+  (`packageManager` is pinned in the root manifest).
+
+## Where things live
+
+| What | Where |
+| --- | --- |
+| Settings | `~/Library/Application Support/freecode/settings.json` |
+| Remote provider key | macOS Keychain, service `studio.freecode.desktop.remote-provider` |
+| Filed conversations | `sessions/` beside the settings file, one JSON file each |
+| Deleted conversations | `sessions/trash/`, until Settings → Storage erases one for good |
+
+A checkout reads its data from the repo root. An installed `.app` uses the directory it owns;
+`FREECODE_ROOT` overrides the root strictly, so a wrong override fails loudly instead of verifying
+the wrong tree.
+
+## Development
+
+| Command | What it does |
+| --- | --- |
+| `pnpm app:dev` | the native app against the Vite dev server |
+| `./scripts/verify-precommit.sh` | the gate: fmt, clippy `-D warnings`, Rust tests, prettier, eslint, tsc, store tests, build, landing root copy |
+| `./scripts/verify-tauri-ui.sh` | boots the real window |
+| `./scripts/verify-studio-natively.sh` | the full native set |
+| `./scripts/render-mascot-logos.py <sheet.png>` | cuts the twelve duck app icons from the sheet |
+| `./scripts/render-wave-marks.py ~/Desktop/wave.png` | cuts the two circular wave app icons |
+
+Four checks exist because a claim that is not enforced rots within a commit:
+
+- `check-i18n.mjs` — every key defined in both catalogs, and every literal lookup defined.
+- `check-contrast.mjs` — every grey and style ink at 4.5:1 on every surface each style paints.
+- `check-shortcuts.mjs` — every binding answered by a handler, every hint reading its label.
+- `check-settings-index.mjs` — the search index matching the rows each Settings page renders.
+
+### Looking at the UI without clicking
+
+The native window takes no injected clicks on a developer machine, and several states are one press
+deep. The dev URL accepts seeds no shipped control sets:
+
+| Seed | Opens |
+| --- | --- |
+| `?fixture=1` | a scripted run, so the transcript and inspector render with nothing to show yet |
+| `?ask=<prompt>` | a real agent run, started from the URL |
+| `?settings=<page>`, `?q=<query>` | a Settings page, and the search field |
+| `?row=<control>` | a Settings control scrolled into view, whether it is a row or a grid of tiles |
+| `?terminal=1`, `?session=shell\|python`, `?input=<line>` | the terminal panel, its own shell or Python session, and the lines typed into it |
+| `?review=1`, `?find=<text>`, `?scope=all`, `?outline=1` | the review panel, its find field, its scope and its fold |
+| `?plan=1`, `?collapsed=<groups>`, `?extensions=1` | the plan panel, the inspector's lower groups, the Extensions inventory |
+
+`pnpm app:dev:fixture`, `app:dev:settings` and `app:dev:chat` are three pre-wired ones.
 
 ## What this build does not do
 
 Said plainly, because the interface says it too — a control that is not built is disabled and names
 the reason on hover:
 
-- Sixteen of the thirty declared tools have executors, and `spawn_subagent` is answered by the run loop
-  rather than an executor. The rest are declared so the model can ask; a call to one is answered with a
-  row that says it was not run. The runners and the three `git` reads are real: they execute the
-  workspace's own manifest through argv, and they are offered only while Terminal access is on.
-- Nothing produces an artifact yet, so that inspector group is the one still scripted under
-  `?fixture=1`.
-- You cannot attach a file to a prompt. The composer's add control is dead until there is a retrieval
-  path to put it in.
-- No telemetry exists to switch off: nothing in this build collects or sends usage data.
-
-## Remote providers (optional)
-
-Settings → Model → Remote provider can send prompts to an OpenAI-compatible endpoint instead of the
-free tier. It is opt-in twice: the Privacy switch *Allow remote providers* must be
-on, and the source must be set to Remote. The key is stored in the macOS Keychain, never in the
-settings file, IPC answers, logs or process arguments, and is sent as `Authorization: Bearer` only
-while a request is being built.
-
-The base URL must be `https://…`; plain `http://` is accepted only for a loopback address. The app
-appends `/v1/chat/completions`. No sampler values or reasoning-effort field are sent — an arbitrary
-endpoint has neither, so its own defaults apply.
-
-## Requirements
-
-- macOS on Apple Silicon. CI and the native builds were verified here; the lock records Intel, Windows
-  and Linux targets, but nothing has been run on them.
-- The [OpenCode](https://opencode.ai) app for the free route. FreeCode starts its service itself and
-  says when OpenCode is not installed.
-- Rust stable with `rustfmt` and `clippy`.
-- Node 22 or newer, and pnpm 11 through corepack (`packageManager` is pinned in the root manifest).
-
-## Getting started
-
-```sh
-pnpm install
-pnpm app:dev
-```
-
-Install OpenCode once; the free tier is the default and the first prompt is answered on Big Pickle —
-the app starts the service for you. To build the app bundle: `pnpm app:build`.
-
-## Where things live
-
-| What | Where |
-| --- | --- |
-| Settings | `~/Library/Application Support/freecode/settings.json` (platform standard elsewhere) |
-| Remote provider key | macOS Keychain, service `studio.freecode.desktop.remote-provider` — the only key this app reads |
-| Filed conversations | `sessions/` beside the settings file, one JSON file each |
-| Deleted conversations | `sessions/trash/`, until Settings → Storage erases one for good |
-| Server pid registry | `servers.pid` beside it |
-
-A checkout reads its data from the repo root. An installed `.app` uses the directory it owns;
-`FREECODE_ROOT` overrides the root and is honoured strictly, so a wrong override fails loudly rather
-than verifying the wrong tree.
-
-## Checks
-
-`./scripts/verify-precommit.sh` is the gate — fmt, clippy at `-D warnings`, the whole Rust test suite,
-frontend format, lint, typecheck, store tests and build. It runs in CI on every PR and from
-`.githooks/pre-commit`.
-
-Alongside it, `verify-tauri-ui.sh` boots the real window, `verify-desktop-native.sh` builds and tests
-the host, and `verify-studio-natively.sh` runs the whole set. `pnpm verify:all` is the long path.
-
-Four of the checks exist because a claim that is not enforced rots within a commit:
-
-- `check-i18n.mjs` — every key defined in both catalogs, and every literal lookup defined. The Rust
-  side of the same promise is `verify-transcript-i18n`: a row's label, a tool's one-line result, a
-  notice, a refusal's three sentences.
-- `check-contrast.mjs` — every grey and every style ink at 4.5:1 on every surface each of the eight
-  styles paints, in both modes.
-- `check-shortcuts.mjs` — every binding in `lib/shortcuts.ts` answered by a handler, and every hint
-  that names a key reading its label from the table.
-- `check-settings-index.mjs` — the search index matching the rows each Settings page actually renders.
-
-## Looking at the UI without clicking
-
-The native window takes no injected clicks on a developer machine, and several states are one press
-deep. The dev URL accepts seeds that no shipped control ever sets:
-
-| Seed | Opens |
-| --- | --- |
-| `?fixture=1` | a scripted run, so the transcript and inspector render with nothing to show yet |
-| `?plan=1` | the run's plan panel, opened over the fixture's list |
-| `?collapsed=<groups>` | the inspector's lower groups |
-| `?settings=<page>`, `?q=<query>` | a Settings page, and the search field |
-| `?review=1`, `?find=<text>`, `?scope=all`, `?outline=1` | the review panel, its find field, its scope and its fold |
-| `?ask=<prompt>` | a real agent run, started from the URL |
-| `?extensions=1` | the Extensions inventory |
-
-`pnpm app:dev:fixture`, `app:dev:settings` and `app:dev:chat` are the three pre-wired ones.
-
-## Shipping
-
-`pnpm app:build` produces an unsigned `.app` and a `.dmg` under `target/release/bundle/`. A second
-launch never starts a second app: the new process hands over and the open window comes forward.
-
-Two release steps are not wired yet, and this build makes no claim to have them:
-
-- **Signing and notarisation.** The bundle is ad-hoc signed, so a copy downloaded from the internet is
-  blocked by Gatekeeper until it is allowed in System Settings → Privacy & Security.
-- **The updater.** It needs a published update endpoint and a signing key pair whose public half ships
-  in the app. Neither exists here, so the app does not check for updates.
+- **No local model.** The local route, its weights and its engine were removed; every build of this
+  app answers over the network.
+- **Not signed or notarised.** The bundle is ad-hoc signed, so a copy downloaded from the internet
+  needs one right-click → Open.
+- **No updater.** It needs a published update endpoint and a signing key pair that does not exist
+  yet; the app tells you when a newer release is published but does not install it.
+- **No telemetry.** Nothing in this build collects or sends usage data.
+- **No file attachments.** The composer's add control is dead until there is a retrieval path.
 
 ## Layout
 
 ```
 crates/freecode-config    settings document, privacy and approval policy
+crates/freecode-tools     the tool registry, the sandbox, exec/web/page/pixel helpers
+crates/freecode-core      the transcript model, the agent loop, approvals
 crates/freecode-models    the retired local route's catalog contract, kept in-tree, not wired in
 crates/freecode-llama     the fork's remote streaming types, kept in-tree, not wired in
-crates/freecode-tools     the tool registry, the sandbox, the two web calls
-crates/freecode-core      the transcript model, the agent loop, approvals
 apps/desktop              the Tauri v2 host, the OpenCode relay and the React interface
+site                      the landing page published at antontuzov.github.io/FreeCode
 docs/reference-ui         the screenshots the interface is matched against
 docs/KNOWN_ISSUES.md      every model limit the code defends against, and where the defence is
 ```
 
 ## Third-party
 
-- **OpenCode** — the free tier and the loopback service the free route is relayed through. FreeCode is
-  not affiliated with OpenCode; the app uses the copy the user installed and its published free list.
-- **Simple Icons (CC0)** — the path data behind the seven marks the app wears: three site signs in the
-  inspector (Hugging Face, GitHub, Wikipedia) and four maker signs on the model rows (DeepSeek, NVIDIA,
-  Xiaomi, MiniMax). The signs remain their owners' trademarks; only the icon geometry is shared.
+- **OpenCode** — the free tier and the loopback service the free route is relayed through. FreeCode
+  is not affiliated with OpenCode; it uses the copy you installed and the list that service publishes.
+- **Simple Icons (CC0)** — path data for the marks the app wears: GitHub, Hugging Face, Wikipedia and
+  four maker signs on the model rows. The signs remain their owners' trademarks; only the icon
+  geometry is shared.
 - **KaTeX** fonts and stylesheet, bundled with the frontend build.
 
 FreeCode is MIT licensed; see [`LICENSE`](LICENSE).
