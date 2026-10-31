@@ -1,11 +1,27 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 
 import { translate, type Locale } from "../i18n";
-import { ipc, type ShellRefusal } from "../lib/ipc";
+import { ipc, type ShellLanguage, type ShellRefusal } from "../lib/ipc";
 import { shortcutLabel } from "../lib/shortcuts";
 import { useShell } from "../state/shell";
 import { RUNNER_LABEL_KEY, SHELL_TAB, useTerminal, type TerminalRun } from "../state/terminal";
 import { Icon } from "./icons";
+
+/** What the tab is called: the language the session speaks, and for Python the folder as well, since
+ *  the shell's tab is the folder and the two sessions are told apart by the first word. */
+function sessionLabel(language: ShellLanguage, cwd: string, locale: Locale): string {
+  const name = translate(locale, language === "python" ? "terminal.python" : "terminal.shell");
+  const folder = cwd ? folderName(cwd) : "";
+  if (language === "python") return folder ? `${name} · ${folder}` : name;
+  return folder || name;
+}
 
 /** What a tab is called: the command as the host worded it, or the check it ran when the manifest
  *  chose the command and the row carries no subject. Only the first line is a label — a script can
@@ -28,8 +44,14 @@ function folderName(path: string): string {
 }
 
 /** Why a line or a start was refused, in the interface's language. The host answers with a code and
- *  the command it refused; where the sentence points is the catalog's business. */
-export function refusalText(locale: Locale, refusal: ShellRefusal): string {
+ *  the command it refused; where the sentence points is the catalog's business. A start names the
+ *  language it tried to open, because "the shell could not start" is the wrong sentence under a
+ *  Python tab. */
+export function refusalText(
+  locale: Locale,
+  refusal: ShellRefusal,
+  language: ShellLanguage = "shell",
+): string {
   switch (refusal.code) {
     case "off":
       return translate(locale, "terminal.refusal.off");
@@ -42,7 +64,11 @@ export function refusalText(locale: Locale, refusal: ShellRefusal): string {
     case "closed":
       return translate(locale, "terminal.refusal.closed");
     case "start":
-      return translate(locale, "terminal.refusal.start", { reason: refusal.reason });
+      return translate(
+        locale,
+        language === "python" ? "terminal.refusal.startPython" : "terminal.refusal.start",
+        { reason: refusal.reason },
+      );
   }
 }
 
@@ -55,9 +81,11 @@ export function refusalText(locale: Locale, refusal: ShellRefusal): string {
  * still exactly the shell's own rules. The last N runs stay when a run ends, because a check's
  * failure is read after it failed.
  *
- * The first tab is the panel's own shell, when it has one: a real terminal in the project folder, so a
- * failing check can be re-run by hand without leaving the app. It is not a way around the dial — see
- * `state/shell.ts` and `shell.rs` — and its body is where the user types.
+ * The first tab is the panel's own session, when it has one: a real shell or a Python REPL in the
+ * project folder, so a failing check can be re-run by hand without leaving the app. It is not a way
+ * around the dial — see `state/shell.ts` and `shell.rs` — and its body is where the user types. The
+ * panel holds one session at a time; the strip's `+` asks which language, and the tab is written for
+ * the one that answered.
  *
  * The chrome is the reference's bottom panel: a strip of tabs, the clear and fold controls, and the
  * way out. A tab's output is a terminal body rather than a transcript row — it follows the tail while
@@ -78,26 +106,50 @@ export function Terminal({ locale }: { locale: Locale }) {
   const hideShell = useTerminal((s) => s.hideShell);
   const shellStatus = useShell((s) => s.status);
   const shellCwd = useShell((s) => s.info?.cwd ?? "");
+  const shellLanguage = useShell((s) => s.language);
+  // The strip's `+` is a question rather than a press: one session at a time, so it asks which
+  // language before it starts anything.
+  const plus = useRef<HTMLButtonElement>(null);
+  const [menu, setMenu] = useState<{ left: number; bottom: number } | null>(null);
 
   const run = runs.find((one) => one.id === active) ?? null;
   const showingShell = shellTab && active === SHELL_TAB;
   const output = run?.output ?? "";
 
-  // The tab appears first and the process is asked for second, so a slow start shows the shell as
+  // The tab appears first and the process is asked for second, so a slow start shows the session as
   // opening rather than the press doing nothing. A refusal lands in the same tab as a sentence.
-  const openShell = () => {
+  const openShell = (language: ShellLanguage = "shell") => {
     showShell();
-    void useShell.getState().open();
+    void useShell.getState().open(language);
   };
   const closeShell = () => {
     void useShell.getState().close();
     hideShell();
   };
+  // The panel sits on the window's bottom edge, so the menu opens upward from the button it belongs
+  // to, at the exact place the plus was pressed.
+  const openMenu = useCallback(() => {
+    const rect = plus.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMenu({ left: Math.max(8, rect.left), bottom: window.innerHeight - rect.top + 6 });
+  }, []);
+  const pick = (language: ShellLanguage) => {
+    setMenu(null);
+    openShell(language);
+  };
+
+  // `?newmenu=1` stands in for the click the strip's `+` needs: the native window takes no injected
+  // clicks, and this menu is the only way to ask which language the next session speaks.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (new URLSearchParams(window.location.search).get("newmenu") !== "1") return;
+    openMenu();
+  }, [openMenu]);
 
   const clearLabel = translate(locale, "terminal.clear");
   const foldLabel = translate(locale, collapsed ? "terminal.expand" : "terminal.collapse");
   const closeLabel = translate(locale, "terminal.close");
-  const shellLabel = translate(locale, "terminal.shell.open");
+  const newLabel = translate(locale, "terminal.new.open");
 
   return (
     <section
@@ -129,16 +181,20 @@ export function Terminal({ locale }: { locale: Locale }) {
                 role="tab"
                 aria-selected={showingShell}
                 onClick={() => focus(SHELL_TAB)}
-                title={shellCwd || translate(locale, "terminal.shell")}
+                title={shellCwd || sessionLabel(shellLanguage, "", locale)}
                 className="flex min-w-0 items-center gap-[var(--space-2)] py-1 text-quiet"
               >
                 {shellStatus === "opening" ? (
                   <span aria-hidden className="dot-running shrink-0" />
                 ) : (
-                  <Icon name="terminal" size={12} className="shrink-0 text-faint" />
+                  <Icon
+                    name={shellLanguage === "python" ? "coding" : "terminal"}
+                    size={12}
+                    className="shrink-0 text-faint"
+                  />
                 )}
                 <span className="truncate font-mono">
-                  {shellCwd ? folderName(shellCwd) : translate(locale, "terminal.shell")}
+                  {sessionLabel(shellLanguage, shellCwd, locale)}
                 </span>
               </button>
               <button
@@ -188,10 +244,13 @@ export function Terminal({ locale }: { locale: Locale }) {
           })}
           {!shellTab && (
             <button
+              ref={plus}
               type="button"
-              onClick={openShell}
-              aria-label={shellLabel}
-              title={shellLabel}
+              onClick={openMenu}
+              aria-label={newLabel}
+              title={newLabel}
+              aria-haspopup="menu"
+              aria-expanded={menu !== null}
               className="icon-btn shrink-0"
             >
               <Icon name="plus" size={15} />
@@ -235,6 +294,47 @@ export function Terminal({ locale }: { locale: Locale }) {
         </div>
       </div>
 
+      {menu && (
+        <>
+          {/* The same scrim the row menus use: the panel behind the menu is not repainted, and a mask
+              over the window would hide the tab the menu belongs to. */}
+          <span className="picker-scrim" onClick={() => setMenu(null)} />
+          <div
+            role="menu"
+            aria-label={newLabel}
+            className="menu-panel menu-panel--row"
+            style={{ left: menu.left, bottom: menu.bottom, top: "auto", right: "auto" }}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              setMenu(null);
+            }}
+          >
+            <div className="menu-main">
+              {(
+                [
+                  ["shell", "terminal", "terminal.shell.open"],
+                  ["python", "coding", "terminal.python.open"],
+                ] as const
+              ).map(([language, icon, label]) => (
+                <button
+                  key={language}
+                  type="button"
+                  role="menuitem"
+                  autoFocus={language === "shell"}
+                  className="menu-row"
+                  onClick={() => pick(language)}
+                >
+                  <Icon name={icon} size={12} className="shrink-0" />
+                  <span className="menu-label truncate">{translate(locale, label)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
       {!collapsed &&
         (showingShell ? (
           <ShellBody locale={locale} />
@@ -246,14 +346,24 @@ export function Terminal({ locale }: { locale: Locale }) {
             <p className="max-w-[52ch] text-fine text-faint">
               {translate(locale, "terminal.empty")}
             </p>
-            <button
-              type="button"
-              onClick={openShell}
-              className="mt-[var(--space-1)] inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-[var(--space-3)] py-1 text-quiet text-muted hover:bg-hover hover:text-fg"
-            >
-              <Icon name="terminal" size={13} />
-              {shellLabel}
-            </button>
+            <div className="mt-[var(--space-1)] flex items-center gap-[var(--space-2)]">
+              {(
+                [
+                  ["shell", "terminal", "terminal.shell.open"],
+                  ["python", "coding", "terminal.python.open"],
+                ] as const
+              ).map(([language, icon, label]) => (
+                <button
+                  key={language}
+                  type="button"
+                  onClick={() => openShell(language)}
+                  className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-line px-[var(--space-3)] py-1 text-quiet text-muted hover:bg-hover hover:text-fg"
+                >
+                  <Icon name={icon} size={13} />
+                  {translate(locale, label)}
+                </button>
+              ))}
+            </div>
           </div>
         ))}
     </section>
@@ -331,23 +441,30 @@ function RunBody({ locale, run, output }: { locale: Locale; run: TerminalRun; ou
 const RULER = "0000000000";
 
 /**
- * The panel's own shell, as a terminal body and a prompt row.
+ * The panel's own session, as a terminal body and a prompt row — a shell or a Python REPL, told apart
+ * by the prompt and the words around it.
  *
  * The field is a line, not a keystroke stream: the host admits the whole line through the approval
- * engine before it reaches the terminal, and the shell runs with its own echo and line editor off, so
- * the prompt row *is* the shell's input. What that costs is stated rather than hidden — there is no
- * cursor editing or tab completion here — and what it buys is that a line the dial refuses never runs,
- * which is the half the dial exists for.
+ * engine before it reaches the session, and neither the shell (echo off) nor Python (a pipe with no
+ * echo) draws the line back, so the prompt row *is* the input. What that costs is stated rather than
+ * hidden — there is no cursor editing or tab completion here — and what it buys is that a line the
+ * dial refuses never runs, which is the half the dial exists for. Python keeps leading indentation and
+ * accepts an empty line, because both are part of how a suite is written at a REPL.
  */
 function ShellBody({ locale }: { locale: Locale }) {
   const status = useShell((s) => s.status);
   const info = useShell((s) => s.info);
+  const language = useShell((s) => s.language);
   const text = useShell((s) => s.text);
   const exitCode = useShell((s) => s.exitCode);
   const refusal = useShell((s) => s.refusal);
   const open = useShell((s) => s.open);
   const send = useShell((s) => s.send);
   const interrupt = useShell((s) => s.interrupt);
+  const python = language === "python";
+  // The prompt the user reads above the field is the one the interpreter would print; the panel
+  // writes it because neither session draws its own prompt.
+  const prompt = python ? ">>>" : "$";
 
   const [line, setLine] = useState("");
   const history = useRef<string[]>([]);
@@ -385,7 +502,8 @@ function ShellBody({ locale }: { locale: Locale }) {
   // reader sees it end. Measured rather than assumed: the character's width comes from a ruler drawn
   // in the body's own font, and the rows from the body's own line height.
   useEffect(() => {
-    if (status !== "live") return;
+    // A Python session has no terminal to size: its input is a pipe.
+    if (status !== "live" || python) return;
     const el = body.current;
     const sample = ruler.current;
     if (!el || !sample) return;
@@ -410,12 +528,15 @@ function ShellBody({ locale }: { locale: Locale }) {
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [status]);
+  }, [status, python]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const command = line.trim();
-    if (!command) {
+    // Python keeps the line as typed — indentation is the block's — and an empty line is the one that
+    // closes a block, so it is sent as a line. A shell command is trimmed and an empty one runs
+    // nothing.
+    const command = python ? line : line.trim();
+    if (!command && !python) {
       setLine("");
       return;
     }
@@ -426,7 +547,7 @@ function ShellBody({ locale }: { locale: Locale }) {
       return;
     }
     const list = history.current;
-    if (list[list.length - 1] !== command) list.push(command);
+    if (command && list[list.length - 1] !== command) list.push(command);
     recalled.current = list.length;
     setLine("");
   };
@@ -455,7 +576,10 @@ function ShellBody({ locale }: { locale: Locale }) {
     }
   };
 
-  const placeholder = translate(locale, "terminal.shell.placeholder");
+  const placeholder = translate(
+    locale,
+    python ? "terminal.python.placeholder" : "terminal.shell.placeholder",
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -480,8 +604,8 @@ function ShellBody({ locale }: { locale: Locale }) {
         ) : (
           <span className="text-faint">
             {status === "opening"
-              ? translate(locale, "terminal.shell.opening")
-              : translate(locale, "terminal.shell.empty")}
+              ? translate(locale, python ? "terminal.python.opening" : "terminal.shell.opening")
+              : translate(locale, python ? "terminal.python.empty" : "terminal.shell.empty")}
           </span>
         )}
       </pre>
@@ -491,7 +615,7 @@ function ShellBody({ locale }: { locale: Locale }) {
           role="alert"
           className="shrink-0 border-t border-line px-[var(--space-4)] py-1.5 text-fine text-danger"
         >
-          {refusalText(locale, refusal)}
+          {refusalText(locale, refusal, language)}
         </p>
       )}
 
@@ -501,7 +625,7 @@ function ShellBody({ locale }: { locale: Locale }) {
           className="flex shrink-0 items-center gap-[var(--space-2)] border-t border-line px-[var(--space-4)] py-1"
         >
           <span aria-hidden className="select-none font-mono text-fine text-faint">
-            $
+            {prompt}
           </span>
           <input
             ref={input}
@@ -534,16 +658,20 @@ function ShellBody({ locale }: { locale: Locale }) {
           <span>
             {status === "ended"
               ? exitCode === null
-                ? translate(locale, "terminal.shell.ended")
-                : translate(locale, "terminal.shell.endedCode", { code: exitCode })
-              : translate(locale, "terminal.shell.closed")}
+                ? translate(locale, python ? "terminal.python.ended" : "terminal.shell.ended")
+                : translate(
+                    locale,
+                    python ? "terminal.python.endedCode" : "terminal.shell.endedCode",
+                    { code: exitCode },
+                  )
+              : translate(locale, python ? "terminal.python.closed" : "terminal.shell.closed")}
           </span>
           <button
             type="button"
-            onClick={() => void open()}
+            onClick={() => void open(language)}
             className="rounded-[var(--radius-md)] border border-line px-[var(--space-2)] py-0.5 text-quiet text-muted hover:bg-hover hover:text-fg"
           >
-            {translate(locale, "terminal.shell.restart")}
+            {translate(locale, python ? "terminal.python.restart" : "terminal.shell.restart")}
           </button>
         </div>
       )}

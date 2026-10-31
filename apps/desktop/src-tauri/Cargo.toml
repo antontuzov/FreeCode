@@ -48,6 +48,9 @@ base64 = "0.22"
 # Windows, so the dependency is gated to the platforms that have the signals.
 [target.'cfg(unix)'.dependencies]
 tokio = { workspace = true }
+# The Python REPL has no terminal to carry its Ctrl-C, so `shell.rs` sends `SIGINT` and `SIGKILL`
+# to the pid itself. One declaration, two signal constants.
+libc = "0.2"
 
 # Tauri 2.12 has no `set_dock_icon`, so the mascot the Dock wears is set through AppKit directly.
 # The two `NSApplication`/`NSImage` features are the whole ask: opting into only those classes is what

@@ -18,6 +18,17 @@
 //! A prompt in the dial (Ask mode) is an admission here: the person typing the line is the one the
 //! prompt would be asking. A refusal (Plan-only, Terminal access off, the command on the deny list) is
 //! kept, which is the half the dial exists for.
+//!
+//! # The Python half
+//!
+//! The panel opens either a shell or a Python REPL in the project folder; the lines go through the
+//! same [`admit`], so the same switch, dial and deny list stand in front of both. Python is not given a
+//! PTY. A PTY is what makes an interactive Python build read keys through readline, and readline draws
+//! the line it reads — the panel would then show every command twice, and the "the host echoes the
+//! admitted line" promise would be gone. Piped input has no terminal echo and no line editor, so the
+//! line the host reports is the only copy of it. [`PY_STARTUP`] blanks the prompts and raises the same
+//! ready marker [`RC`] does, and Ctrl-C is a real `SIGINT` at the process rather than an ETX byte,
+//! which is what makes Python answer it with `KeyboardInterrupt` and keep the session open.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -30,9 +41,18 @@ use freecode_config::agent::{shell_governed, ApprovalMode, Approvals};
 use freecode_core::approvals::{evaluate, ApprovalDecision, Pending};
 use freecode_tools::SandboxPolicy;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+/// What the panel starts: the user's own shell, or a Python REPL. Both run in the project folder and
+/// both are admitted line by line by [`admit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Language {
+    Shell,
+    Python,
+}
 
 /// What starting or sending a line was refused by. The window words it; the codes are the contract.
 #[derive(Debug, Clone, Serialize)]
@@ -57,6 +77,8 @@ pub struct ShellInfo {
     pub id: u64,
     /// The folder the shell starts in, so the panel can say where a command will run.
     pub cwd: String,
+    /// Which of the two sessions this is, so the panel can write the right prompt and tab.
+    pub language: Language,
 }
 
 /// What the window hears while a shell is open. One channel: the line it admitted, the bytes back,
@@ -98,23 +120,92 @@ impl Default for ShellState {
 struct Session {
     id: u64,
     cwd: PathBuf,
-    /// The master side is what keeps the PTY open: dropping it hangs the shell up, so it lives as
-    /// long as the session and is the handle a resize goes through.
-    master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
-    killer: Box<dyn ChildKiller + Send + Sync>,
+    language: Language,
+    process: Process,
     /// Set by the waiter thread, so a send after the shell ended is answered as such rather than
     /// writing into a closed terminal.
     dead: Arc<AtomicBool>,
-    /// Raised once the startup file has turned echo off. A send holds until then.
+    /// Raised once the startup has finished and the session may be written to. A send holds until
+    /// then.
     ready: Arc<Ready>,
-    /// The frame the shell sourced its startup from. Removed with the session.
-    rc: PathBuf,
+    /// The folder the startup file was written in. Removed with the session.
+    scratch: PathBuf,
+}
+
+/// How a session is written to and stopped. The shell is a PTY — it needs a terminal for `cd`, an
+/// editor or a server to behave. Python is a pipe pair for the reason the module doc gives: a PTY is
+/// what would bring readline's own echo back.
+enum Process {
+    Pty {
+        /// The master side is what keeps the PTY open: dropping it hangs the shell up, so it lives as
+        /// long as the session and is the handle a resize goes through.
+        master: Box<dyn MasterPty + Send>,
+        writer: Box<dyn Write + Send>,
+        killer: Box<dyn ChildKiller + Send + Sync>,
+    },
+    /// Python only exists where `fork` and signals do; the host's Windows build refuses it at the
+    /// door, so the variant is compiled out rather than left to hold nothing.
+    #[cfg(unix)]
+    Pipes {
+        stdin: Box<dyn Write + Send>,
+        /// The pid is how the interrupt and the kill reach a process whose `wait` is owned by the
+        /// waiter thread.
+        pid: u32,
+    },
+}
+
+impl Session {
+    /// One admitted line into the session. A shell gets its newline and its canonical-mode delivery; a
+    /// Python REPL gets the same, and an empty line is a real line there — it closes a block.
+    fn write_line(&mut self, command: &str) -> std::io::Result<()> {
+        match &mut self.process {
+            Process::Pty { writer, .. } => writer
+                .write_all(format!("{command}\n").as_bytes())
+                .and_then(|_| writer.flush()),
+            #[cfg(unix)]
+            Process::Pipes { stdin, .. } => stdin
+                .write_all(format!("{command}\n").as_bytes())
+                .and_then(|_| stdin.flush()),
+        }
+    }
+
+    /// Ctrl-C: stops what is running rather than starting something, so it is not a line.
+    fn interrupt(&mut self) -> std::io::Result<()> {
+        match &mut self.process {
+            Process::Pty { writer, .. } => writer.write_all(&[3u8]),
+            #[cfg(unix)]
+            Process::Pipes { pid, .. } => {
+                // Safety: `kill` with a plain signal number has no memory-safety preconditions; a pid
+                // that has already gone is reported as ESRCH and ignored by the caller.
+                unsafe {
+                    libc::kill(*pid as libc::pid_t, libc::SIGINT);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Ending the session from the app: the kill, not a closed stdin, because a Python process can be
+    /// waiting on something that does not read its input.
+    fn kill(&mut self) {
+        match &mut self.process {
+            Process::Pty { killer, .. } => {
+                let _ = killer.kill();
+            }
+            #[cfg(unix)]
+            Process::Pipes { pid, .. } => {
+                // Safety: as in `interrupt`; SIGKILL has no handler and no memory-safety conditions.
+                unsafe {
+                    libc::kill(*pid as libc::pid_t, libc::SIGKILL);
+                }
+            }
+        }
+    }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.rc);
+        let _ = std::fs::remove_dir_all(&self.scratch);
     }
 }
 
@@ -142,6 +233,16 @@ printf '\\033]633;freecode-ready\\007'
 /// either the kernel or zsh's line editor would draw it a second time. It is an OSC sequence, so the
 /// sanitizer would drop it anyway; [`ReadyScan`] removes it before that so it never reaches the panel.
 const READY: &[u8] = b"\x1b]633;freecode-ready\x07";
+
+/// The startup file Python runs before its first prompt (`PYTHONSTARTUP`). Both prompts are blank
+/// because the panel draws its own, and the marker is the same one [`RC`] raises so one [`Ready`] gate
+/// serves both sessions. Python reads this file only in interactive mode, which is what `-i` forces.
+const PY_STARTUP: &str = "\
+import sys
+sys.ps1 = \"\"
+sys.ps2 = \"\"
+print(\"\\033]633;freecode-ready\\007\", end=\"\", flush=True)
+";
 
 /// The gate between "the terminal exists" and "a line may be written".
 #[derive(Default)]
@@ -239,8 +340,15 @@ fn admit_start(approvals: &Approvals) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// Open the panel's session. `language` is the press the user made — a shell or a Python REPL; a
+/// window that names neither gets the shell, which is what every earlier caller meant.
 #[tauri::command]
-pub fn shell_open(app: AppHandle, state: State<'_, ShellState>) -> Result<ShellInfo, Refusal> {
+pub fn shell_open(
+    app: AppHandle,
+    state: State<'_, ShellState>,
+    language: Option<Language>,
+) -> Result<ShellInfo, Refusal> {
+    let language = language.unwrap_or(Language::Shell);
     let settings =
         crate::appearance::load_settings().map_err(|reason| Refusal::Start { reason })?;
     admit_start(&settings.approvals)?;
@@ -249,115 +357,217 @@ pub fn shell_open(app: AppHandle, state: State<'_, ShellState>) -> Result<ShellI
 
     let mut guard = state.session.lock().unwrap();
     if let Some(session) = guard.as_ref() {
-        if !session.dead.load(Ordering::Relaxed) {
+        if !session.dead.load(Ordering::Relaxed) && session.language == language {
             return Ok(ShellInfo {
                 id: session.id,
                 cwd: session.cwd.display().to_string(),
+                language,
             });
         }
     }
-    // An ended session is replaced rather than reused: its writer is a closed terminal.
-    guard.take();
+    // An ended session is replaced rather than reused: its writer is a closed terminal. A live one of
+    // the other language is replaced too, because the panel holds one session at a time and the press
+    // that named another language is the press that ends this one.
+    if let Some(mut session) = guard.take() {
+        session.kill();
+    }
 
     let id = state.next.fetch_add(1, Ordering::Relaxed);
-    let session = spawn(&app, id, &root, &settings.approvals)?;
+    let session = spawn(&app, id, &root, language)?;
     let info = ShellInfo {
         id,
         cwd: session.cwd.display().to_string(),
+        language,
     };
     *guard = Some(session);
     Ok(info)
 }
 
-fn spawn(app: &AppHandle, id: u64, root: &Path, approvals: &Approvals) -> Result<Session, Refusal> {
-    #[cfg(not(unix))]
-    {
-        let _ = (app, id, root, approvals);
-        return Err(Refusal::Start {
-            reason: "the built-in shell runs on macOS and Linux only".to_string(),
-        });
+fn spawn(app: &AppHandle, id: u64, root: &Path, language: Language) -> Result<Session, Refusal> {
+    match language {
+        Language::Shell => spawn_shell(app, id, root),
+        Language::Python => spawn_python(app, id, root),
     }
+}
 
-    #[cfg(unix)]
-    {
-        let _ = approvals;
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows: 12,
-                cols: 120,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|e| Refusal::Start {
-                reason: format!("a terminal could not be opened: {e}"),
-            })?;
+#[cfg(not(unix))]
+fn spawn_shell(_app: &AppHandle, _id: u64, _root: &Path) -> Result<Session, Refusal> {
+    Err(Refusal::Start {
+        reason: "the built-in shell runs on macOS and Linux only".to_string(),
+    })
+}
 
-        let rc = std::env::temp_dir().join(format!("freecode-shell-{id}-{}", std::process::id()));
-        std::fs::create_dir_all(&rc).map_err(|e| Refusal::Start {
-            reason: format!("the shell could not be prepared: {e}"),
+#[cfg(unix)]
+fn spawn_shell(app: &AppHandle, id: u64, root: &Path) -> Result<Session, Refusal> {
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 12,
+            cols: 120,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| Refusal::Start {
+            reason: format!("a terminal could not be opened: {e}"),
         })?;
-        std::fs::write(rc.join(".zshrc"), RC).map_err(|e| Refusal::Start {
-            reason: format!("the shell could not be prepared: {e}"),
-        })?;
 
-        let mut cmd = CommandBuilder::new("/bin/zsh");
-        cmd.arg("-i");
-        cmd.cwd(root);
-        // A builder starts with no environment of its own, and a shell without PATH cannot run the
-        // project's own tools. The app's environment is the one the run inherits too.
-        for (key, value) in std::env::vars_os() {
-            cmd.env(key, value);
-        }
-        cmd.env("ZDOTDIR", &rc);
-        cmd.env("TERM", "dumb");
-        cmd.env("NO_COLOR", "1");
-        cmd.env("CLICOLOR", "0");
-        cmd.env("PAGER", "cat");
-        cmd.env("GIT_PAGER", "cat");
+    let rc = std::env::temp_dir().join(format!("freecode-shell-{id}-{}", std::process::id()));
+    std::fs::create_dir_all(&rc).map_err(|e| Refusal::Start {
+        reason: format!("the shell could not be prepared: {e}"),
+    })?;
+    std::fs::write(rc.join(".zshrc"), RC).map_err(|e| Refusal::Start {
+        reason: format!("the shell could not be prepared: {e}"),
+    })?;
 
-        let child = pair.slave.spawn_command(cmd).map_err(|e| Refusal::Start {
-            reason: format!("the shell could not be started: {e}"),
-        })?;
-        // The slave end belongs to the child now; keeping our copy open would keep the terminal from
-        // reporting EOF when the shell exits.
-        drop(pair.slave);
+    let mut cmd = CommandBuilder::new("/bin/zsh");
+    cmd.arg("-i");
+    cmd.cwd(root);
+    // A builder starts with no environment of its own, and a shell without PATH cannot run the
+    // project's own tools. The app's environment is the one the run inherits too.
+    for (key, value) in std::env::vars_os() {
+        cmd.env(key, value);
+    }
+    cmd.env("ZDOTDIR", &rc);
+    cmd.env("TERM", "dumb");
+    cmd.env("NO_COLOR", "1");
+    cmd.env("CLICOLOR", "0");
+    cmd.env("PAGER", "cat");
+    cmd.env("GIT_PAGER", "cat");
 
-        let reader = pair.master.try_clone_reader().map_err(|e| Refusal::Start {
-            reason: format!("the terminal could not be read: {e}"),
-        })?;
-        let writer = pair.master.take_writer().map_err(|e| Refusal::Start {
-            reason: format!("the terminal could not be written: {e}"),
-        })?;
-        let killer = child.clone_killer();
+    let child = pair.slave.spawn_command(cmd).map_err(|e| Refusal::Start {
+        reason: format!("the shell could not be started: {e}"),
+    })?;
+    // The slave end belongs to the child now; keeping our copy open would keep the terminal from
+    // reporting EOF when the shell exits.
+    drop(pair.slave);
 
-        let dead = Arc::new(AtomicBool::new(false));
-        let ready = Arc::new(Ready::default());
-        let reader_app = app.clone();
-        let reader_ready = ready.clone();
-        thread::spawn(move || read_loop(reader_app, id, reader, reader_ready));
-        let waiter_app = app.clone();
-        let waiter_dead = dead.clone();
-        thread::spawn(move || {
-            let mut child = child;
-            let code = match child.wait() {
-                Ok(status) => status.exit_code() as i32,
-                Err(_) => -1,
-            };
-            waiter_dead.store(true, Ordering::Relaxed);
-            let _ = waiter_app.emit("shell-event", ShellEvent::Exit { id, code });
-        });
+    let reader = pair.master.try_clone_reader().map_err(|e| Refusal::Start {
+        reason: format!("the terminal could not be read: {e}"),
+    })?;
+    let writer = pair.master.take_writer().map_err(|e| Refusal::Start {
+        reason: format!("the terminal could not be written: {e}"),
+    })?;
+    let killer = child.clone_killer();
 
-        Ok(Session {
-            id,
-            cwd: root.to_path_buf(),
+    let dead = Arc::new(AtomicBool::new(false));
+    let ready = Arc::new(Ready::default());
+    let reader_app = app.clone();
+    let reader_ready = ready.clone();
+    thread::spawn(move || read_loop(reader_app, id, reader, reader_ready));
+    let waiter_app = app.clone();
+    let waiter_dead = dead.clone();
+    thread::spawn(move || {
+        let mut child = child;
+        let code = match child.wait() {
+            Ok(status) => status.exit_code() as i32,
+            Err(_) => -1,
+        };
+        waiter_dead.store(true, Ordering::Relaxed);
+        let _ = waiter_app.emit("shell-event", ShellEvent::Exit { id, code });
+    });
+
+    Ok(Session {
+        id,
+        cwd: root.to_path_buf(),
+        language: Language::Shell,
+        process: Process::Pty {
             master: pair.master,
             writer,
             killer,
-            dead,
-            ready,
-            rc,
-        })
-    }
+        },
+        dead,
+        ready,
+        scratch: rc,
+    })
+}
+
+#[cfg(not(unix))]
+fn spawn_python(_app: &AppHandle, _id: u64, _root: &Path) -> Result<Session, Refusal> {
+    Err(Refusal::Start {
+        reason: "the Python REPL runs on macOS and Linux only".to_string(),
+    })
+}
+
+/// Python with its stdio on a pipe pair, merged into one stream so a `print` and the traceback after
+/// it keep the order the interpreter wrote them in. The process is the user's own `python3` from
+/// `PATH`, in the project folder, with the app's environment; the REPL has no sandbox of its own,
+/// which is why every line is admitted before it is written.
+#[cfg(unix)]
+fn spawn_python(app: &AppHandle, id: u64, root: &Path) -> Result<Session, Refusal> {
+    use std::os::unix::net::UnixStream;
+    use std::process::{Command, Stdio};
+
+    let scratch = std::env::temp_dir().join(format!("freecode-python-{id}-{}", std::process::id()));
+    std::fs::create_dir_all(&scratch).map_err(|e| Refusal::Start {
+        reason: format!("Python could not be prepared: {e}"),
+    })?;
+    let startup = scratch.join("startup.py");
+    std::fs::write(&startup, PY_STARTUP).map_err(|e| Refusal::Start {
+        reason: format!("Python could not be prepared: {e}"),
+    })?;
+
+    // One writer end cloned for both stdio handles, so the two streams arrive as one and the reader
+    // sanitises them in a single pass.
+    let (reader, out) = UnixStream::pair().map_err(|e| Refusal::Start {
+        reason: format!("Python's output could not be wired: {e}"),
+    })?;
+    let err = out.try_clone().map_err(|e| Refusal::Start {
+        reason: format!("Python's output could not be wired: {e}"),
+    })?;
+    let out: std::os::fd::OwnedFd = out.into();
+    let err: std::os::fd::OwnedFd = err.into();
+
+    let mut child = Command::new("python3")
+        .args(["-q", "-i"])
+        .current_dir(root)
+        // `-q` drops the version banner; `-i` is what makes a piped stdin interactive, and that is
+        // also what makes Python run `PYTHONSTARTUP`.
+        .env("PYTHONSTARTUP", &startup)
+        .env("PYTHONUNBUFFERED", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("TERM", "dumb")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(out))
+        .stderr(Stdio::from(err))
+        .spawn()
+        .map_err(|e| Refusal::Start {
+            reason: format!("python3 could not be started: {e}"),
+        })?;
+
+    let pid = child.id();
+    let stdin = child.stdin.take().ok_or_else(|| Refusal::Start {
+        reason: "python3 was started without an input pipe".to_string(),
+    })?;
+
+    let dead = Arc::new(AtomicBool::new(false));
+    let ready = Arc::new(Ready::default());
+    let reader_app = app.clone();
+    let reader_ready = ready.clone();
+    let reader = Box::new(reader);
+    thread::spawn(move || read_loop(reader_app, id, reader, reader_ready));
+    let waiter_app = app.clone();
+    let waiter_dead = dead.clone();
+    thread::spawn(move || {
+        let code = match child.wait() {
+            Ok(status) => status.code().unwrap_or(-1),
+            Err(_) => -1,
+        };
+        waiter_dead.store(true, Ordering::Relaxed);
+        let _ = waiter_app.emit("shell-event", ShellEvent::Exit { id, code });
+    });
+
+    Ok(Session {
+        id,
+        cwd: root.to_path_buf(),
+        language: Language::Python,
+        process: Process::Pipes {
+            stdin: Box::new(stdin),
+            pid,
+        },
+        dead,
+        ready,
+        scratch,
+    })
 }
 
 /// Read the terminal until it closes, turning bytes into text the panel can draw. Bytes that are not
@@ -394,13 +604,28 @@ pub async fn shell_send(
     state: State<'_, ShellState>,
     line: String,
 ) -> Result<(), Refusal> {
+    // Leading indentation is part of a Python line — a suite's body is written with it — so only the
+    // line ending the input field added is taken off.
     let command = line.trim_end_matches(['\r', '\n']);
-    if command.trim().is_empty() {
+    let language = state
+        .session
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|session| session.language)
+        .unwrap_or(Language::Shell);
+    // An empty line runs nothing in a shell, so it is answered without a round trip. In a Python REPL
+    // it is a line the interpreter acts on: it closes a block. It is still not a program, so it goes
+    // to the policy-free path below rather than being admitted as one.
+    let blank = command.trim().is_empty();
+    if blank && language != Language::Python {
         return Ok(());
     }
-    let settings =
-        crate::appearance::load_settings().map_err(|reason| Refusal::Start { reason })?;
-    admit(&settings.approvals, command)?;
+    if !blank {
+        let settings =
+            crate::appearance::load_settings().map_err(|reason| Refusal::Start { reason })?;
+        admit(&settings.approvals, command)?;
+    }
 
     // A shell opened a moment ago may not have sourced its startup file yet, and a line written now
     // would be echoed by the terminal before `stty -echo` ran — the panel would show the command
@@ -430,7 +655,8 @@ pub async fn shell_send(
     }
     // The line is echoed to the window rather than by the terminal, and it is emitted before the
     // write so the log reads in the order the user typed it: a command that ran always has its line
-    // above its output, and a refused one has neither.
+    // above its output, and a refused one has neither. A blank Python line is echoed as well: it is
+    // the line that closes a block, and a log that skipped it would never say the block ended.
     let _ = app.emit(
         "shell-event",
         ShellEvent::Sent {
@@ -438,25 +664,22 @@ pub async fn shell_send(
             command: command.to_string(),
         },
     );
-    // The shell runs with echo off, so the newline is the only byte the terminal needs: canonical
-    // mode delivers the whole line at once.
-    session
-        .writer
-        .write_all(format!("{command}\n").as_bytes())
-        .and_then(|_| session.writer.flush())
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::BrokenPipe {
-                Refusal::Closed
-            } else {
-                Refusal::Start {
-                    reason: format!("the command could not be sent: {e}"),
-                }
+    // Both sessions run quiet about keys: the shell has echo off, and Python's stdin is a pipe that
+    // has no echo to turn off. The newline is all either needs.
+    session.write_line(command).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            Refusal::Closed
+        } else {
+            Refusal::Start {
+                reason: format!("the command could not be sent: {e}"),
             }
-        })
+        }
+    })
 }
 
-/// Ctrl-C: the interrupt goes to the terminal, not through the line policy, because it stops a
-/// command rather than starting one.
+/// Ctrl-C: the interrupt goes to the session, not through the line policy, because it stops a
+/// command rather than starting one. A shell gets the terminal's ETX byte; Python, with no terminal
+/// attached, gets a real `SIGINT`, which is what it answers with `KeyboardInterrupt`.
 #[tauri::command]
 pub fn shell_interrupt(state: State<'_, ShellState>) -> Result<(), Refusal> {
     let mut guard = state.session.lock().unwrap();
@@ -466,24 +689,23 @@ pub fn shell_interrupt(state: State<'_, ShellState>) -> Result<(), Refusal> {
     if session.dead.load(Ordering::Relaxed) {
         return Err(Refusal::Closed);
     }
-    session
-        .writer
-        .write_all(&[3u8])
-        .map_err(|e| Refusal::Start {
-            reason: format!("the interrupt could not be sent: {e}"),
-        })
+    session.interrupt().map_err(|e| Refusal::Start {
+        reason: format!("the interrupt could not be sent: {e}"),
+    })
 }
 
 /// The panel body's measure, so a long line wraps where the panel does rather than at the width the
-/// PTY happened to start with.
+/// PTY happened to start with. Python's stdin is a pipe with no width, so there is nothing to set.
 #[tauri::command]
 pub fn shell_resize(state: State<'_, ShellState>, rows: u16, cols: u16) -> Result<(), Refusal> {
     let guard = state.session.lock().unwrap();
     let Some(session) = guard.as_ref() else {
         return Ok(());
     };
-    session
-        .master
+    let Process::Pty { master, .. } = &session.process else {
+        return Ok(());
+    };
+    master
         .resize(PtySize {
             rows: rows.max(2),
             cols: cols.max(20),
@@ -498,7 +720,7 @@ pub fn shell_resize(state: State<'_, ShellState>, rows: u16, cols: u16) -> Resul
 #[tauri::command]
 pub fn shell_close(state: State<'_, ShellState>) -> Result<(), Refusal> {
     if let Some(mut session) = state.session.lock().unwrap().take() {
-        let _ = session.killer.kill();
+        session.kill();
     }
     Ok(())
 }
@@ -509,7 +731,7 @@ pub fn shutdown(app: &AppHandle) {
     let state = app.state::<ShellState>();
     let session = state.session.lock().ok().and_then(|mut guard| guard.take());
     if let Some(mut session) = session {
-        let _ = session.killer.kill();
+        session.kill();
     }
 }
 
@@ -867,6 +1089,93 @@ mod tests {
         let _ = child.kill();
         drop(writer);
         drop(pair.master);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The Python half, end to end: a real `python3` on the pipe pair the host uses, the startup file
+    /// in [`PY_STARTUP`], the reader's two promises. The expression's value comes back, and the line
+    /// that produced it does not — there is no terminal to echo it. The block with a blank line is
+    /// the reason an empty line is not dropped for this session: it is what closes the suite.
+    #[cfg(unix)]
+    #[test]
+    fn a_python_line_is_answered_and_never_echoed() {
+        use std::os::unix::net::UnixStream;
+        use std::process::{Command, Stdio};
+        use std::sync::mpsc;
+
+        let dir = std::env::temp_dir().join(format!("freecode-python-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let startup = dir.join("startup.py");
+        std::fs::write(&startup, PY_STARTUP).unwrap();
+
+        let (reader, out) = UnixStream::pair().unwrap();
+        let err = out.try_clone().unwrap();
+        let out: std::os::fd::OwnedFd = out.into();
+        let err: std::os::fd::OwnedFd = err.into();
+        let mut child = Command::new("python3")
+            .args(["-q", "-i"])
+            .env("PYTHONSTARTUP", &startup)
+            .env("PYTHONUNBUFFERED", "1")
+            .env("PYTHONIOENCODING", "utf-8")
+            .env("TERM", "dumb")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::from(out))
+            .stderr(Stdio::from(err))
+            .spawn()
+            .expect("python3 is on PATH");
+        let mut stdin = child.stdin.take().unwrap();
+
+        let ready = Arc::new(Ready::default());
+        let reader_ready = ready.clone();
+        let (tx, rx) = mpsc::channel();
+        let mut reader = reader;
+        thread::spawn(move || {
+            let mut plain = Plain::default();
+            let mut scan = ReadyScan::default();
+            let mut buf = [0u8; 4096];
+            let mut text = String::new();
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let bytes = scan.push(&buf[..n]);
+                        if scan.is_ready() {
+                            reader_ready.mark();
+                        }
+                        text.push_str(&plain.push(&bytes));
+                        if text.contains("42") {
+                            let _ = tx.send(text.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        assert!(
+            ready.wait(Duration::from_secs(10)),
+            "Python never said it was ready"
+        );
+        stdin
+            .write_all(b"def double(n):\n    return n * 2\n\ndouble(21)\n")
+            .unwrap();
+        stdin.flush().unwrap();
+        let seen = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("Python answered");
+        assert!(seen.contains("42"), "{seen:?}");
+        assert!(
+            !seen.contains("double(21)"),
+            "the line was echoed: {seen:?}"
+        );
+        assert!(
+            !seen.contains(">>>"),
+            "the prompt reached the panel: {seen:?}"
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(stdin);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

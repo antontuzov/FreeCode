@@ -20,7 +20,8 @@ vi.mock("../lib/ipc", () => ({
 
 const mock = vi.mocked(ipc);
 
-const INFO = { id: 7, cwd: "/work/project" };
+const INFO = { id: 7, cwd: "/work/project", language: "shell" as const };
+const PYTHON = { id: 8, cwd: "/work/project", language: "python" as const };
 
 function chunk(id: number, text: string): ShellEvent {
   return { kind: "chunk", id, text };
@@ -65,6 +66,30 @@ describe("opening and closing", () => {
     await useShell.getState().open();
     await useShell.getState().open();
     expect(mock.shellOpen).toHaveBeenCalledTimes(1);
+  });
+
+  // The panel holds one session at a time, so the press that names the other language is the press
+  // that ends this one — and the log belongs to the session that is leaving.
+  it("replaces a live shell when the press asks for Python", async () => {
+    mock.shellOpen.mockResolvedValueOnce(INFO).mockResolvedValueOnce(PYTHON);
+    mock.shellClose.mockResolvedValue(undefined);
+    await useShell.getState().open("shell");
+    useShell.getState().apply(chunk(7, "from the shell\n"));
+    await expect(useShell.getState().open("python")).resolves.toBe(true);
+    expect(mock.shellClose).toHaveBeenCalledTimes(1);
+    expect(mock.shellOpen).toHaveBeenLastCalledWith("python");
+    const state = useShell.getState();
+    expect(state.info).toEqual(PYTHON);
+    expect(state.language).toBe("python");
+    expect(state.text).toBe("");
+  });
+
+  it("does not reopen a live session of the same language", async () => {
+    mock.shellOpen.mockResolvedValue(PYTHON);
+    await useShell.getState().open("python");
+    await useShell.getState().open("python");
+    expect(mock.shellOpen).toHaveBeenCalledTimes(1);
+    expect(mock.shellClose).not.toHaveBeenCalled();
   });
 
   it("kills the session and forgets it", async () => {
@@ -117,6 +142,18 @@ describe("sending a line", () => {
     await expect(useShell.getState().send("   ")).resolves.toBe(false);
     expect(mock.shellSend).not.toHaveBeenCalled();
   });
+
+  // A Python suite's body is indented, and the blank line after it is what closes the block: both are
+  // sent exactly as typed, or a REPL cannot be used for anything bigger than one expression.
+  it("sends a Python line as typed, including its indentation and an empty line", async () => {
+    mock.shellOpen.mockResolvedValue(PYTHON);
+    mock.shellSend.mockResolvedValue(undefined);
+    await useShell.getState().open("python");
+    await useShell.getState().send("    return 1");
+    expect(mock.shellSend).toHaveBeenLastCalledWith("    return 1");
+    await expect(useShell.getState().send("")).resolves.toBe(true);
+    expect(mock.shellSend).toHaveBeenLastCalledWith("");
+  });
 });
 
 describe("the host's events", () => {
@@ -126,6 +163,17 @@ describe("the host's events", () => {
     useShell.getState().apply({ kind: "sent", id: 7, command: "pwd" });
     useShell.getState().apply(chunk(7, "/work/project\n"));
     expect(useShell.getState().text).toBe("$ pwd\n/work/project\n");
+  });
+
+  // The echo carries the prompt the field shows, and the blank line that closes a block is a line
+  // the reader took: a log that skipped it would never say the block ended.
+  it("echoes a Python block under the Python prompt", async () => {
+    mock.shellOpen.mockResolvedValue(PYTHON);
+    await useShell.getState().open("python");
+    useShell.getState().apply({ kind: "sent", id: 8, command: "def double(n):" });
+    useShell.getState().apply({ kind: "sent", id: 8, command: "    return n * 2" });
+    useShell.getState().apply({ kind: "sent", id: 8, command: "" });
+    expect(useShell.getState().text).toBe(">>> def double(n):\n>>>     return n * 2\n>>>\n");
   });
 
   it("ignores a session this window has already replaced", async () => {

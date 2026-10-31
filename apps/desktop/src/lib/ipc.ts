@@ -364,12 +364,17 @@ export const AGENT_EVENT = "agent-event";
 
 /* ---- the terminal panel's own shell ---- */
 
+/** Which session the panel opens: the user's shell, or a Python REPL. Both run in the project folder
+ *  and both are admitted line by line by the host, which is what makes the panel one surface with two
+ *  interpreters rather than two tools. Mirrors `shell::Language`. */
+export type ShellLanguage = "shell" | "python";
+
 /**
- * The shell the panel opened. Mirrors `shell::ShellInfo`. `cwd` is the folder it started in — the
+ * The session the panel opened. Mirrors `shell::ShellInfo`. `cwd` is the folder it started in — the
  * project folder the run works in — which the panel says rather than guessing from the app's own
- * directory.
+ * directory. `language` is what the prompt row and the tab are written for.
  */
-export type ShellInfo = { id: number; cwd: string };
+export type ShellInfo = { id: number; cwd: string; language: ShellLanguage };
 
 /**
  * `shell::ShellEvent` on the `shell-event` channel. `sent` is the line the host admitted, emitted
@@ -947,15 +952,18 @@ export const ipc = {
   /** Stop the reply that is streaming. The next message opens a fresh turn on the same route. */
   chatStop: () => invoke<void>("chat_stop"),
   /**
-   * Open the panel's own shell in the project folder, or answer why it will not. Refused while the
-   * Terminal switch is off, while the dial is Plan only, or by a tool override that takes the shell
-   * away — the same three the agent's own `terminal` call meets, and the same answer.
+   * Open the panel's own session in the project folder, or answer why it will not. `shell` is the
+   * user's zsh, `python` a REPL on the machine's `python3`; both are refused while the Terminal switch
+   * is off, while the dial is Plan only, or by a tool override that takes the shell away — the same
+   * three the agent's own `terminal` call meets, and the same answer. A live session of the other
+   * language is ended first: the panel holds one at a time.
    */
-  shellOpen: () => invoke<ShellInfo>("shell_open"),
+  shellOpen: (language: ShellLanguage = "shell") => invoke<ShellInfo>("shell_open", { language }),
   /**
-   * Send one line. The host admits it through the approval engine before a byte reaches the terminal,
+   * Send one line. The host admits it through the approval engine before a byte reaches the session,
    * so a refused line rejects with a `ShellRefusal` and never runs. The line's echo arrives on
-   * `onShellEvent` as `sent`, which is also the proof it was admitted.
+   * `onShellEvent` as `sent`, which is also the proof it was admitted. An empty line is a real line
+   * for Python — it closes a block — and is ignored for the shell.
    */
   shellSend: (line: string) => invoke<void>("shell_send", { line }),
   /** Ctrl-C: stop what is running. It closes a command rather than starting one, so no line is admitted. */
