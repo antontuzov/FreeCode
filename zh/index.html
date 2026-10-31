@@ -1,0 +1,551 @@
+<!doctype html>
+    <!-- Generated from site/zh/index.html by scripts/site-root.mjs — edit that file, then regenerate. -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FreeCode —— 快速、免费的桌面智能体</title>
+    <meta
+      name="description"
+      content="FreeCode 是一个 Rust 原生的桌面智能体：运行互联网上所有免费模型，驱动浏览器，并检查自己的成果。永久免费。"
+    />
+    <meta property="og:title" content="FreeCode —— 快速、免费的桌面智能体" />
+    <meta
+      property="og:description"
+      content="跑在免费模型上的 Rust 原生桌面智能体。它会构建、会检查、会试玩。"
+    />
+    <meta property="og:type" content="website" />
+    <link rel="canonical" href="https://antontuzov.github.io/FreeCode/zh/" />
+    <meta property="og:url" content="https://antontuzov.github.io/FreeCode/zh/" />
+    <link rel="alternate" hreflang="en" href="https://antontuzov.github.io/FreeCode/" />
+    <link rel="alternate" hreflang="zh" href="https://antontuzov.github.io/FreeCode/zh/" />
+    <link rel="alternate" hreflang="x-default" href="https://antontuzov.github.io/FreeCode/" />
+    <meta name="theme-color" content="#0c1210" />
+    <script>
+      // Runs before the stylesheet so the chosen theme paints on the first frame. With no stored
+      // choice, follow the system; dark stays the brand default when the system says nothing.
+      (function () {
+        try {
+          var stored = localStorage.getItem("freecode-theme");
+          var theme =
+            stored === "light" || stored === "dark"
+              ? stored
+              : matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+          document.documentElement.dataset.theme = theme;
+        } catch (e) {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
+    <link rel="icon" href="../site/assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../site/assets/site.css" />
+  </head>
+  <body data-note-missing="第一个 .dmg 正在路上——关注 GitHub 上的 Releases。">
+    <header class="nav">
+      <a class="brand" href="../">
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="brand-mark">
+          <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H10a2 2 0 0 1 2 2v13a1 1 0 0 0 1 1h1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+          <path d="M4 5.5V17a3 3 0 0 0 3 3h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+          <path d="M8.5 8.5h2.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+          <circle cx="17.5" cy="6.5" r="3" fill="none" stroke="currentColor" stroke-width="1.7" />
+        </svg>
+        FreeCode
+      </a>
+      <nav class="nav-links">
+        <a class="nav-more" href="#work">成果</a>
+        <a class="nav-more" href="#how">工作方式</a>
+        <a class="nav-more" href="#features">功能</a>
+        <a class="nav-more" href="#models">模型</a>
+        <a href="#faq">常见问题</a>
+        <a href="https://github.com/antontuzov/FreeCode" target="_blank" rel="noopener">GitHub</a>
+        <a class="nav-lang" href="../" lang="en" hreflang="en">EN</a>
+        <button
+          class="theme-toggle"
+          id="theme-toggle"
+          type="button"
+          aria-label="切换到浅色主题"
+          data-label-light="切换到浅色主题"
+          data-label-dark="切换到深色主题"
+        >
+          <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.7" />
+            <path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.5 1.5M17.1 17.1l1.5 1.5M18.6 5.4l-1.5 1.5M6.9 17.1l-1.5 1.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <a class="nav-cta" href="#download">下载</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <canvas class="hero-field" id="hero-field" aria-hidden="true"></canvas>
+        <h1 class="hero-title">
+          <span class="hero-title-line">有了 FreeCode 桌面应用，</span>
+          <span class="sr-only">它会构建、会交付、会试玩，并检查自己的成果。</span>
+          <span
+            class="rotator"
+            id="rotator"
+            data-deco="pill"
+            data-pairs='[{"verb":"构建","tail":"整个网站","deco":"pill"},{"verb":"搞定","tail":"午饭前的活儿","deco":"underline"},{"verb":"试玩","tail":"自己做的游戏","deco":"doodle"},{"verb":"检查","tail":"自己的成果","deco":"brackets"}]'
+            aria-hidden="true"
+          >
+            <span class="rotator-verb" id="rotator-verb">
+              <span class="deco deco-pill"></span>
+              <span class="deco deco-underline">
+                <svg viewBox="0 0 200 12" preserveAspectRatio="none">
+                  <path d="M2 8.6C38 3.4 92 2.4 142 4.1c18 .6 38 1.9 56 4.1" />
+                </svg>
+              </span>
+              <span class="deco deco-doodle">
+                <svg viewBox="0 0 140 90" fill="none" stroke="currentColor" stroke-linecap="round">
+                  <path d="M6 66c17-25 43-39 69-37 16 1.2 26 9.4 21.6 19-4.2 9.2-17.6 10.6-23.2 3.6-5.2-6.4 1.4-13.4 9.8-14.2 12.4-1.2 23.8 7 29.8 20.6" stroke-width="3.4" />
+                  <path d="M44 19l4.4 10.6M55 11.4l2 11M35.6 11.8l7.2 8.4" stroke-width="2.6" />
+                </svg>
+              </span>
+              <span class="deco deco-brackets"><b>[</b><b>]</b></span>
+              <span class="rotator-word">构建</span>
+            </span>
+            <span class="rotator-tail">整个网站</span>
+          </span>
+        </h1>
+        <p class="hero-sub">
+          互联网上的每一个免费模型，装进一个原生应用。它写代码、驱动浏览器、检查自己的成果——
+          比任何智能体都快，因为整个循环都是 Rust。
+        </p>
+        <div class="downloads" id="download">
+          <a
+            class="btn btn-primary"
+            id="btn-macos"
+            href="https://github.com/antontuzov/FreeCode/releases/latest/download/FreeCode.dmg"
+          >
+            <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true">
+              <path d="M12 7.5c-1.9 0-3.2 1.2-3.2 1.2s.3-2.4 3.2-4.7c2.9 2.3 3.2 4.7 3.2 4.7S13.9 7.5 12 7.5Z" fill="currentColor"/>
+              <path d="M12 4c-1.5-1.7-3.7-2-5-1.9-.4 2.4.7 4.4 1.6 5.4M12 4c1.5-1.7 3.7-2 5-1.9.4 2.4-.7 4.4-1.6 5.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M6.3 14.2c0-3 1.8-5.7 2.9-5.7s1.3.8 2.8.8 1.7-.8 2.8-.8c1.1 0 2.9 2.7 2.9 5.7 0 3-2.1 5.8-5.7 5.8s-5.7-2.8-5.7-5.8Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            下载 macOS 版 <span class="btn-note">.dmg · Apple 芯片</span>
+          </a>
+          <a
+            class="btn btn-ghost"
+            id="btn-windows"
+            href="https://github.com/antontuzov/FreeCode/releases"
+            target="_blank"
+            rel="noopener"
+          >
+            <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true">
+              <path d="M4 5.5 11 4.4v7.1H4V5.5ZM12.9 4.1 20 3v8.5h-7.1V4.1ZM4 13.5h7v7.1L4 19.5v-6ZM12.9 13.5H20V22l-7.1-1v-7.5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Windows <span class="btn-note">正在开发中</span>
+          </a>
+        </div>
+        <p class="hero-note" id="hero-note">
+          永久免费。无需 API Key，无需账号，无需额度。.dmg 未签名——首次打开请右键 → 打开。
+        </p>
+
+        <div class="hero-video" id="hero-video-wrap">
+          <video
+            id="hero-video"
+            src="../site/video/hero.mp4"
+            muted
+            loop
+            playsinline
+            preload="metadata"
+            poster="../site/video/poster.png"
+          ></video>
+          <div class="video-chrome">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="video-title">FreeCode —— 一次真实的运行，未剪辑</span>
+          </div>
+        </div>
+
+        <div class="hero-props">
+          <div class="prop">
+            <h3>你交代的事，它做完</h3>
+            <p>页面、游戏、脚本、修改——描述任务，智能体负责计划、编写、运行和修复。</p>
+          </div>
+          <div class="prop">
+            <h3>所有免费模型</h3>
+            <p>OpenCode 网关承载着互联网上所有免费模型。任务中途也能切换，循环毫不在意。</p>
+          </div>
+          <div class="prop">
+            <h3>快，因为是 Rust</h3>
+            <p>工具循环、浏览器桥接、差异引擎——一路到底都是原生代码，没有 Electron 的开销。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section work" id="work">
+        <div class="section-head">
+          <span class="eyebrow">一次运行留下的东西</span>
+          <h2>你能打开的文件，而不是一段需要相信的记录</h2>
+          <p>
+            下面每一行，都是智能体在这台机器上、在你选定的文件夹里真正产出的东西，
+            结束后差异还留在屏幕上。
+          </p>
+        </div>
+        <div class="work-grid">
+          <article class="work-card">
+            <div class="work-art wa-game" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <h3>一个文件写成的小游戏</h3>
+            <p>俄罗斯方块、贪吃蛇、像素鸟——先写出来，再由写它的这次运行亲自玩一遍，证明分数真的在动。</p>
+            <code>tetris.html · 单文件，无需构建</code>
+          </article>
+
+          <article class="work-card">
+            <div class="work-art wa-page" aria-hidden="true">
+              <i></i><b></b><b></b><u></u><u></u><u></u>
+            </div>
+            <h3>你一直没空做的那个页面</h3>
+            <p>落地页、内部看板、团队追踪器——排好版、做好主题，并在浏览器里检查过。</p>
+            <code>index.html + assets/site.css</code>
+          </article>
+
+          <article class="work-card">
+            <div class="work-art wa-script" aria-hidden="true">
+              <em>$ rename + dedupe 400 files</em><em>✓ 400 renamed</em><em>✓ 0 collisions</em>
+            </div>
+            <h3>周一最烦的那件杂事</h3>
+            <p>带着计划的命令行工作：它执行命令、读取输出，在数字说话的时候停下。</p>
+            <code>terminal · 面板里实时可见</code>
+          </article>
+
+          <article class="work-card">
+            <div class="work-art wa-patch" aria-hidden="true">
+              <del>- const v = 1</del><ins>+ const v = 2</ins><ins>+ if (!v) return</ins>
+            </div>
+            <h3>一次改五个文件</h3>
+            <p>一次补丁调用，每个改动块都在审阅面板里画出来——撤销能把文件夹原样还原。</p>
+            <code>+184 −37 · 5 个文件</code>
+          </article>
+
+          <article class="work-card">
+            <div class="work-art wa-read" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <h3>有出处的答案</h3>
+            <p>它会搜索、打开页面、引用原文，并把它们列成可点击的来源。</p>
+            <code>运行报告 · 6 个来源</code>
+          </article>
+
+          <article class="work-card">
+            <div class="work-art wa-check" aria-hidden="true">
+              <b class="ok">非空白 ✓</b><b class="bad">50%×50% 处取色 ✗</b>
+            </div>
+            <h3>被检查过的成果</h3>
+            <p>这次运行会把它做出来的东西截成图，并在像素上做出断言，然后才宣称完成。</p>
+            <code>2 项通过 · 1 项失败 · 1 项已修复</code>
+          </article>
+        </div>
+      </section>
+
+      <section class="section how" id="how">
+        <div class="section-head">
+          <span class="eyebrow">一次运行的过程</span>
+          <h2>五件事，你都能看见。</h2>
+        </div>
+        <ol class="how-steps">
+          <li>
+            <span class="step-num">1</span>
+            <h3>描述</h3>
+            <p>在输入框里写一段话。没有提示词模板，没有 YAML，没有账号。</p>
+          </li>
+          <li>
+            <span class="step-num">2</span>
+            <h3>计划</h3>
+            <p>这次运行会自己写待办清单，并在过程中一条条划掉。</p>
+          </li>
+          <li>
+            <span class="step-num">3</span>
+            <h3>编写</h3>
+            <p>文件落进你选定的文件夹。每一处改动都是你可以先读再接受的差异块。</p>
+          </li>
+          <li>
+            <span class="step-num">4</span>
+            <h3>运行并检查</h3>
+            <p>它在聊天旁边的浏览器里打开页面、点击它、拍照、检验像素。</p>
+          </li>
+          <li>
+            <span class="step-num">5</span>
+            <h3>汇报</h3>
+            <p>画面、检查、来源和差异都在一张卡片里——整个运行随时可以一键撤销。</p>
+          </li>
+        </ol>
+
+        <div class="demo">
+          <div class="demo-bar">
+            <div class="demo-tabs" role="tablist" aria-label="这次运行给你看的三样东西">
+              <button class="demo-tab is-on" type="button" role="tab" aria-selected="true" data-panel="transcript">运行记录</button>
+              <button class="demo-tab" type="button" role="tab" aria-selected="false" data-panel="terminal">终端</button>
+              <button class="demo-tab" type="button" role="tab" aria-selected="false" data-panel="review">审阅</button>
+            </div>
+            <span class="demo-file">snake.html</span>
+          </div>
+          <div class="demo-body">
+            <div class="demo-panel is-on" data-panel="transcript">
+              <p class="line"><span class="tick">✓</span> 已规划 4 个步骤</p>
+              <p class="line"><span class="tick">✓</span> 已读取 <b>src/game.js</b> <span class="dim">· 214 行</span></p>
+              <p class="line"><span class="tick">✓</span> 已写入 <b>snake.html</b> <span class="add">+184</span></p>
+              <p class="line"><span class="tick">✓</span> 已打开 preview://snake.html</p>
+              <p class="line"><span class="tick">✓</span> 已点击开始，按下 ↓ ×3</p>
+              <p class="line"><span class="tick">✓</span> 已截取 3 帧</p>
+              <p class="line"><span class="tick">✓</span> 非空白 <span class="ok">通过</span></p>
+              <p class="line"><span class="tick">✓</span> 2 秒后得分 &gt; 0 <span class="ok">通过</span></p>
+              <p class="line done">41 秒完成 · 9 次工具调用 · big-pickle</p>
+            </div>
+            <div class="demo-panel" data-panel="terminal">
+              <p class="line"><span class="prompt">$</span> node scripts/probe.mjs snake.html</p>
+              <p class="line out">画布 800×600 · ctx2d 正常</p>
+              <p class="line out">第 0 帧：得分 0 · 方块 1</p>
+              <p class="line out">第 12 帧：得分 3 · 方块 4</p>
+              <p class="line out">第 24 帧：得分 7 · 方块 8</p>
+              <p class="line"><span class="prompt">$</span> <span class="cursor"></span></p>
+            </div>
+            <div class="demo-panel" data-panel="review">
+              <p class="line file">snake.html</p>
+              <p class="line ctx">@@ -1,3 +1,5 @@</p>
+              <p class="line del">- const CELL = 16;</p>
+              <p class="line add">+ const CELL = 16;</p>
+              <p class="line add">+ const SPEED_START = 140;</p>
+              <p class="line add">+ const SPEED_MIN = 70;</p>
+              <p class="line ctx">  function step() {</p>
+              <p class="line del">-   if (tick++ % 6) return;</p>
+              <p class="line add">+   if (tick++ % interval()) return;</p>
+              <p class="line revert">↺ 撤销这次运行——文件夹会原样还原</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="features" id="features">
+        <article class="feature">
+          <div class="feature-copy">
+            <span class="feature-num">01</span>
+            <h2>互联网上的每一个免费模型</h2>
+            <p>
+              一个选择器，收齐免费服务提供的所有模型——从轻快的闪模型到大的那一些。
+              智能体按任务选择路线，运行报告会告诉你最后是谁回答的。
+            </p>
+          </div>
+          <div class="feature-art art-models" aria-hidden="true">
+            <span class="pill">big-pickle · 免费</span>
+            <span class="pill">glm flash · 免费</span>
+            <span class="pill">qwen coder · 免费</span>
+            <span class="pill">glm 5.3 · 免费</span>
+            <span class="pill">+ 免费服务新增的每一个模型</span>
+          </div>
+        </article>
+
+        <article class="feature flip">
+          <div class="feature-copy">
+            <span class="feature-num">02</span>
+            <h2>从头到尾的浏览器控制</h2>
+            <p>
+              智能体打开它刚做出来的页面，点击它、往里面输入，再把内容读回来——
+              就在聊天旁边的应用内浏览器里。做出游戏时，它会玩自己做的游戏。
+            </p>
+          </div>
+          <div class="feature-art art-browser" aria-hidden="true">
+            <div class="mini-window">
+              <div class="mini-bar"><span></span><span></span><span></span></div>
+              <div class="mini-body">
+                <div class="mini-bounce"><i></i></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="feature">
+          <div class="feature-copy">
+            <span class="feature-num">03</span>
+            <h2>它会检查自己的成果</h2>
+            <p>
+              一次运行不会只说它做完了——它会把页面截成图，并在像素上做出断言：
+              不是空白、该有颜色的地方有颜色。画面会留在运行报告里，和评判它们的检查放在一起。
+            </p>
+          </div>
+          <div class="feature-art art-checks" aria-hidden="true">
+            <div class="check-row">
+              <span class="thumb"></span>
+              <span class="check-label">非空白</span>
+              <span class="verdict pass">通过</span>
+            </div>
+            <div class="check-row">
+              <span class="thumb thumb-b"></span>
+              <span class="check-label">#3f7f6a at 50% × 50%</span>
+              <span class="verdict fail">失败</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="feature flip">
+          <div class="feature-copy">
+            <span class="feature-num">04</span>
+            <h2>原生速度，原生工具</h2>
+            <p>
+              循环是 Rust：它驱动的 shell、它应用的补丁、它画出的差异。
+              一个能实时观看的终端、一份由运行自己维护的待办清单、一个能把一切撤销的审阅面板。
+            </p>
+          </div>
+          <div class="feature-art art-rust" aria-hidden="true">
+            <pre><code>运行 → 计划 → 编写 → 检查 → 试玩
+     ↑___________________________|</code></pre>
+          </div>
+        </article>
+      </section>
+
+      <section class="section models" id="models">
+        <div class="section-head">
+          <span class="eyebrow">免费清单</span>
+          <h2>八个模型，一个选择器，账单为零</h2>
+          <p>
+            这是本次构建随附的行，2026 年 10 月 29 日已按免费层重新核对。
+            任务中途可以切换——运行会保留上下文，报告会说明最后是谁回答的。
+          </p>
+        </div>
+        <ul class="model-list">
+          <li><b>Big Pickle</b><span>FreeCode</span><em>默认</em></li>
+          <li><b>GLM-5.3-Flash</b><span>GLM</span><em>免费</em></li>
+          <li><b>DeepSeek V4.1 Flash</b><span>DeepSeek</span><em>免费</em></li>
+          <li><b>Beam</b><span>Beam</span><em>免费</em></li>
+          <li><b>Flint 40B</b><span>Flint</span><em>免费</em></li>
+          <li><b>MiMo-V2.6-Flash</b><span>MiMo</span><em>免费</em></li>
+          <li><b>Nemotron 3.5 Lightning</b><span>NVIDIA</span><em>免费</em></li>
+          <li><b>Nemotron 3.5 Super VL</b><span>NVIDIA</span><em>视觉</em></li>
+          <li class="more"><b>免费层接下来发布的任何模型</b><span>随应用一起发布</span></li>
+        </ul>
+        <p class="models-note">
+          免费层是别人的基础设施，所以这个应用不假装它是永久的：当某个模型不再免费，
+          它那一行就不再可选，而不是悄悄向你收费。免费层由 OpenCode 的本地服务提供——
+          FreeCode 会替你启动它，并在一台还没装 OpenCode 的 Mac 上把这件事说明白。
+          想要付费模型？那就在设置里粘贴你自己的服务方密钥，它会加入选择器。
+        </p>
+      </section>
+
+      <section class="section faq" id="faq">
+        <div class="section-head">
+          <span class="eyebrow">问题</span>
+          <h2>诚实的答案</h2>
+        </div>
+        <div class="faq-list">
+          <details>
+            <summary>它是真的免费，还是免费到某个时候为止？</summary>
+            <p>
+              这次构建里没有账号、没有 API Key、也没有额度系统——以后也没有需要关闭的东西。
+              模型来自公开发布的免费层，应用会如实呈现它们：某个模型不再免费时，
+              那一行会停止回答，而不是给你寄一张账单。
+            </p>
+          </details>
+          <details>
+            <summary>为什么 macOS 在打开前会警告我？</summary>
+            <p>
+              这个 .dmg 是在一台笔记本上构建的，没有公司签名和公证——
+              那需要一个 Apple 开发者账号和一条这个项目还没付费的流水线。
+              首次打开请右键应用 → 打开，之后 Gatekeeper 就不再管它。
+            </p>
+          </details>
+          <details>
+            <summary>运行它需要什么？</summary>
+            <p>
+              一台 macOS 12 或更新版本的 Apple 芯片 Mac，以及 OpenCode——
+              就是那个用本地服务回答免费模型的应用。FreeCode 会自己启动这个服务；
+              如果还没装 OpenCode，第一次免费对话会明确告诉你，而不是悄悄失败。
+              这里的下载包是 9 MB，装到磁盘上是 16 MB，因为它是一个 Rust 宿主，
+              直接画进系统自带的网页视图，而不是自带一份 Chromium。Windows 版正在做，还不能用；
+              页头的按钮如实这么说，而不是撒谎。
+            </p>
+          </details>
+          <details>
+            <summary>它会毁掉我的文件吗？</summary>
+            <p>
+              它只在你选定的文件夹里工作，不碰外面的一切。每一次改动都是审阅面板里能读的差异块，
+              一次运行会保留改动前的镜像，所以撤销能把文件夹还原成原样——包括它新建的文件。
+            </p>
+          </details>
+          <details>
+            <summary>它会偷偷上传数据吗？</summary>
+            <p>
+              没有分析、没有崩溃上报、没有使用信标——设置里的那一行写着“尚未构建”，因为它确实没有。
+              离开你机器的只有这次运行的文本，发给正在回答它的模型服务，以及它打开的页面。
+            </p>
+          </details>
+          <details>
+            <summary>在飞机上能用吗？</summary>
+            <p>
+              不能。这次构建里的每条路线都要走网络：免费模型是云端的一层，
+              你粘贴在设置里的密钥也指向远端。没有可以离线兜底的已下载模型——这次构建一个也没有。
+            </p>
+          </details>
+          <details>
+            <summary>为什么用 Rust 而不是 Electron？</summary>
+            <p>
+              因为循环本身就是产品。工具运行器、补丁应用器、浏览器桥接和差异引擎都是原生代码，
+              所以一次运行把时间花在思考上，而不是重画窗口。
+            </p>
+          </details>
+        </div>
+      </section>
+
+      <section class="cta">
+        <h2>一分钟内开始你的第一次运行</h2>
+        <p>下载、打开、选一个免费模型、描述任务。设置到此为止——应用会替你启动 OpenCode 的服务。</p>
+        <a class="btn btn-primary" href="https://github.com/antontuzov/FreeCode/releases/latest/download/FreeCode.dmg">
+          下载 macOS 版
+        </a>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <span class="brand">
+            <svg viewBox="0 0 24 24" aria-hidden="true" class="brand-mark">
+              <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H10a2 2 0 0 1 2 2v13a1 1 0 0 0 1 1h1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <path d="M4 5.5V17a3 3 0 0 0 3 3h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <path d="M8.5 8.5h2.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <circle cx="17.5" cy="6.5" r="3" fill="none" stroke="currentColor" stroke-width="1.7" />
+            </svg>
+            FreeCode
+          </span>
+          <p>跑在免费模型上的桌面智能体。Rust 宿主，原生窗口，没有订阅。</p>
+        </div>
+        <div class="footer-col">
+          <h4>产品</h4>
+          <a href="#download">下载 macOS 版</a>
+          <a href="#work">一次运行留下的东西</a>
+          <a href="#how">一次运行的过程</a>
+          <a href="#features">功能</a>
+          <a href="#models">免费模型</a>
+        </div>
+        <div class="footer-col">
+          <h4>能力</h4>
+          <a href="#features">智能体工具循环</a>
+          <a href="#features">浏览器控制</a>
+          <a href="#features">像素检查</a>
+          <a href="#features">实时终端</a>
+          <a href="#faq">撤销与镜像</a>
+        </div>
+        <div class="footer-col">
+          <h4>项目</h4>
+          <a href="https://github.com/antontuzov/FreeCode">GitHub</a>
+          <a href="https://github.com/antontuzov/FreeCode/issues">问题</a>
+          <a href="https://github.com/antontuzov/FreeCode/releases">发布</a>
+          <a href="https://github.com/antontuzov/FreeCode/releases/latest">最新的 .dmg</a>
+          <a href="https://opencode.ai">由 OpenCode 免费模型提供算力</a>
+        </div>
+      </div>
+      <p class="footer-line">
+        © 2026 FreeCode —— 免费的含义是免费模型。本站提到的 OpenCode、NVIDIA、DeepSeek
+        等厂商与本项目无隶属关系。
+      </p>
+    </footer>
+
+    <script src="../site/assets/site.js"></script>
+  </body>
+</html>

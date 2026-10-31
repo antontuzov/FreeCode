@@ -11,7 +11,7 @@ tier [OpenCode](https://opencode.ai) publishes. It is a real agent loop: it read
 writes files, runs your checks, drives a browser, and shows every step it took.
 
 **[Download for macOS →](https://github.com/antontuzov/FreeCode/releases/latest/download/FreeCode.dmg)**
-· [Landing page](https://antontuzov.github.io/FreeCode/) · [Issues](https://github.com/antontuzov/FreeCode/issues)
+· [Landing page](https://antontuzov.github.io/FreeCode/) · [中文](https://antontuzov.github.io/FreeCode/zh/) · [Issues](https://github.com/antontuzov/FreeCode/issues)
 
 > The build is not signed or notarised yet. On first launch, right-click the app → **Open**, then
 > confirm once; Gatekeeper leaves it alone after that.

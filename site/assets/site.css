@@ -125,6 +125,23 @@ a {
   color: var(--mint-bright);
 }
 
+.nav-lang {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--quiet);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.nav-lang:hover {
+  color: var(--fg);
+  border-color: var(--mint);
+}
+
 .nav-cta:hover {
   background: var(--mint);
   color: #fff;
@@ -1400,7 +1417,7 @@ a {
     gap: 28px;
   }
 
-  .nav-links a:not(.nav-cta) {
+  .nav-links a:not(.nav-cta):not(.nav-lang) {
     display: none;
   }
 

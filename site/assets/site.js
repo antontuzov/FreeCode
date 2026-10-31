@@ -23,7 +23,10 @@
   }
   function noteUnavailable() {
     var note = document.getElementById("hero-note");
-    if (note) note.textContent = "The first .dmg is on its way — watch Releases on GitHub.";
+    var text =
+      (document.body && document.body.dataset.noteMissing) ||
+      "The first .dmg is on its way — watch Releases on GitHub.";
+    if (note) note.textContent = text;
     if (dmg) {
       dmg.removeAttribute("href");
       dmg.style.opacity = "0.55";
@@ -54,10 +57,11 @@
       meta.setAttribute("content", theme === "light" ? "#f6f4ee" : "#0c1210");
     }
     if (toggle) {
-      toggle.setAttribute(
-        "aria-label",
-        theme === "light" ? "Switch to dark theme" : "Switch to light theme",
-      );
+      var label =
+        theme === "light"
+          ? toggle.dataset.labelDark || "Switch to dark theme"
+          : toggle.dataset.labelLight || "Switch to light theme";
+      toggle.setAttribute("aria-label", label);
       toggle.setAttribute("aria-pressed", theme === "light" ? "true" : "false");
     }
     document.dispatchEvent(new CustomEvent("freecode:theme", { detail: { theme: theme } }));
@@ -97,6 +101,13 @@
     { verb: "Play", tail: "its own game", deco: "doodle" },
     { verb: "Check", tail: "its own work", deco: "brackets" },
   ];
+  // The Chinese copy carries its own sentences, so the page says which ones to use.
+  if (rotator.dataset.pairs) {
+    try {
+      var given = JSON.parse(rotator.dataset.pairs);
+      if (Array.isArray(given) && given.length) pairs = given;
+    } catch (e) {}
+  }
   var index = 0;
 
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
