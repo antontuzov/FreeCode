@@ -13,12 +13,21 @@
 // rather than an intention), and what the run would do with each one right now. The second is
 // computed by `freecode_core::approvals::evaluate` against the settings and sandbox in force — the
 // same engine that decides it mid-run, so the page cannot tell a friendlier story than the loop acts.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Row, Section } from "./controls";
 import { Icon } from "./icons";
 import { translate, type Locale } from "../i18n";
-import { ipc, type ExtensionInventory, type ExtensionTool, type SkillPack } from "../lib/ipc";
+import {
+  ipc,
+  type ExtensionInventory,
+  type ExtensionTool,
+  type McpInventory,
+  type McpReport,
+  type McpServer,
+  type McpTool,
+  type SkillPack,
+} from "../lib/ipc";
 import { shortcutLabel } from "../lib/shortcuts";
 import { useSkills } from "../state/skills";
 
@@ -90,8 +99,7 @@ function Skill({ pack, t }: { pack: SkillPack; t: T }) {
   );
 }
 
-/**
- * Where a pack goes, said by the host's own resolved paths rather than a description of them: the
+/** Where a pack goes, said by the host's own resolved paths rather than a description of them: the
  * folder this project picks is the folder the run reads, and it is not always the one the page's name
  * implies. One line per place, and only the machine line when this host has no separate project folder
  * to name — an empty path printed under a heading is worse than the heading missing.
@@ -107,9 +115,109 @@ function WhereToLook({ label, path }: { label: string; path: string }) {
   );
 }
 
+/* ---- the MCP servers this machine declares ---- */
+
+/** What one server's press came back with, or why it did not. */
+type Check = { report?: McpReport; error?: string };
+
+/**
+ * The calls one server answered with, as rows of the same vocabulary the tool list above uses. The
+ * title is the name a call would go by and the description carries the server's own display name and
+ * prose, so a user reading the page sees the two spellings side by side — which is the only way a
+ * server answering for `list_dir` is visible rather than silent.
+ */
+function Published({ report, t }: { report: McpReport; t: T }) {
+  return (
+    <>
+      <p className="px-[var(--space-4)] pb-[var(--space-2)] text-fine text-faint">
+        {t("mcp.answered", {
+          server: report.serverName || report.name,
+          version: report.serverVersion,
+          protocol: report.protocol,
+          count: report.tools.length,
+        })}
+      </p>
+      {report.tools.map((tool) => (
+        <ToolRow key={tool.name} tool={tool} t={t} />
+      ))}
+    </>
+  );
+}
+
+function ToolRow({ tool, t }: { tool: McpTool; t: T }) {
+  const head = [tool.title !== tool.name ? tool.title : "", tool.description]
+    .filter(Boolean)
+    .join(" — ");
+  return (
+    <Row title={tool.name} description={head}>
+      {tool.collides && <span className="pill shrink-0">{t("mcp.collides")}</span>}
+    </Row>
+  );
+}
+
+/**
+ * One declared server as a row. The title is the key written under `mcpServers`, because that is the
+ * name the press is made against, and the command line rides the description so what the page shows is
+ * what the press would start. Only the names of the variables the entry sets are shown, never their
+ * values: a declaration is where an API key goes, and a row that echoed it would put the secret on the
+ * screen for whoever is looking at the page.
+ *
+ * A server this build cannot start — a URL-shaped one, or one switched off in the file — keeps its row
+ * and shows the reason in place of the press, because the entry exists and pretending otherwise would
+ * read as a file the app ignored.
+ */
+function Server({
+  server,
+  t,
+  outcome,
+  checking,
+  onCheck,
+}: {
+  server: McpServer;
+  t: T;
+  outcome: Check | undefined;
+  checking: boolean;
+  onCheck: () => void;
+}) {
+  const line = [server.command, ...server.args].filter(Boolean).join(" ");
+  const description = server.envKeys.length
+    ? `${line} · ${t("mcp.env", { keys: server.envKeys.join(", ") })}`
+    : line;
+  return (
+    <>
+      <Row title={server.name} description={description}>
+        <span className="flex shrink-0 items-center gap-[var(--space-2)]">
+          <span className="pill shrink-0">{server.transport}</span>
+          {server.runnable ? (
+            <button type="button" className="field" disabled={checking} onClick={onCheck}>
+              {checking ? t("mcp.asking") : t("mcp.check")}
+            </button>
+          ) : (
+            <span className="pill shrink-0">
+              {t(server.disabled ? "mcp.off" : "mcp.unrunnable")}
+            </span>
+          )}
+        </span>
+      </Row>
+      {outcome?.error && (
+        <p role="alert" className="px-[var(--space-4)] pb-[var(--space-3)] text-fine text-danger">
+          {t("mcp.failed", { error: outcome.error })}
+        </p>
+      )}
+      {outcome?.report && <Published report={outcome.report} t={t} />}
+    </>
+  );
+}
+
 export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => void }) {
   const [inv, setInv] = useState<ExtensionInventory | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mcp, setMcp] = useState<McpInventory | null>(null);
+  const [mcpError, setMcpError] = useState<string | null>(null);
+  // One entry per server that has been asked, so a second press on a different row cannot answer over
+  // the first one's row. `asking` is the name whose press is still out.
+  const [checks, setChecks] = useState<Record<string, Check>>({});
+  const [asking, setAsking] = useState<string | null>(null);
   const t: T = (key, params) => translate(locale, `extensions.${key}`, params);
   // The packs come from the store the composer reads, so the page and the slash strip cannot show two
   // different vocabularies. `force` asks for the folder as it is now: a page that reports what is on
@@ -137,6 +245,40 @@ export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => v
     return () => {
       live = false;
     };
+  }, []);
+
+  // The declaration file is read the same way the tool list is: once, on the host's own answer, with
+  // nothing started on the way. A failure here is about the file, so it gets its own line rather than
+  // the page-level "the registry could not be read", which would name the wrong thing.
+  useEffect(() => {
+    let live = true;
+    void ipc
+      .mcpInventory()
+      .then((found) => {
+        if (live) setMcp(found);
+      })
+      .catch((e: unknown) => {
+        if (live) setMcpError(String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // The press the row offers. It starts the command, takes the handshake and the tool list, and stops
+  // the process again — so it is stated as the question it answers, and its failure is the host's own
+  // sentence about why, not a spinner that never clears.
+  const ask = useCallback(async (name: string) => {
+    setAsking(name);
+    setChecks((current) => ({ ...current, [name]: {} }));
+    try {
+      const report = await ipc.mcpCheck(name);
+      setChecks((current) => ({ ...current, [name]: { report } }));
+    } catch (reason) {
+      setChecks((current) => ({ ...current, [name]: { error: String(reason) } }));
+    } finally {
+      setAsking(null);
+    }
   }, []);
 
   // `?tool=<id>` is the deep link to one row of this list, the way `?row=` is the deep link to a
@@ -171,6 +313,20 @@ export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => v
     if (!new URLSearchParams(window.location.search).get("skill")) return;
     document.getElementById("skills")?.scrollIntoView({ block: "start" });
   }, [inv]);
+
+  // `?mcp=<anything>` takes the capture to the servers, which sit under the whole tool list, and
+  // `?mcpcheck=<name>` presses the named row's Check for it. This window takes no injected clicks and
+  // the answer is a round trip to somebody else's process, so the state a press puts on the page — the
+  // protocol the server chose, its calls, the collision flag — is otherwise unreachable from a harness.
+  // Both are dev-only, and the seed only fires for a server the file actually declares.
+  useEffect(() => {
+    if (!mcp || !import.meta.env.DEV) return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get("mcp")) return;
+    document.getElementById("mcp")?.scrollIntoView({ block: "start" });
+    const wanted = params.get("mcpcheck");
+    if (wanted && mcp.servers.some((s) => s.name === wanted)) void ask(wanted);
+  }, [mcp, ask]);
 
   const blocked = inv?.tools.filter((r) => r.decision === "blocked").length ?? 0;
   // The registry holds only calls that reach a runner, so this is empty today. The section stays
@@ -300,6 +456,63 @@ export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => v
                   skills.map((pack) => <Skill key={pack.id} pack={pack} t={t} />)
                 )}
               </Section>
+
+              {/* The servers this machine declares. Listed before anything is asked of them, and a press
+                  that starts one answers only the question "what do you publish" — which is why the note
+                  under the rows says what a run cannot do with the answer yet. */}
+              {(mcp || mcpError) && (
+                <Section
+                  label={t("mcp")}
+                  id="mcp"
+                  description={
+                    mcp && mcp.servers.length === 0
+                      ? undefined
+                      : t("mcp.desc", { count: mcp?.servers.length ?? 0 })
+                  }
+                >
+                  {mcpError && (
+                    <p
+                      role="alert"
+                      className="px-[var(--space-4)] py-[var(--space-3)] text-fine text-danger"
+                    >
+                      {t("mcp.loadFailed", { error: mcpError })}
+                    </p>
+                  )}
+                  {mcp && mcp.error && (
+                    <p
+                      role="alert"
+                      className="px-[var(--space-4)] py-[var(--space-3)] text-fine text-danger"
+                    >
+                      {t("mcp.broken", { error: mcp.error })}
+                    </p>
+                  )}
+                  {mcp &&
+                    (mcp.servers.length === 0 ? (
+                      <>
+                        <p className="px-[var(--space-4)] py-[var(--space-3)] text-quiet text-muted">
+                          {t("mcp.none")}
+                        </p>
+                        <div className="px-[var(--space-4)] pb-[var(--space-3)]">
+                          <WhereToLook label={t("mcp.file")} path={mcp.path} />
+                        </div>
+                      </>
+                    ) : (
+                      mcp.servers.map((server) => (
+                        <Server
+                          key={server.name}
+                          server={server}
+                          t={t}
+                          outcome={checks[server.name]}
+                          checking={asking === server.name}
+                          onCheck={() => void ask(server.name)}
+                        />
+                      ))
+                    ))}
+                  <p className="px-[var(--space-4)] pb-[var(--space-3)] text-fine text-faint">
+                    {t("mcp.note")}
+                  </p>
+                </Section>
+              )}
 
               <p className="text-fine text-faint">{t("note")}</p>
             </>

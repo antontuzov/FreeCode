@@ -29,7 +29,8 @@
     "tauri:rain": "tauri dev --config src-tauri/tauri.dev-rain.conf.json",
     "tauri:nav": "tauri dev --config src-tauri/tauri.dev-nav.conf.json",
     "tauri:extensions": "tauri dev --config src-tauri/tauri.dev-extensions.conf.json",
-    "tauri:hero": "tauri dev --config src-tauri/tauri.dev-hero.conf.json"
+    "tauri:hero": "tauri dev --config src-tauri/tauri.dev-hero.conf.json",
+    "tauri:mcp": "tauri dev --config src-tauri/tauri.dev-mcp.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

@@ -752,6 +752,55 @@ export type SkillInventory = {
   projectDir: string;
 };
 
+/* ---- the MCP servers this machine declares ---- */
+
+/**
+ * One declared server, as `mcp::Server` states it. Mirrors the host rather than the file: `args` and
+ * `envKeys` are what the entry says, and `envKeys` holds the *names* of the variables, because a
+ * declaration is where an API key goes and the page's job is to show the command a press would run.
+ */
+export type McpServer = {
+  /** The key under `mcpServers`, which is the name the user calls it by. */
+  name: string;
+  command: string;
+  args: string[];
+  envKeys: string[];
+  disabled: boolean;
+  /** `"stdio"` is the one transport this build speaks; anything else is listed so the row can name
+   * what it cannot start. */
+  transport: string;
+  /** Whether a press would try to run this one. */
+  runnable: boolean;
+};
+
+/** Mirrors `mcp::Inventory`. `path` is the declaration file, and `error` is the one sentence about
+ * what went wrong — including the entries that were skipped while the rest was listed. */
+export type McpInventory = {
+  servers: McpServer[];
+  path: string;
+  error: string;
+};
+
+/** One call a server publishes. Mirrors `mcp::Tool`. */
+export type McpTool = {
+  name: string;
+  /** The server's own display name for it, when it gave one. */
+  title: string;
+  description: string;
+  /** Whether this build already runs a call of that name. */
+  collides: boolean;
+};
+
+/** What one server answered. Mirrors `mcp::Report`. */
+export type McpReport = {
+  name: string;
+  /** The version the server said it will speak, which is not necessarily the one we offered. */
+  protocol: string;
+  serverName: string;
+  serverVersion: string;
+  tools: McpTool[];
+};
+
 /* ---- the Storage page: what this host has written on the machine ---- */
 
 /**
@@ -799,6 +848,13 @@ export const ipc = {
   extensionsInventory: () => invoke<ExtensionInventory>("extensions_inventory"),
   /** The skill packs this machine and this folder hold, by the name a prompt invokes one by. */
   skillsList: () => invoke<SkillInventory>("skills_list"),
+  /** The MCP servers in this machine's declaration file, without starting any of them. */
+  mcpInventory: () => invoke<McpInventory>("mcp_inventory"),
+  /**
+   * Ask one declared server what it publishes. The host starts the command, completes the handshake,
+   * reads `tools/list` and stops the process again; a refusal comes back as the error the page shows.
+   */
+  mcpCheck: (name: string) => invoke<McpReport>("mcp_check", { name }),
   /** The conversations this app has filed, measured from the files on disk. */
   storageReport: () => invoke<StorageReport>("storage_report"),
   /** Which machine this is and which build is on it. */

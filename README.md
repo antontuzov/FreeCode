@@ -147,6 +147,7 @@ deep. The dev URL accepts seeds no shipped control sets:
 | `?terminal=1`, `?session=shell\|python`, `?input=<line>` | the terminal panel, its own shell or Python session, and the lines typed into it |
 | `?review=1`, `?find=<text>`, `?scope=all`, `?outline=1` | the review panel, its find field, its scope and its fold |
 | `?plan=1`, `?collapsed=<groups>`, `?extensions=1` | the plan panel, the inspector's lower groups, the Extensions inventory |
+| `?mcp=<anything>`, `?mcpcheck=<server>` | the Extensions page's MCP section, and one declared server asked what it publishes |
 
 `pnpm app:dev:fixture`, `app:dev:settings` and `app:dev:chat` are three pre-wired ones.
 
@@ -163,6 +164,10 @@ the reason on hover:
   yet; the app tells you when a newer release is published but does not install it.
 - **No telemetry.** Nothing in this build collects or sends usage data.
 - **No file attachments.** The composer's add control is dead until there is a retrieval path.
+- **MCP servers are read, not called.** The Extensions page lists `~/.freecode/mcp.json`, and a press
+  starts one server, completes the handshake, reads the calls it publishes and stops it again. Neither
+  answer route is handed those calls yet — the free route's tools are run by the service itself — so a
+  server that answers here is one this build has read, and the row says that.
 
 ## Layout
 

@@ -359,7 +359,7 @@ fn first_line(body: &str) -> String {
 }
 
 /// This machine's home — the same one [`crate::instructions`] reads its always-on file from.
-fn machine_home() -> Option<PathBuf> {
+pub(crate) fn machine_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)

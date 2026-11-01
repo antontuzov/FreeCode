@@ -16,6 +16,7 @@ mod extensions;
 mod free_models;
 mod github;
 mod instructions;
+mod mcp;
 mod opencode;
 mod paths;
 mod preview;
@@ -80,6 +81,22 @@ async fn skills_list(app: AppHandle) -> Result<skills::Inventory, String> {
     tauri::async_runtime::spawn_blocking(move || skills::inventory(Some(&app), &settings))
         .await
         .map_err(|e| format!("skill inventory failed: {e}"))
+}
+
+/// The Extensions page's MCP section: the servers this machine declares, read from one file, with the
+/// file's own path so an empty section can say where a declaration goes.
+#[tauri::command]
+async fn mcp_inventory() -> Result<mcp::Inventory, String> {
+    tauri::async_runtime::spawn_blocking(mcp::inventory)
+        .await
+        .map_err(|e| format!("mcp inventory failed: {e}"))
+}
+
+/// Ask one declared server what it publishes. The press starts the command and stops it again, which
+/// is what the row says it does; a run is given nothing by this.
+#[tauri::command]
+async fn mcp_check(name: String) -> Result<mcp::Report, String> {
+    mcp::check(&name).await
 }
 
 /// The Storage page: the conversations this host has filed, measured from the files on disk.
@@ -347,6 +364,9 @@ pub fn run() {
             extensions_inventory,
             // The skill packs a prompt can be worked under, for the same page and the composer.
             skills_list,
+            // The MCP servers this machine declares, and the answer to "what does this one publish?".
+            mcp_inventory,
+            mcp_check,
             // What this app has put on the machine.
             storage_report,
             // Which machine that is, and which build is running on it.
