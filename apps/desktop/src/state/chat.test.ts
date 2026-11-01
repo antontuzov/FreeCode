@@ -69,8 +69,9 @@ describe("sending", () => {
 
     mock.chatSend.mockResolvedValueOnce("ok");
     await useChat.getState().send("", "data:image/png;base64,AA");
-    // Even a picture with no words is an agent prompt: the tools always go with it.
-    expect(mock.chatSend).toHaveBeenCalledWith("", "data:image/png;base64,AA", true);
+    // Even a picture with no words is an agent prompt: the tools always go with it. The fourth
+    // argument is the skill pack, and a prompt that names none sends `undefined` rather than a name.
+    expect(mock.chatSend).toHaveBeenCalledWith("", "data:image/png;base64,AA", true, undefined);
   });
 
   it("shows the bubble on the click, before the host has answered", async () => {
@@ -98,11 +99,61 @@ describe("sending", () => {
     await first;
   });
 
+  it("takes a slash command off the prompt and sends it as the pack to work under", async () => {
+    mock.chatSend.mockResolvedValueOnce("answer");
+    await useChat.getState().send("/tidy-commit rewrite this commit message");
+
+    // The host gets the name and the prompt apart, so the filed turn is the question rather than the
+    // question with a command in front of it.
+    expect(mock.chatSend).toHaveBeenCalledWith(
+      "rewrite this commit message",
+      undefined,
+      true,
+      "tidy-commit",
+    );
+    expect(at(useTranscript.getState().rows, 0)).toMatchObject({
+      kind: "turn",
+      role: "user",
+      text: "rewrite this commit message",
+    });
+  });
+
+  it("sends a bare command as typed, so its refusal lands under the line that asked", async () => {
+    mock.chatSend.mockRejectedValueOnce(
+      new Error("the skill tidy-commit needs a prompt to go with it."),
+    );
+    await useChat.getState().send("/tidy-commit");
+
+    expect(mock.chatSend).toHaveBeenCalledWith("", undefined, true, "tidy-commit");
+    expect(at(useTranscript.getState().rows, 0)).toMatchObject({
+      kind: "turn",
+      role: "user",
+      text: "/tidy-commit",
+    });
+  });
+
+  it("leaves a prompt that opens with a path alone", async () => {
+    mock.chatSend.mockResolvedValueOnce("answer");
+    await useChat.getState().send("/etc/hosts looks like this");
+
+    expect(mock.chatSend).toHaveBeenCalledWith(
+      "/etc/hosts looks like this",
+      undefined,
+      true,
+      undefined,
+    );
+  });
+
   it("closes the send out, refreshes the server and the filed list, and hands the rows over", async () => {
     mock.chatSend.mockResolvedValueOnce("answer");
     await useChat.getState().send("hello", "data:image/png;base64,AA");
 
-    expect(mock.chatSend).toHaveBeenCalledWith("hello", "data:image/png;base64,AA", true);
+    expect(mock.chatSend).toHaveBeenCalledWith(
+      "hello",
+      "data:image/png;base64,AA",
+      true,
+      undefined,
+    );
     expect(useChat.getState().sending).toBe(false);
     expect(useTranscript.getState().running).toBe(false);
     expect(mock.listSessions).toHaveBeenCalled();

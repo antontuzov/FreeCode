@@ -23,6 +23,7 @@ mod provider;
 mod reveal;
 mod sessions;
 mod shell;
+mod skills;
 mod status;
 mod storage;
 mod undo;
@@ -68,6 +69,17 @@ async fn extensions_inventory(app: AppHandle) -> Result<extensions::Inventory, S
     tauri::async_runtime::spawn_blocking(move || extensions::Inventory::build(&root, &settings))
         .await
         .map_err(|e| format!("tool inventory failed: {e}"))
+}
+
+/// The Extensions page's Skills section: the packs this machine and this folder hold, each under the
+/// name a prompt invokes it by. Read on the blocking pool like the tool inventory, because it walks two
+/// directories on disk.
+#[tauri::command]
+async fn skills_list(app: AppHandle) -> Result<skills::Inventory, String> {
+    let settings = appearance::load_settings()?;
+    tauri::async_runtime::spawn_blocking(move || skills::inventory(Some(&app), &settings))
+        .await
+        .map_err(|e| format!("skill inventory failed: {e}"))
 }
 
 /// The Storage page: the conversations this host has filed, measured from the files on disk.
@@ -333,6 +345,8 @@ pub fn run() {
             model_status,
             // What the agent can reach and what this build runs, for the Extensions page.
             extensions_inventory,
+            // The skill packs a prompt can be worked under, for the same page and the composer.
+            skills_list,
             // What this app has put on the machine.
             storage_report,
             // Which machine that is, and which build is running on it.

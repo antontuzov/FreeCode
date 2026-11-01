@@ -11,6 +11,7 @@ export function Section({
   label,
   description,
   bare,
+  id,
   children,
 }: {
   label: string;
@@ -18,10 +19,13 @@ export function Section({
   /** A section whose content is its own surface — a row of circles needs no card around it, and the
    * card's hairline would only draw a box the picker does not have. */
   bare?: boolean;
+  /** A section a capture names rather than scrolls to find: the native window takes no injected
+   * clicks, so a page longer than the window needs an anchor to be reached at all. */
+  id?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="settings-section mb-[var(--space-6)]">
+    <section id={id} className="settings-section mb-[var(--space-6)]">
       <h2 className="settings-section-title text-quiet uppercase tracking-[0.08em] text-muted">
         {label}
       </h2>

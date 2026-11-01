@@ -7,6 +7,7 @@ import { shortcutLabel } from "../lib/shortcuts";
 import { useChat } from "../state/chat";
 import { useNav } from "../state/nav";
 import { useSettings } from "../state/settings";
+import { suggestions, useSkills } from "../state/skills";
 import { useTranscript, type RunDiff, type RunRounds } from "../state/transcript";
 import { Icon } from "./icons";
 import { ModelPicker } from "./ModelPicker";
@@ -93,6 +94,11 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
   const review = useNav((s) => s.panel) === "review";
   const toggleReview = useNav((s) => s.toggleReview);
   const [draft, setDraft] = useState("");
+  const skills = useSkills((s) => s.skills);
+  // The packs this draft could still resolve to, or `null` when it is not naming one. The same function
+  // the press of Send reads through, so the strip and the send cannot disagree about which draft was a
+  // command — a strip that stayed up over a prompt the host would send as prose would be a lie.
+  const skillsFromDraft = suggestions(skills, draft);
   const mode = useSettings((s) => s.doc?.approvals.mode);
   // The shell's switch changes what the agent's title may promise: with it on, a run can also issue
   // one command, and that is the one call the tooltip's "nothing else reaches past this machine" would
@@ -150,6 +156,24 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
     if (!store.loaded) void store.load();
   }, []);
 
+  // A prompt can be worked under a skill pack, which is a file on disk, so the list is read the first
+  // time a draft opens with `/` — not at launch, because the box is typed into for every other reason
+  // too. `load` keeps its answer and ignores a re-read while one is in flight, so this fires on each
+  // keystroke of a command and still costs one round trip per window.
+  useEffect(() => {
+    if (!draft.trimStart().startsWith("/")) return;
+    void useSkills.getState().load();
+  }, [draft]);
+
+  // `?draft=<text>` types that text into the box on mount. The native window takes no injected
+  // keystrokes, and the strip a draft opens with `/` is a surface no capture could otherwise reach —
+  // the same door `?shell=` is for the terminal's prompt row. It seeds nothing by default: the box is
+  // empty on a normal launch, as it is for a user.
+  useEffect(() => {
+    const seed = new URLSearchParams(window.location.search).get("draft");
+    if (seed !== null) setDraft(seed);
+  }, []);
+
   // A press writes the same document the Settings page edits, and the host reads it when the next
   // prompt is sent — so the run already on screen is unaffected, and the one after it is not.
   const cycleApproval = async () => {
@@ -158,6 +182,17 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
     // `custom` is not in the cycle, so its index is -1 and the next press lands on the first mode.
     const next = DIAL[(DIAL.indexOf(current) + 1) % DIAL.length] ?? "auto_approve";
     await useSettings.getState().update((doc) => void (doc.approvals.mode = next));
+  };
+
+  // Accepting a row finishes the command rather than sending it: the name goes in with the space that
+  // closes it, and the caret is left where the prompt starts. This is only reachable while the draft is
+  // exactly `/token`, which is exactly when `suggestions` returns rows, so it can never overwrite words
+  // the user has written.
+  const acceptSkill = () => {
+    const pack = skillsFromDraft?.[0];
+    if (!pack) return false;
+    setDraft(`/${pack.id} `);
+    return true;
   };
 
   const submit = () => {
@@ -202,16 +237,44 @@ export function Composer({ locale, onPickModel }: { locale: Locale; onPickModel:
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            // Enter sends, Shift+Enter adds the newline a multi-line task needs.
+            // Enter sends, Shift+Enter adds the newline a multi-line task needs. While the box is
+            // still naming a pack, Enter finishes the name instead: the draft has no prompt in it yet,
+            // so sending would ask the host to work an empty prompt under a pack.
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              submit();
+              if (!acceptSkill()) submit();
             }
           }}
           rows={2}
           placeholder={translate(locale, "composer.placeholder")}
           className="app-composer-field w-full resize-none bg-transparent px-[var(--space-4)] pt-[var(--space-3)] text-fg outline-none placeholder:text-faint"
         />
+        {skillsFromDraft !== null && (
+          // The packs a `/name` could still be. It closes on the first Enter or the first space, which
+          // is the moment it would start covering the prompt. An empty list is said rather than shown
+          // as nothing, because on this machine a pack is a file the user has to make.
+          <div className="composer-skills" role="list">
+            <p className="composer-skills-head">{translate(locale, "composer.skills")}</p>
+            {skillsFromDraft.length === 0 && (
+              <p className="composer-skills-none">{translate(locale, "composer.skills.none")}</p>
+            )}
+            {skillsFromDraft.map((pack) => (
+              <button
+                key={pack.id}
+                type="button"
+                role="listitem"
+                onClick={() => setDraft(`/${pack.id} `)}
+                className="composer-skill-row"
+              >
+                <span className="composer-skill-name">/{pack.id}</span>
+                <span className="composer-skill-desc">{pack.description}</span>
+                <span className="composer-skill-src">
+                  {translate(locale, `extensions.skill.${pack.source}`)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         {error && (
           <p role="alert" className="px-[var(--space-4)] pb-1 text-fine text-danger">
             {error}

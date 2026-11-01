@@ -1745,12 +1745,19 @@ fn carried_capture(sight: Sight, path: &Path) -> Result<String, String> {
 /// emits anyway becomes a notice. On, the calls this build can run are offered and [`run_rounds`]
 /// answers what the model asks for — unless the approval dial says Plan only, in which case the run
 /// explores with the read-only calls and answers with a plan instead of changing the workspace.
+///
+/// `skill` is the name of a pack the composer's slash command picked out of this folder or this
+/// machine's. It is resolved before the run is claimed, and an unknown name refuses: a prompt worked
+/// under a pack the user believes is in force is a worse answer than one that says the pack was not
+/// found. The text the window sends is the prompt with the command already taken off it, so what the
+/// model is asked to do never carries a token it cannot act on.
 #[tauri::command]
 pub async fn chat_send(
     app: AppHandle,
     text: String,
     image: Option<String>,
     tools: bool,
+    skill: Option<String>,
 ) -> Result<String, String> {
     let text = text.trim().to_string();
     let image = image.filter(|url| !url.is_empty());
@@ -1760,9 +1767,26 @@ pub async fn chat_send(
         }
     }
     if text.is_empty() && image.is_none() {
-        return Err("there is nothing to send".into());
+        return Err(match &skill {
+            // A bare command is the composer's own case: the pack says how to work, and there is
+            // nothing here to work on. Said as the missing prompt it is, rather than the "nothing to
+            // send" an empty box answers with.
+            Some(name) => format!("the skill {name} needs a prompt to go with it."),
+            None => "there is nothing to send".into(),
+        });
     }
     let answer = ensure_answer(&app).await?;
+    let settings = appearance::load_settings()?;
+    // Resolved before the one-answer-at-a-time flag is taken, so a name that means no pack leaves the
+    // window able to send its next prompt rather than parked on a run that never started.
+    let skill = match skill
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        Some(name) => Some(crate::skills::load(Some(&app), &settings, name)?),
+        None => None,
+    };
     // The OpenCode route runs its own tool loop inside the service, which asks this app before any
     // write of it lands — so the run has rows, a diff and a Review panel exactly like a local one, and
     // the tools stay offered. What it does not get is this app's plan contract on the model's own
@@ -1778,7 +1802,6 @@ pub async fn chat_send(
         state.stop_requested.store(false, Ordering::Relaxed);
     }
 
-    let settings = appearance::load_settings()?;
     // Read from the settings this run will use, not from the page, so the announcement and the
     // request cannot disagree about what the dial said.
     let plan = planning(&settings, tools);
@@ -1887,8 +1910,28 @@ pub async fn chat_send(
             );
         }
     }
+    // The pack the command named goes after those files, on the run's own turn, and is said in the
+    // transcript under its own name: the instruction files are always on and were not asked for, while
+    // this one is the user's choice for this prompt, and an answer that follows it should show which
+    // instructions it was worked under. Carrying it here rather than in the prompt text is what puts it
+    // in front of both routes — the free service has no system channel of its own and flattens this
+    // turn into its single prompt, so a skill that only reached one of them would be a feature that
+    // works on the route nobody is on.
+    let instructions = match &skill {
+        None => instructions,
+        Some(invoked) => {
+            let chars = invoked.chars.to_string();
+            emit(
+                &app,
+                AgentEvent::notice(
+                    NoticeCode::SkillUsed,
+                    &[("name", invoked.name.as_str()), ("chars", chars.as_str())],
+                ),
+            );
+            with_instructions(&instructions, &invoked.block())
+        }
+    };
     let request = request_for(&state, &settings, &answer, tools, &instructions);
-
     let started = Instant::now();
     let run = Run {
         stops: Stops {

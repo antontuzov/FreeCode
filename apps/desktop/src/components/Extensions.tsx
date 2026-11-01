@@ -18,8 +18,9 @@ import { useEffect, useState } from "react";
 import { Row, Section } from "./controls";
 import { Icon } from "./icons";
 import { translate, type Locale } from "../i18n";
-import { ipc, type ExtensionInventory, type ExtensionTool } from "../lib/ipc";
+import { ipc, type ExtensionInventory, type ExtensionTool, type SkillPack } from "../lib/ipc";
 import { shortcutLabel } from "../lib/shortcuts";
+import { useSkills } from "../state/skills";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -68,10 +69,60 @@ function Tool({ tool, t }: { tool: ExtensionTool; t: T }) {
   );
 }
 
+/**
+ * A pack as a row. The title is the name a prompt types after the slash — the folder's own — rather
+ * than the prettified one, because the page's job here is to list what can be invoked, and a row that
+ * led with `Tidy commits` would name a command that resolves to nothing. The display name and the
+ * characters the run is given ride the description line with it.
+ */
+function Skill({ pack, t }: { pack: SkillPack; t: T }) {
+  const head = pack.name === pack.id ? pack.description : `${pack.name} — ${pack.description}`;
+  return (
+    <Row title={`/${pack.id}`} description={head}>
+      <span className="flex shrink-0 items-center gap-[var(--space-2)]">
+        {pack.cut && <span className="pill shrink-0">{t("skills.tooLong")}</span>}
+        <span className="pill shrink-0">{t(`skill.${pack.source}`)}</span>
+        <span className="shrink-0 tabular-nums text-fine text-muted">
+          {pack.chars.toLocaleString()}
+        </span>
+      </span>
+    </Row>
+  );
+}
+
+/**
+ * Where a pack goes, said by the host's own resolved paths rather than a description of them: the
+ * folder this project picks is the folder the run reads, and it is not always the one the page's name
+ * implies. One line per place, and only the machine line when this host has no separate project folder
+ * to name — an empty path printed under a heading is worse than the heading missing.
+ */
+function WhereToLook({ label, path }: { label: string; path: string }) {
+  if (!path) return null;
+  return (
+    <p className="mt-[var(--space-3)] text-fine text-faint">
+      {label}
+      <br />
+      <span className="font-mono break-words">{path}</span>
+    </p>
+  );
+}
+
 export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => void }) {
   const [inv, setInv] = useState<ExtensionInventory | null>(null);
   const [error, setError] = useState<string | null>(null);
   const t: T = (key, params) => translate(locale, `extensions.${key}`, params);
+  // The packs come from the store the composer reads, so the page and the slash strip cannot show two
+  // different vocabularies. `force` asks for the folder as it is now: a page that reports what is on
+  // disk should not answer from a list this window read before the last pack was saved.
+  const skills = useSkills((s) => s.skills);
+  const machineDir = useSkills((s) => s.machineDir);
+  const projectDir = useSkills((s) => s.projectDir);
+  const skillsError = useSkills((s) => s.error);
+  const loadSkills = useSkills((s) => s.load);
+
+  useEffect(() => {
+    void loadSkills(true);
+  }, [loadSkills]);
 
   useEffect(() => {
     let live = true;
@@ -107,6 +158,18 @@ export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => v
     hit.dataset.flash = "true";
     const id = window.setTimeout(() => delete hit.dataset.flash, 1400);
     return () => window.clearTimeout(id);
+  }, [inv]);
+
+  // `?skill=<anything>` is the same door for the packs, which sit under the whole tool list: the
+  // section is the last thing on a page longer than the window, and this window cannot be scrolled by
+  // the harness. The value is not a filter — the packs are the folder's, all of them — so any value
+  // takes the capture to where they are listed, which is also where the empty state and its two paths
+  // sit. It waits for the inventory because the rows above are what move the section out of the frame.
+  useEffect(() => {
+    if (!inv) return;
+    if (!import.meta.env.DEV) return;
+    if (!new URLSearchParams(window.location.search).get("skill")) return;
+    document.getElementById("skills")?.scrollIntoView({ block: "start" });
   }, [inv]);
 
   const blocked = inv?.tools.filter((r) => r.decision === "blocked").length ?? 0;
@@ -208,6 +271,35 @@ export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => v
                   ))}
                 </Section>
               )}
+
+              {/* The packs a prompt can be worked under. Read from disk by the same host that will read
+                  one back during a run, so this is the vocabulary the slash command actually has. */}
+              <Section
+                label={t("skills")}
+                id="skills"
+                description={
+                  skills.length === 0 ? undefined : t("skills.desc", { count: skills.length })
+                }
+              >
+                {skills.length === 0 ? (
+                  <>
+                    <p className="px-[var(--space-4)] py-[var(--space-3)] text-quiet text-muted">
+                      {t("skills.none")}
+                    </p>
+                    <div className="px-[var(--space-4)] pb-[var(--space-3)]">
+                      <WhereToLook label={t("skills.machine")} path={machineDir} />
+                      <WhereToLook label={t("skills.project")} path={projectDir} />
+                      {skillsError && (
+                        <p role="alert" className="mt-[var(--space-3)] text-fine text-danger">
+                          {t("skills.failed", { error: skillsError })}
+                        </p>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  skills.map((pack) => <Skill key={pack.id} pack={pack} t={t} />)
+                )}
+              </Section>
 
               <p className="text-fine text-faint">{t("note")}</p>
             </>

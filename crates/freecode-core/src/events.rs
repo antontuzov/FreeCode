@@ -202,13 +202,21 @@ pub enum NoticeCode {
     /// it. Said because a project that wrote down a rule the run never received would otherwise be
     /// answered as if the rule had reached it.
     InstructionsCut,
+    /// This prompt is being worked under a skill pack the user invoked for it.
+    ///
+    /// An invoked pack is instructions the user chose for one prompt, in the same system turn as the
+    /// files that are always on, and it says how the work should be done without changing what the run
+    /// may do. Named because an answer that follows a pack's house style would otherwise read as though
+    /// that style were the app's own — and because a pack is the one part of a run's contract that a
+    /// later prompt in the same conversation will not carry.
+    SkillUsed,
 }
 
 impl NoticeCode {
     /// Every code the host can emit. `verify-transcript-i18n` walks this to require one catalog entry
     /// per code, so a notice added here without its sentence in both locales fails the build instead
     /// of rendering its own key in the middle of a transcript.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::EffortNotSupported,
         Self::EffortNotSent,
         Self::EngineRestarted,
@@ -229,6 +237,7 @@ impl NoticeCode {
         Self::ChecksFailed,
         Self::InstructionsRead,
         Self::InstructionsCut,
+        Self::SkillUsed,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -253,6 +262,7 @@ impl NoticeCode {
             Self::ChecksFailed => "notice.checks-failed",
             Self::InstructionsRead => "notice.instructions-read",
             Self::InstructionsCut => "notice.instructions-cut",
+            Self::SkillUsed => "notice.skill-used",
         }
     }
 
@@ -282,6 +292,7 @@ impl NoticeCode {
             Self::ChecksFailed => &["code"],
             Self::InstructionsRead => &["files", "chars"],
             Self::InstructionsCut => &["files", "chars"],
+            Self::SkillUsed => &["name", "chars"],
         }
     }
 }

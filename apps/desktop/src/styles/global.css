@@ -1420,6 +1420,75 @@ select.field-input {
   border-radius: 8px;
 }
 
+/* The slash vocabulary, drawn inside the composer box under the field it belongs to. It shares the
+ * palette panel's idiom — a hovered row lifts out of the surface, the name is the strong ink and the
+ * description the quiet one — because it is the same kind of thing: a list of what a typed word could
+ * become. It is not a floating panel, since it closes the moment the command is settled and a box that
+ * grew and shrank under the caret would move the text being written. */
+.composer-skills {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 var(--space-2) var(--space-2);
+  border-top: 1px solid var(--border);
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+}
+.composer-skills-head {
+  font-size: var(--size-micro);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 0 var(--space-2);
+}
+.composer-skills-none {
+  font-size: var(--size-fine);
+  line-height: 1.5;
+  color: var(--text-muted);
+  padding: var(--space-1) var(--space-2);
+}
+.composer-skill-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: var(--space-1) var(--space-2);
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    border-color var(--dur-quick) var(--ease-standard);
+}
+.composer-skill-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-line);
+}
+.composer-skill-name {
+  font-family: var(--font-family-code);
+  font-size: var(--size-fine);
+  font-weight: 600;
+  color: var(--text-strong);
+  flex-shrink: 0;
+}
+.composer-skill-desc {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--size-fine);
+  color: var(--text-muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Which of the two places the pack came from, because a project's pack of the same name is the one
+ * that wins, and the row the user is about to invoke has to say which it is. */
+.composer-skill-src {
+  flex-shrink: 0;
+  font-size: var(--size-micro);
+  color: var(--text-faint);
+}
+
 .app-status {
   font-size: var(--size-micro);
   font-weight: 550;

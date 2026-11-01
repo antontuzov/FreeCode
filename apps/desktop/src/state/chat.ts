@@ -5,6 +5,7 @@ import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import { useApproval } from "./approval";
 import { fileable, useSessions } from "./sessions";
+import { invocation } from "./skills";
 import { useTerminal } from "./terminal";
 import { useTranscript } from "./transcript";
 
@@ -18,7 +19,10 @@ type ChatStore = {
   /** A picture is a `data:` URL the composer shrank; a prompt may be nothing but one. Every prompt is
    * an agent prompt: the workspace tools go with it, because this app is an agent rather than a chat
    * window. What a run may *change* is the approval policy's answer, and the shell and the subagents
-   * are Settings switches, so the tools offered are the ones the machine has actually agreed to. */
+   * are Settings switches, so the tools offered are the ones the machine has actually agreed to.
+   *
+   * `text` is what the box holds, which may open with a slash command naming the skill pack this prompt
+   * is worked under; the command is taken off before the host is asked. */
   send: (text: string, image?: string) => Promise<void>;
   stop: () => Promise<void>;
   newTask: () => Promise<void>;
@@ -29,17 +33,24 @@ export const useChat = create<ChatStore>((set, get) => ({
   error: null,
   announced: false,
   send: async (text, image) => {
-    const trimmed = text.trim();
-    // A picture alone is a question: "what is in this?" needs no words.
-    if ((!trimmed && !image) || get().sending) return;
+    if (get().sending) return;
+    // A draft that opens with `/name` names a pack for this prompt to be worked under, and the name is
+    // not part of what the model is asked to do. Parsing here rather than at the composer is what makes
+    // the dev seed's `?ask=/name …` the same path as the press of Send.
+    const { skill, prompt } = invocation(text);
+    // A picture alone is a question: "what is in this?" needs no words. A bare command is shown as
+    // typed, because the refusal the host answers it with — a pack with no prompt under it — is about
+    // the command, and a row that showed nothing would be a turn the user never sent.
+    const shown = prompt || text.trim();
+    if (!shown && !image) return;
     const transcript = useTranscript.getState();
     // The bubble appears on the click, not on the reply: the engine may be about to spend ten
     // seconds paging the pack into memory, and a window that shows nothing looks frozen.
-    transcript.pushPrompt(trimmed, image);
+    transcript.pushPrompt(shown, image);
     transcript.setRunning(true);
     set({ sending: true, error: null, announced: false });
     try {
-      await ipc.chatSend(trimmed, image, true);
+      await ipc.chatSend(prompt, image, true, skill ?? undefined);
     } catch (error) {
       // The transcript is where a send's failure belongs: the composer repeating it puts the same
       // sentence on screen twice, 200 px apart. A refusal or a dead stream already announced itself on

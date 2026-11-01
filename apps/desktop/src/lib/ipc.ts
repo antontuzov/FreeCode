@@ -721,6 +721,37 @@ export type ExtensionInventory = {
   networkAllowed: boolean;
 };
 
+/* ---- the skill packs a prompt can be worked under ---- */
+
+/**
+ * Which of the two places a pack was read from, as `skills::Source` spells it. A folder's pack of one
+ * name shadows the machine's, so the row has to say which file answered — it is the only way a user
+ * looking at two packs of one name can tell what the run was given.
+ */
+export type SkillSource = "machine" | "project";
+
+/** One pack. Mirrors `skills::Pack`. */
+export type SkillPack = {
+  /** The folder's name, which is what a prompt types after the slash. */
+  id: string;
+  name: string;
+  description: string;
+  source: SkillSource;
+  /** The pack's own length, before the clipping a run applies to it. */
+  chars: number;
+  /** Whether that length is past what one prompt is given, so the row can say the run will read part
+   * of the pack rather than leaving the user to count it out. */
+  cut: boolean;
+  path: string;
+};
+
+/** Mirrors `skills::Inventory`. The two directories are empty strings when this host cannot name them. */
+export type SkillInventory = {
+  skills: SkillPack[];
+  machineDir: string;
+  projectDir: string;
+};
+
 /* ---- the Storage page: what this host has written on the machine ---- */
 
 /**
@@ -766,6 +797,8 @@ export const ipc = {
   modelStatus: () => invoke<ModelStatus>("model_status"),
   /** Every tool the agent is offered, with the current approvals and sandbox applied to each row. */
   extensionsInventory: () => invoke<ExtensionInventory>("extensions_inventory"),
+  /** The skill packs this machine and this folder hold, by the name a prompt invokes one by. */
+  skillsList: () => invoke<SkillInventory>("skills_list"),
   /** The conversations this app has filed, measured from the files on disk. */
   storageReport: () => invoke<StorageReport>("storage_report"),
   /** Which machine this is and which build is on it. */
@@ -911,12 +944,18 @@ export const ipc = {
    * agent prompt. False, the host sends one request and answers in prose, and a tool call the model
    * emits anyway is a notice. On, the four read-only tools are offered and each call the model asks
    * for becomes a transcript row.
+   *
+   * `skill` names a pack the composer's slash command took off the front of `text`. The host reads it
+   * into the run's instructions and refuses an unknown name out loud, which is why the name travels on
+   * its own rather than being left in the prompt: what the model is asked to do should not carry a
+   * token it cannot act on, and the pack has to reach the route that has no system channel of its own.
    */
-  chatSend: (text: string, image?: string, tools?: boolean) =>
+  chatSend: (text: string, image?: string, tools?: boolean, skill?: string) =>
     invoke<string>("chat_send", {
       text,
       image: image ?? null,
       tools: tools ?? false,
+      skill: skill ?? null,
     }),
   /**
    * Start a new task: forget the conversation in flight and keep the server up. This is what the
