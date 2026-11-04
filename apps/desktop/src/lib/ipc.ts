@@ -218,6 +218,7 @@ export type HostStepKind =
   | "webSearch"
   | "webReading"
   | "browser"
+  | "mcpTool"
   | "source"
   | "blocked";
 
@@ -356,8 +357,9 @@ export type AgentEvent =
    * patience rather than letting the window guess one, so the countdown the user reads is the number
    * that decides. A round's calls go out together, so two of these can be open at once — which is why
    * an answer has to name the `callId` it is about.
-   * `command` is the exact argv when the call runs one: the headline says what is about to happen in
-   * the interface's language, and this is the line behind it, unedited. */
+   * `payload` is what the call would act on, unedited: the argv when the call runs one, the arguments
+   * when a connected server published it. The headline says what is about to happen in the
+   * interface's language, and this is the line behind it. */
   | {
       type: "approvalRequested";
       callId: string;
@@ -365,7 +367,7 @@ export type AgentEvent =
       headline: string;
       permission: PermissionClass;
       timeoutMs: number;
-      command?: string | null;
+      payload?: string | null;
     }
   /** What became of a prompt: the press, its time running out, or a stop that settled it. The host
    * closes the card with this rather than the window deciding on its own when a prompt is over. */
@@ -789,6 +791,22 @@ export type McpTool = {
   description: string;
   /** Whether this build already runs a call of that name. */
   collides: boolean;
+  /** The name a run calls it by, once the server has been connected. Empty for a call that could not
+   * be registered — one published without a name, which cannot be routed. */
+  offered: string;
+};
+
+/** One call a run may ask for. Mirrors `mcp::Published`. */
+export type McpPublished = {
+  /** The name the model calls it by. */
+  id: string;
+  /** The server that published it. */
+  server: string;
+  /** The name the server published it under. */
+  tool: string;
+  /** The label a refusal card names it by. */
+  title: string;
+  description: string;
 };
 
 /** What one server answered. Mirrors `mcp::Report`. */
@@ -855,6 +873,11 @@ export const ipc = {
    * reads `tools/list` and stops the process again; a refusal comes back as the error the page shows.
    */
   mcpCheck: (name: string) => invoke<McpReport>("mcp_check", { name }),
+  /**
+   * The calls a connected server published, by the names a run may ask for them by. Empty until a
+   * server has answered once: a declaration is not a connection.
+   */
+  mcpPublished: () => invoke<McpPublished[]>("mcp_published"),
   /** The conversations this app has filed, measured from the files on disk. */
   storageReport: () => invoke<StorageReport>("storage_report"),
   /** Which machine this is and which build is on it. */

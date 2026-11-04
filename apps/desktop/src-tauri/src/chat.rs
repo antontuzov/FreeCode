@@ -775,7 +775,7 @@ impl ServiceWrites {
                     Some(violation) => opencode::Verdict::Refuse(violation.to_string()),
                     // Inside the folder, so the dial gets its say: under Ask every change is the
                     // user's to approve, exactly as it is on the route that runs its own tool loop.
-                    None => match self.gated(request, settings, policy) {
+                    None => match self.gated(app, request, settings, policy) {
                         Ok(None) => opencode::Verdict::Allow,
                         Ok(Some(prompt)) => {
                             self.open_row(app, request);
@@ -800,12 +800,14 @@ impl ServiceWrites {
     /// file the row will name.
     fn gated(
         &self,
+        app: &AppHandle,
         request: &opencode::Request,
         settings: &Settings,
         policy: &SandboxPolicy,
     ) -> Result<Option<ApprovalRequest>, String> {
         let (tool, path) = self.subject(request);
         agent::gated(
+            app,
             tool,
             &json!({ "path": path }),
             &request.id,
@@ -1080,6 +1082,7 @@ fn planning(settings: &Settings, tools: bool) -> bool {
 /// when the run began, resolved once by [`chat_send`] and carried down, so a file saved mid-answer
 /// cannot change the contract the run is already working to.
 fn request_for(
+    app: &AppHandle,
     state: &ChatState,
     settings: &Settings,
     answer: &Answer,
@@ -1096,9 +1099,20 @@ fn request_for(
     request.max_tokens = answer.max_tokens();
     request.reasoning_effort = answer.effort().map(str::to_string);
     if tools {
-        request.tools = tool_offer(settings);
+        request.tools = tool_offer(settings, answer.is_local(), &server_calls(app, answer));
     }
     request
+}
+
+/// The calls a connected server published, for the route that can carry them.
+///
+/// The free service runs its own tool loop and never sees this host's registry, so a run answered
+/// there is offered none of them — a tool the model cannot make is a round it spends for nothing.
+fn server_calls(app: &AppHandle, answer: &Answer) -> Vec<Value> {
+    if answer.is_local() {
+        return Vec::new();
+    }
+    crate::mcp::offered(app)
 }
 
 /// The calls a tool-offering run may ask for: every executable one the switches allow, or only the
@@ -1107,7 +1121,12 @@ fn request_for(
 /// The read-only offer is the same list a subagent gets, and for the same reason: a tool offered and
 /// then refused costs the model a round, and the approval engine would refuse every write in this
 /// mode anyway. The planning contract can then name exactly what exists.
-fn tool_offer(settings: &Settings) -> Vec<Value> {
+///
+/// The calls a connected server published are added to the offer, and only on the route that can carry
+/// them — `local` says the run is answered by the free service, which runs its own tools and is never
+/// handed this host's registry. Plan-only leaves them out for the same reason it leaves the writes
+/// out: the gate would refuse every one.
+fn tool_offer(settings: &Settings, local: bool, published: &[Value]) -> Vec<Value> {
     if settings.approvals.mode == ApprovalMode::PlanOnly {
         return freecode_tools::read_only_specs();
     }
@@ -1116,11 +1135,17 @@ fn tool_offer(settings: &Settings) -> Vec<Value> {
     // delegation when Subagents is on: a schema the host cannot run, or one that would leave the
     // machine or start a second run against the user's stated wish, is a promise the model would
     // be asked to break.
-    freecode_tools::executable_specs(
+    let mut offer = freecode_tools::executable_specs(
         settings.privacy.allow_remote_providers,
         settings.approvals.shell_enabled,
         settings.approvals.subagents_enabled,
-    )
+    );
+    // A server call reaches out of this app, so it needs the same switch the web calls need — and
+    // the only route that can offer one already requires that switch to be on.
+    if !local && settings.privacy.allow_remote_providers {
+        offer.extend(published.iter().cloned());
+    }
+    offer
 }
 
 /// Whether the answer stopped to ask for a tool rather than finishing in prose.
@@ -1499,7 +1524,9 @@ async fn run_rounds(
         // In the order the model asked, because the replay pairs each result with its `call_id` and
         // the template rejects a batch whose answers are shuffled. An ordinary call goes on the
         // blocking pool — a walk of the workspace is exactly the kind of thing the event loop must not
-        // wait on — while a delegation is itself async and streams its own request.
+        // wait on — while a delegation is itself async and streams its own request. A server call is
+        // async too: it starts the server and waits for it over a pipe, which the blocking pool
+        // cannot hold a runtime for.
         let mut ran = Vec::with_capacity(calls.len());
         for call in &calls {
             if freecode_tools::is_delegated(&call.name) {
@@ -1508,6 +1535,10 @@ async fn run_rounds(
                     delegations += 1;
                 }
                 ran.push(run_delegation(app, answer, settings, &policy, call, allowed, run).await);
+                continue;
+            }
+            if crate::mcp::published(app, &call.name).is_some() {
+                ran.push(agent::run_published(app, call, settings, &policy).await);
                 continue;
             }
             let (host, batch_settings, batch_policy, one) =
@@ -1581,7 +1612,7 @@ async fn run_rounds(
         if stops.stopped.load(Ordering::Relaxed) {
             break;
         }
-        request = request_for(state, settings, answer, tools, &run.instructions);
+        request = request_for(app, state, settings, answer, tools, &run.instructions);
         reply = stream_turn(app, answer, &request, tools, stops).await?;
     }
     // The same measurement for this route: the model's own check is the better one when it ran, and
@@ -1931,7 +1962,7 @@ pub async fn chat_send(
             with_instructions(&instructions, &invoked.block())
         }
     };
-    let request = request_for(&state, &settings, &answer, tools, &instructions);
+    let request = request_for(&app, &state, &settings, &answer, tools, &instructions);
     let started = Instant::now();
     let run = Run {
         stops: Stops {
@@ -2492,7 +2523,7 @@ mod tests {
         assert!(folder.contains(PLAN_SYSTEM));
         assert!(folder.find(PLAN_SYSTEM).unwrap() < folder.find("Ship on Fridays.").unwrap());
 
-        let offer = tool_offer(&settings);
+        let offer = tool_offer(&settings, false, &[]);
         let names: Vec<&str> = offer
             .iter()
             .map(|spec| spec["function"]["name"].as_str().unwrap())
@@ -2518,7 +2549,7 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.approvals.mode, ApprovalMode::AutoApprove);
         assert!(!planning(&settings, true));
-        let offer = tool_offer(&settings);
+        let offer = tool_offer(&settings, false, &[]);
         let names: Vec<&str> = offer
             .iter()
             .map(|spec| spec["function"]["name"].as_str().unwrap())
@@ -2526,6 +2557,57 @@ mod tests {
         for id in ["write_file", "edit_file", "apply_patch"] {
             assert!(names.contains(&id), "{id} is missing: {names:?}");
         }
+    }
+
+    #[test]
+    fn a_connected_servers_calls_are_offered_to_the_route_that_can_run_them() {
+        let mut settings = Settings::default();
+        settings.privacy.allow_remote_providers = true;
+        let published = vec![json!({
+            "type": "function",
+            "function": {
+                "name": "mcp__weather__get_forecast",
+                "description": "One day.",
+                "parameters": { "type": "object", "properties": {} },
+            },
+        })];
+
+        let names = |offer: Vec<Value>| -> Vec<String> {
+            offer
+                .iter()
+                .map(|spec| spec["function"]["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+
+        // The remote route carries them: the host's own loop is the one that can run a server's call.
+        let remote = names(tool_offer(&settings, false, &published));
+        assert!(
+            remote.contains(&"mcp__weather__get_forecast".to_string()),
+            "{remote:?}"
+        );
+        // The free service runs its own tools and is never handed this host's registry, so offering a
+        // call there is a round the model would spend on a tool it cannot make.
+        let local = names(tool_offer(&settings, true, &published));
+        assert!(
+            !local.contains(&"mcp__weather__get_forecast".to_string()),
+            "{local:?}"
+        );
+        // And the Privacy switch still speaks for it: a server's call reaches out of the machine.
+        let mut closed = settings.clone();
+        closed.privacy.allow_remote_providers = false;
+        let barred = names(tool_offer(&closed, false, &published));
+        assert!(
+            !barred.contains(&"mcp__weather__get_forecast".to_string()),
+            "{barred:?}"
+        );
+        // Plan-only leaves it out for the same reason it leaves the writes out: the gate refuses it.
+        let mut planner = settings.clone();
+        planner.approvals.mode = ApprovalMode::PlanOnly;
+        let planned = names(tool_offer(&planner, false, &published));
+        assert!(
+            !planned.contains(&"mcp__weather__get_forecast".to_string()),
+            "{planned:?}"
+        );
     }
 
     #[test]

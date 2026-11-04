@@ -34,6 +34,68 @@ impl ToolDescriptor {
     }
 }
 
+/// What the approval engine needs to know about a call, whoever wrote it.
+///
+/// The registry's own entries carry their text compiled in; a call a declared MCP server publishes
+/// has its name, its description and its schema arrive at run time, so it cannot be one of those.
+/// Both answer these questions, and the gate asks the same ones of either — which is what lets a
+/// call this build did not write be judged by the same rules as one it did.
+pub trait ToolFacts {
+    /// The id the model calls it by.
+    fn tool_id(&self) -> &str;
+    /// The label a row and a refusal card show.
+    fn tool_title(&self) -> &str;
+    /// What the call does, in the words of whoever declared it.
+    fn tool_description(&self) -> &str;
+    /// How much of the machine the call may touch.
+    fn tool_class(&self) -> PermissionClass;
+    /// Whether reaching it means something leaves this machine.
+    fn tool_needs_network(&self) -> bool;
+    /// The JSON schema the model is handed.
+    fn tool_schema(&self) -> &Value;
+    /// Whether the call changes nothing.
+    fn tool_is_read_only(&self) -> bool {
+        self.tool_class() == PermissionClass::ReadOnly
+    }
+    /// The question the approval prompt asks.
+    fn tool_headline(&self, arguments: &Value) -> String {
+        summary(self.tool_id(), arguments)
+    }
+    /// The text under that question: what would run.
+    fn tool_payload(&self, arguments: &Value) -> Option<String> {
+        arguments
+            .get("command")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }
+}
+
+impl ToolFacts for ToolDescriptor {
+    fn tool_id(&self) -> &str {
+        self.id
+    }
+
+    fn tool_title(&self) -> &str {
+        self.title
+    }
+
+    fn tool_description(&self) -> &str {
+        self.description
+    }
+
+    fn tool_class(&self) -> PermissionClass {
+        self.permission
+    }
+
+    fn tool_needs_network(&self) -> bool {
+        self.requires_network
+    }
+
+    fn tool_schema(&self) -> &Value {
+        &self.input_schema
+    }
+}
+
 /// A request to run a tool, as parsed out of the model's stream.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -147,7 +147,7 @@ deep. The dev URL accepts seeds no shipped control sets:
 | `?terminal=1`, `?session=shell\|python`, `?input=<line>` | the terminal panel, its own shell or Python session, and the lines typed into it |
 | `?review=1`, `?find=<text>`, `?scope=all`, `?outline=1` | the review panel, its find field, its scope and its fold |
 | `?plan=1`, `?collapsed=<groups>`, `?extensions=1` | the plan panel, the inspector's lower groups, the Extensions inventory |
-| `?mcp=<anything>`, `?mcpcheck=<server>` | the Extensions page's MCP section, and one declared server asked what it publishes |
+| `?mcp=<anything>`, `?mcpcheck=<server>` | the Extensions page's MCP section, and one declared server asked what it publishes — a check connects it, so its calls reach a run; the same check from the conversation leaves the page closed, so the run's own rows stay in view |
 
 `pnpm app:dev:fixture`, `app:dev:settings` and `app:dev:chat` are three pre-wired ones.
 
@@ -164,10 +164,13 @@ the reason on hover:
   yet; the app tells you when a newer release is published but does not install it.
 - **No telemetry.** Nothing in this build collects or sends usage data.
 - **No file attachments.** The composer's add control is dead until there is a retrieval path.
-- **MCP servers are read, not called.** The Extensions page lists `~/.freecode/mcp.json`, and a press
-  starts one server, completes the handshake, reads the calls it publishes and stops it again. Neither
-  answer route is handed those calls yet — the free route's tools are run by the service itself — so a
-  server that answers here is one this build has read, and the row says that.
+- **MCP servers are read on one route and called on another.** The Extensions page lists
+  `~/.freecode/mcp.json`, and a press starts one server, completes the handshake, reads the calls it
+  publishes and stops it again. What it published then enters the host's registry as calls a run may
+  ask for — on the remote-provider route, the one whose tool loop this host runs. Each of those calls
+  goes through the same approval gate as a call this build wrote: it asks first, Plan-only refuses
+  it, and the Privacy switch has to be on before it is offered at all. The free route runs its own
+  tools and is never handed this host's registry, so a run answered there is offered none of them.
 
 ## Layout
 

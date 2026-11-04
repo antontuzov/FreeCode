@@ -43,6 +43,7 @@ export type StepKind =
   | "webSearch"
   | "webReading"
   | "browser"
+  | "mcpTool"
   | "source"
   | "blocked";
 
@@ -70,6 +71,7 @@ const I18N_KEYS: Record<StepKind, string> = {
   webSearch: "transcript.step.webSearch",
   webReading: "transcript.step.webReading",
   browser: "transcript.step.browser",
+  mcpTool: "transcript.step.mcpTool",
   source: "transcript.step.source",
   blocked: "transcript.step.blocked",
 };
@@ -687,6 +689,7 @@ const CAPABILITIES = new Set<StepKind>([
   "webSearch",
   "webReading",
   "browser",
+  "mcpTool",
   "tool",
 ]);
 

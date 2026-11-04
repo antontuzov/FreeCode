@@ -1,9 +1,10 @@
-//! MCP: the servers this machine declares, and what each one says it can do.
+//! MCP: the servers this machine declares, and the calls they publish.
 //!
 //! The Model Context Protocol is how a tool that is not part of this build reaches a run at all. A
 //! skill (#240) adds instructions and grants nothing; a server claims the opposite — it publishes
-//! calls, and the whole point of it is that the app did not write them. That is why this file stops
-//! short of the run.
+//! calls, and the whole point of it is that the app did not write them. That is why a call it
+//! publishes goes through the same approval gate as one this build wrote, and why it only exists
+//! once the user has pressed Check on the server that publishes it.
 //!
 //! Servers are declared in one place, `~/.freecode/mcp.json`, in the shape the ecosystem already
 //! pastes around:
@@ -18,17 +19,21 @@
 //! executed by whoever looked at its Extensions page. The skills scan has no such edge because it
 //! reads files rather than running them.
 //!
-//! And what a check does here is *ask*, not *use*: spawn the command, complete the handshake, take
-//! `tools/list`, and shut the child down. The page can then show what a server publishes and name the
-//! one thing this build cannot yet do with it — the free route's calls are run by the service itself
-//! ([`crate::opencode`]'s ruleset), so a tool this app declares has no loop to be offered from. The
-//! row says so rather than letting a green light imply a capability.
+//! Two things happen here. The press on the Extensions page *asks*: it spawns the command, completes
+//! the handshake, takes `tools/list`, and shuts the child down — and what the server published then
+//! enters the host's registry as calls a run may ask for. The run itself *uses* one: the same server
+//! is started again for that one call, asked `tools/call`, and stopped again, because a server this
+//! app did not write is not a process it can leave running behind a transcript.
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Duration;
 
+use freecode_config::agent::PermissionClass;
+use freecode_tools::ToolFacts;
 use serde::Serialize;
 use serde_json::{json, Value};
+use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 
@@ -102,10 +107,18 @@ pub struct Tool {
     /// The server's own display name for it, when it gave one.
     pub title: String,
     pub description: String,
-    /// Whether this build already has a call of that name. A collision is not fatal today — nothing
-    /// is routed from here to a run — but it is the thing a user has to see before a later build lets
-    /// a server answer for a call the app means to own.
+    /// Whether this build already has a call of that name. A collision is not fatal — a server's
+    /// call is offered under a name of its own, so it never answers for one of this app's — but it
+    /// is the thing a user has to see before a later build lets a server answer for a call the app
+    /// means to own.
     pub collides: bool,
+    /// The name a run calls it by, once the server has been connected. Empty for a call that was
+    /// never registered — one the server published without a name, which cannot be routed.
+    pub offered: String,
+    /// The schema the server published, in the form the model is handed. It stays off the wire: the
+    /// page has no use for it, and a server's schema is not this app's to publish.
+    #[serde(skip)]
+    pub input_schema: Value,
 }
 
 /// What one server answered.
@@ -130,9 +143,25 @@ impl Tool {
             collides: name.is_empty() || freecode_tools::find(&name).is_some(),
             title: text(value, "title"),
             description: text(value, "description"),
+            input_schema: schema(value),
             name,
+            offered: String::new(),
         }
     }
+}
+
+/// The schema a server published, in a shape the model can be handed.
+///
+/// A server is free to publish a schema that is not an object of properties, and the model is not:
+/// a function whose parameters are an array is a call no model can fill in. So anything that is not
+/// an object with properties becomes the empty object schema, which asks for nothing and refuses
+/// nothing.
+fn schema(value: &Value) -> Value {
+    let declared = value.get("inputSchema");
+    if declared.map(|schema| schema.is_object()).unwrap_or(false) {
+        return declared.cloned().unwrap_or_else(|| json!({}));
+    }
+    json!({ "type": "object", "properties": {} })
 }
 
 fn text(value: &Value, key: &str) -> String {
@@ -141,6 +170,201 @@ fn text(value: &Value, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+/// One call a declared server publishes, as the host's own registry sees it.
+///
+/// The model calls it by [`Self::id`] — the server's name and the call's name folded into one
+/// function name — because two servers may publish a call of the same name and the model has to be
+/// able to tell them apart. The server is still asked by the name it published the call under.
+///
+/// It answers the approval gate as a side effect that reaches the network, because that is what it
+/// is: a command this app did not write, running on this user's machine, on the far side of a
+/// switch the user has to turn on before any of it is offered.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Published {
+    /// The name the model calls it by.
+    pub id: String,
+    /// The server that published it.
+    pub server: String,
+    /// The name the server published it under — what `tools/call` asks for.
+    pub tool: String,
+    /// The label a refusal card names it by.
+    pub title: String,
+    /// What the call does, in the words of whoever declared it.
+    pub description: String,
+    /// The schema the model is handed. It stays off the wire: the page has no use for a server's
+    /// schema, and a schema is not this app's to publish.
+    #[serde(skip)]
+    pub input_schema: Value,
+}
+
+impl ToolFacts for Published {
+    fn tool_id(&self) -> &str {
+        &self.id
+    }
+
+    fn tool_title(&self) -> &str {
+        &self.title
+    }
+
+    fn tool_description(&self) -> &str {
+        &self.description
+    }
+
+    fn tool_class(&self) -> PermissionClass {
+        PermissionClass::SideEffect
+    }
+
+    fn tool_needs_network(&self) -> bool {
+        true
+    }
+
+    fn tool_schema(&self) -> &Value {
+        &self.input_schema
+    }
+
+    fn tool_headline(&self, _arguments: &Value) -> String {
+        format!("Call `{}` on the {} server", self.tool, self.server)
+    }
+
+    /// The arguments the server would be given, as they were written. It is the whole of what the
+    /// call would do that this app can show, and a call with no arguments has nothing to show.
+    fn tool_payload(&self, arguments: &Value) -> Option<String> {
+        match arguments.as_object() {
+            Some(map) if !map.is_empty() => Some(arguments.to_string()),
+            _ => None,
+        }
+    }
+}
+
+/// The calls a connected server has published, and the ones a run may ask for.
+///
+/// The registry is the app's own state rather than the declaration file's: a call enters it when
+/// the user presses Check on a server and the handshake answered, which is the only moment this
+/// app has agreed to run that command at all. A server that is declared but never connected
+/// publishes nothing a run can reach, and a server that has answered once keeps its calls until it
+/// is asked again — a declaration edited behind the app's back does not silently change what a run
+/// may ask for.
+#[derive(Default)]
+pub struct Registry {
+    published: Mutex<Vec<Published>>,
+}
+
+impl Registry {
+    /// Remember what one server publishes, replacing what it published before.
+    ///
+    /// The ids are handed out here rather than taken from the server, because a function name has to
+    /// be one word of a small alphabet and a server's names are not that. The ids come back in the
+    /// order of the tools, so the page can show a run's name for a call beside the server's own.
+    pub fn register(&self, server: &str, tools: &[Tool]) -> Vec<String> {
+        let Ok(mut held) = self.published.lock() else {
+            return vec![String::new(); tools.len()];
+        };
+        held.retain(|published| published.server != server);
+        let mut taken: Vec<String> = held.iter().map(|published| published.id.clone()).collect();
+        let mut ids = Vec::with_capacity(tools.len());
+        for tool in tools {
+            if tool.name.is_empty() {
+                ids.push(String::new());
+                continue;
+            }
+            let id = offered_id(server, &tool.name, &taken);
+            taken.push(id.clone());
+            ids.push(id.clone());
+            held.push(Published {
+                id,
+                server: server.to_string(),
+                tool: tool.name.clone(),
+                title: if tool.title.is_empty() {
+                    tool.name.clone()
+                } else {
+                    tool.title.clone()
+                },
+                description: if tool.description.is_empty() {
+                    format!("A call the {} server publishes.", server)
+                } else {
+                    tool.description.clone()
+                },
+                input_schema: tool.input_schema.clone(),
+            });
+        }
+        ids
+    }
+
+    /// One published call, by the name the model calls it by.
+    pub fn find(&self, id: &str) -> Option<Published> {
+        self.published
+            .lock()
+            .ok()
+            .and_then(|held| held.iter().find(|published| published.id == id).cloned())
+    }
+
+    /// Every published call, in the order the servers were connected.
+    pub fn all(&self) -> Vec<Published> {
+        self.published
+            .lock()
+            .map(|held| held.clone())
+            .unwrap_or_default()
+    }
+
+    /// The published calls as the declarations the model is handed.
+    pub fn specs(&self) -> Vec<Value> {
+        self.all()
+            .iter()
+            .map(|published| {
+                json!({
+                    "type": "function",
+                    "function": {
+                        "name": published.id,
+                        "description": published.description,
+                        "parameters": published.input_schema,
+                    }
+                })
+            })
+            .collect()
+    }
+}
+
+/// The name the model calls a published call by.
+///
+/// A function name has to be one word of letters, digits, `_` and `-`, and this app's own calls are
+/// plain words — so a server's call is prefixed and both halves are folded into that alphabet. The
+/// two lengths keep the whole inside the sixty-four characters the format allows, and a name that
+/// two servers fold to the same thing gets a number rather than being one of them.
+pub fn offered_id(server: &str, tool: &str, taken: &[String]) -> String {
+    let base = format!("mcp__{}__{}", fold(server, 20), fold(tool, 32));
+    if !taken.iter().any(|id| id == &base) {
+        return base;
+    }
+    for n in 2..100 {
+        let candidate = format!("{base}_{n}");
+        if !taken.iter().any(|id| id == &candidate) {
+            return candidate;
+        }
+    }
+    base
+}
+
+/// One name folded into the alphabet a function name may use, and cut to `max` characters.
+fn fold(name: &str, max: usize) -> String {
+    let folded: String = name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' || character == '-' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let cut: String = folded.chars().take(max).collect();
+    if cut.is_empty() {
+        "x".to_string()
+    } else {
+        cut
+    }
 }
 
 /// The file's location: this machine's `.freecode`, beside the folder skills are read from.
@@ -271,9 +495,13 @@ fn server(name: &str, entry: &Value) -> Result<Server, String> {
 
 /// Ask one declared server what it publishes, then shut it down.
 ///
+/// What it published enters the registry as calls a run may ask for: the press on the Extensions
+/// page is the moment this app agreed to run that command at all, so it is the moment its calls
+/// become reachable.
+///
 /// The child is killed on every path, and `kill_on_drop` is the backstop for a future early return
 /// that forgets to: an MCP server that outlives the check that started it is a process with no owner.
-pub async fn check(name: &str) -> Result<Report, String> {
+pub async fn check(name: &str, registry: &Registry) -> Result<Report, String> {
     let server = inventory()
         .servers
         .into_iter()
@@ -282,7 +510,31 @@ pub async fn check(name: &str) -> Result<Report, String> {
     if let Some(reason) = refusal(&server) {
         return Err(reason);
     }
-    ask_server(&server).await
+    let mut report = ask_server(&server).await?;
+    let ids = registry.register(&server.name, &report.tools);
+    for (tool, id) in report.tools.iter_mut().zip(ids) {
+        tool.offered = id;
+    }
+    Ok(report)
+}
+
+/// One published call, by the name the model calls it by.
+pub fn published(app: &AppHandle, id: &str) -> Option<Published> {
+    app.state::<Registry>().find(id)
+}
+
+/// Every published call, as the declarations the model is handed.
+pub fn offered(app: &AppHandle) -> Vec<Value> {
+    app.state::<Registry>().specs()
+}
+
+/// The calls a run may ask for, grouped by the server that published them.
+///
+/// What the page shows after a reload: a server that answered once keeps its calls until it is asked
+/// again, so the page has to be able to say which ones are reachable rather than only what the last
+/// press said.
+pub fn connected(app: &AppHandle) -> Vec<Published> {
+    app.state::<Registry>().all()
 }
 
 /// Why a press would refuse this server, or nothing when it would start it.
@@ -475,6 +727,17 @@ impl<C: ChildPipes> Client<C> {
         ))
     }
 
+    /// Ask the server to run one of the calls it published, and say what it answered.
+    pub async fn call(&mut self, tool: &str, arguments: &Value) -> Result<String, String> {
+        let result = self
+            .request(
+                "tools/call",
+                json!({ "name": tool, "arguments": arguments }),
+            )
+            .await?;
+        said(&result)
+    }
+
     async fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let id = self.next_id;
         self.next_id += 1;
@@ -580,9 +843,83 @@ fn clip(text: &str) -> String {
     chars[..QUOTED_CHARS].iter().collect::<String>() + "…"
 }
 
+/// The text a `tools/call` result carries.
+///
+/// The protocol's own shape for a result is a list of typed blocks rather than a string, and the
+/// text blocks are what a model can read. A result that says `isError` is the server saying the
+/// call failed, and that is an error here rather than a sentence the model would read as an answer.
+fn said(result: &Value) -> Result<String, String> {
+    if result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(format!("the call failed: {}", answer(result)));
+    }
+    Ok(answer(result))
+}
+
+/// The readable part of a result: its text blocks, or its structured content when it published no
+/// text at all.
+fn answer(result: &Value) -> String {
+    let mut out = String::new();
+    if let Some(blocks) = result.get("content").and_then(Value::as_array) {
+        for block in blocks {
+            if block.get("type").and_then(Value::as_str) != Some("text") {
+                continue;
+            }
+            let body = block
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(body);
+        }
+    }
+    if out.is_empty() {
+        if let Some(structured) = result.get("structuredContent") {
+            if !structured.is_null() {
+                return structured.to_string();
+            }
+        }
+    }
+    out
+}
+
+/// Run one published call: start the server, ask it, and stop it again.
+///
+/// The server is read fresh from the declaration file rather than from whatever was declared when
+/// it was connected, so a command that has been edited or removed since is the one that runs — or
+/// the one that is refused. The child is killed on every path out, including the ones that failed:
+/// a server this app did not write is not a process it can leave behind a transcript.
+pub async fn call_tool(server_name: &str, tool: &str, arguments: &Value) -> Result<String, String> {
+    let server = inventory()
+        .servers
+        .into_iter()
+        .find(|declared| declared.name == server_name)
+        .ok_or_else(|| format!("no server named {server_name} is declared"))?;
+    if let Some(reason) = refusal(&server) {
+        return Err(reason);
+    }
+    let (pipes, mut child) = spawn(&server)?;
+    let mut client = Client::new(pipes);
+    let outcome = async {
+        client.initialize(env!("CARGO_PKG_VERSION")).await?;
+        client.call(tool, arguments).await
+    }
+    .await;
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    outcome.map_err(|why| format!("{}: {why}", server.name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use freecode_config::agent::{ApprovalMode, Approvals};
+    use freecode_core::approvals::{evaluate, ApprovalDecision, Pending};
     use tokio::io::DuplexStream;
 
     fn servers(text: &str) -> Vec<Server> {
@@ -688,7 +1025,9 @@ mod tests {
     async fn an_undeclared_name_is_said_as_that() {
         // Nothing on any machine is named like this, so the answer does not depend on what the file
         // beside this test's home folder happens to hold.
-        let why = check("no-such-server-anywhere").await.unwrap_err();
+        let why = check("no-such-server-anywhere", &Registry::default())
+            .await
+            .unwrap_err();
         assert!(why.contains("no server named"), "{why}");
     }
 
@@ -932,6 +1271,280 @@ done
         assert!(
             why.contains("definitely-not-an-installed-mcp-server"),
             "{why}"
+        );
+    }
+
+    /// The name the model calls a published call by: the server and the call, in one word.
+    #[test]
+    fn a_published_call_is_named_after_its_server_and_its_own_name() {
+        assert_eq!(
+            offered_id("weather", "get_forecast", &[]),
+            "mcp__weather__get_forecast"
+        );
+    }
+
+    #[test]
+    fn a_name_outside_the_alphabet_is_folded_into_it() {
+        // A function name is one token of letters, digits, `_` and `-`, and a server's names are not
+        // that. Folding is what lets the call be called at all.
+        assert_eq!(
+            offered_id("my server", "get/forecast.v2", &[]),
+            "mcp__my_server__get_forecast_v2"
+        );
+    }
+
+    #[test]
+    fn two_calls_that_fold_to_the_same_name_are_told_apart() {
+        let registry = Registry::default();
+        let ids = registry.register(
+            "weather",
+            &[
+                Tool::declared(&json!({ "name": "get forecast" })),
+                Tool::declared(&json!({ "name": "get_forecast" })),
+            ],
+        );
+        assert_eq!(
+            ids,
+            ["mcp__weather__get_forecast", "mcp__weather__get_forecast_2"],
+            "the second call gets a number rather than being the first one"
+        );
+    }
+
+    #[test]
+    fn a_long_name_stays_inside_the_function_name_limit() {
+        let id = offered_id(&"s".repeat(60), &"t".repeat(60), &[]);
+        assert_eq!(id, format!("mcp__{}__{}", "s".repeat(20), "t".repeat(32)));
+        assert!(id.len() <= 64, "{id} is {} characters", id.len());
+    }
+
+    #[test]
+    fn a_call_the_server_published_without_a_name_is_not_offered() {
+        // It cannot be routed, so it is not registered and the run is never told about it.
+        let registry = Registry::default();
+        let ids = registry.register(
+            "weather",
+            &[Tool::declared(&json!({ "description": "no name" }))],
+        );
+        assert_eq!(ids, [""]);
+        assert!(registry.all().is_empty());
+    }
+
+    #[test]
+    fn a_connected_server_publishes_calls_a_run_may_ask_for() {
+        let registry = Registry::default();
+        let ids = registry.register(
+            "weather",
+            &[Tool::declared(&json!({
+                "name": "get_forecast",
+                "description": "One day.",
+                "inputSchema": { "type": "object", "properties": { "city": { "type": "string" } } },
+            }))],
+        );
+        assert_eq!(ids, ["mcp__weather__get_forecast"]);
+        let found = registry.find("mcp__weather__get_forecast").unwrap();
+        assert_eq!(found.server, "weather");
+        assert_eq!(
+            found.tool, "get_forecast",
+            "the server is asked by its own name"
+        );
+        assert_eq!(found.description, "One day.");
+        assert_eq!(found.input_schema["properties"]["city"]["type"], "string");
+        // The model is handed the server's schema under the name the model calls it by.
+        let specs = registry.specs();
+        assert_eq!(specs[0]["function"]["name"], "mcp__weather__get_forecast");
+        assert_eq!(
+            specs[0]["function"]["parameters"]["properties"]["city"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
+    fn a_second_check_replaces_what_the_server_published_before() {
+        // The page's press is the moment the app agreed to run that command, so a later press is the
+        // moment its calls change — a server that dropped a call must not leave the old one reachable.
+        let registry = Registry::default();
+        registry.register(
+            "weather",
+            &[Tool::declared(&json!({ "name": "get_forecast" }))],
+        );
+        registry.register("weather", &[Tool::declared(&json!({ "name": "radar" }))]);
+        assert!(
+            registry.find("mcp__weather__get_forecast").is_none(),
+            "the call the server no longer publishes is gone"
+        );
+        assert!(registry.find("mcp__weather__radar").is_some());
+        assert_eq!(registry.all().len(), 1);
+    }
+
+    #[test]
+    fn a_server_that_never_connected_publishes_nothing() {
+        // Declared is not connected: only the press on the Extensions page starts the command.
+        let registry = Registry::default();
+        assert!(registry.find("mcp__weather__get_forecast").is_none());
+        assert!(registry.all().is_empty());
+    }
+
+    /// The call the model makes, over the protocol, against the peer at the far end of a pipe pair.
+    #[tokio::test]
+    async fn a_published_call_is_asked_by_its_own_name_and_its_answer_read_back() {
+        let (mut client, mut peer) = pair();
+        let script = async {
+            let (id, _) = peer.request("initialize").await;
+            peer.reply(id, json!({ "protocolVersion": PROTOCOL_VERSION }))
+                .await;
+            peer.notification("notifications/initialized").await;
+            let (id, params) = peer.request("tools/call").await;
+            assert_eq!(
+                params["name"],
+                json!("get_forecast"),
+                "the server is asked by the name it published"
+            );
+            assert_eq!(params["arguments"], json!({ "city": "Berlin" }));
+            peer.reply(
+                id,
+                json!({ "content": [{ "type": "text", "text": "12C and raining" }] }),
+            )
+            .await;
+        };
+        let (outcome, ()) = tokio::join!(
+            async {
+                client.initialize(env!("CARGO_PKG_VERSION")).await?;
+                client
+                    .call("get_forecast", &json!({ "city": "Berlin" }))
+                    .await
+            },
+            script
+        );
+        assert_eq!(outcome.unwrap(), "12C and raining");
+    }
+
+    #[tokio::test]
+    async fn a_call_the_server_failed_is_a_failure_rather_than_an_answer() {
+        let (mut client, mut peer) = pair();
+        let script = async {
+            let (id, _) = peer.request("initialize").await;
+            peer.reply(id, json!({ "protocolVersion": PROTOCOL_VERSION }))
+                .await;
+            peer.notification("notifications/initialized").await;
+            let (id, _) = peer.request("tools/call").await;
+            peer.reply(
+                id,
+                json!({
+                    "content": [{ "type": "text", "text": "no station for that city" }],
+                    "isError": true,
+                }),
+            )
+            .await;
+        };
+        let (outcome, ()) = tokio::join!(
+            async {
+                client.initialize(env!("CARGO_PKG_VERSION")).await?;
+                client
+                    .call("get_forecast", &json!({ "city": "Atlantis" }))
+                    .await
+            },
+            script
+        );
+        let why = outcome.unwrap_err();
+        assert!(why.contains("the call failed"), "{why}");
+        assert!(why.contains("no station"), "{why}");
+    }
+
+    /// The published call the gate is asked about.
+    fn published_call() -> Published {
+        Published {
+            id: "mcp__weather__get_forecast".to_string(),
+            server: "weather".to_string(),
+            tool: "get_forecast".to_string(),
+            title: "get_forecast".to_string(),
+            description: "One day.".to_string(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+
+    fn sandbox(network: bool) -> freecode_tools::SandboxPolicy {
+        freecode_tools::SandboxPolicy {
+            network_allowed: network,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_published_call_asks_before_it_runs() {
+        // A call the app did not write is a side effect that reaches out of the machine, so it goes
+        // through the same gate as one this build wrote — and a side effect prompts.
+        let call = published_call();
+        match evaluate(
+            &call,
+            &json!({ "city": "Berlin" }),
+            &Approvals::default(),
+            &sandbox(true),
+            "call-1",
+        ) {
+            Pending::Prompt(request) => {
+                assert_eq!(request.tool_id, "mcp__weather__get_forecast");
+                assert_eq!(request.permission, PermissionClass::SideEffect);
+                assert_eq!(
+                    request.headline,
+                    "Call `get_forecast` on the weather server"
+                );
+                assert_eq!(request.payload.as_deref(), Some(r#"{"city":"Berlin"}"#));
+            }
+            other => panic!("a published call must prompt: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_published_call_is_refused_while_the_privacy_switch_is_off() {
+        // The switch that keeps the "Local" badge true also speaks for a server's call: it is a
+        // command this app did not write, running on this user's machine.
+        let call = published_call();
+        assert_eq!(
+            evaluate(
+                &call,
+                &json!({}),
+                &Approvals::default(),
+                &sandbox(false),
+                "call-1"
+            ),
+            Pending::Decided(ApprovalDecision::BlockedByPolicy)
+        );
+    }
+
+    #[test]
+    fn a_plan_only_run_refuses_a_published_call() {
+        let call = published_call();
+        let approvals = Approvals {
+            mode: ApprovalMode::PlanOnly,
+            ..Default::default()
+        };
+        assert_eq!(
+            evaluate(&call, &json!({}), &approvals, &sandbox(true), "call-1"),
+            Pending::Decided(ApprovalDecision::BlockedByPolicy)
+        );
+    }
+
+    #[test]
+    fn an_allow_list_entry_does_not_admit_a_published_call() {
+        // The lists are the user's own words about commands. A server's call is not this user's
+        // shell, so an entry that names it says nothing about it.
+        let call = published_call();
+        let approvals = Approvals {
+            shell_allow: vec!["get_forecast".into()],
+            shell_enabled: true,
+            ..Default::default()
+        };
+        let policy = freecode_tools::SandboxPolicy {
+            network_allowed: true,
+            shell_allowed: true,
+            ..Default::default()
+        };
+        assert!(
+            matches!(
+                evaluate(&call, &json!({}), &approvals, &policy, "call-1"),
+                Pending::Prompt(_)
+            ),
+            "the list is about commands, and this is not one of them"
         );
     }
 }

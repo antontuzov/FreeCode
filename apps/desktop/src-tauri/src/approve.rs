@@ -91,7 +91,7 @@ pub fn ask(app: &AppHandle, request: &ApprovalRequest) -> Result<ApprovalDecisio
             headline: request.headline.clone(),
             permission: request.permission,
             timeout_ms: request.timeout_ms,
-            command: request.command.clone(),
+            payload: request.payload.clone(),
         },
     );
     if let Err(why) = sent {
@@ -273,7 +273,7 @@ mod tests {
             headline: "Run `cargo test`".to_string(),
             permission: PermissionClass::SideEffect,
             timeout_ms: 120_000,
-            command: Some("cargo test".to_string()),
+            payload: Some("cargo test".to_string()),
         })
         .unwrap();
         assert_eq!(json["type"], "approvalRequested");
@@ -282,7 +282,7 @@ mod tests {
         assert_eq!(json["headline"], "Run `cargo test`");
         assert_eq!(json["permission"], "side_effect");
         assert_eq!(json["timeoutMs"], 120_000);
-        assert_eq!(json["command"], "cargo test");
+        assert_eq!(json["payload"], "cargo test");
     }
 
     /// A prompt the policy settled on its own never reaches this module — but a run whose dial says

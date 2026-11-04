@@ -365,10 +365,11 @@ pub enum AgentEvent {
         headline: String,
         permission: PermissionClass,
         timeout_ms: u64,
-        /// The exact command, when this is a call that runs one: the headline says what the run is
-        /// about to do in the interface's language, and this is the argv behind it, unedited.
+        /// What the call would act on, unedited: the argv for a call that runs one, the arguments for a
+        /// call a server published. The headline says what the run is about to do in the interface's
+        /// language, and this is the thing behind it.
         #[serde(default)]
-        command: Option<String>,
+        payload: Option<String>,
     },
     /// The answer a prompt got, from the user or from its time running out. It closes the card the
     /// window is showing, which is what makes a denied call and an unanswered one read differently.

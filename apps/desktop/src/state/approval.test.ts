@@ -25,7 +25,7 @@ const REPORT: RunReport = {
 function asked(
   callId: string,
   timeoutMs = 120_000,
-  command: string | null = "cargo test",
+  payload: string | null = "cargo test",
 ): AgentEvent {
   return {
     type: "approvalRequested",
@@ -34,7 +34,7 @@ function asked(
     headline: "Run `cargo test`",
     permission: "side_effect",
     timeoutMs,
-    command,
+    payload,
   };
 }
 
@@ -75,7 +75,7 @@ describe("opening cards", () => {
       callId: "call-1",
       headline: "Run `cargo test`",
       permission: "side_effect",
-      command: "cargo test",
+      payload: "cargo test",
       pressed: null,
     });
     // Stamped from the event's own timeout rather than a number the card invents, so the seconds the
@@ -100,9 +100,9 @@ describe("opening cards", () => {
     expect(useApproval.getState().prompts.map((p) => p.callId)).toEqual(["call-2"]);
   });
 
-  it("drops the command line a prompt never carried", () => {
+  it("drops the payload a prompt never carried", () => {
     useApproval.getState().apply(asked("call-1", 120_000, null));
-    expect(card("call-1").command).toBeNull();
+    expect(card("call-1").payload).toBeNull();
   });
 });
 

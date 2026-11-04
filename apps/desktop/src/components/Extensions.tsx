@@ -23,6 +23,7 @@ import {
   type ExtensionInventory,
   type ExtensionTool,
   type McpInventory,
+  type McpPublished,
   type McpReport,
   type McpServer,
   type McpTool,
@@ -150,7 +151,14 @@ function ToolRow({ tool, t }: { tool: McpTool; t: T }) {
     .join(" — ");
   return (
     <Row title={tool.name} description={head}>
-      {tool.collides && <span className="pill shrink-0">{t("mcp.collides")}</span>}
+      <span className="flex shrink-0 items-center gap-[var(--space-2)]">
+        {tool.collides && <span className="pill shrink-0">{t("mcp.collides")}</span>}
+        {tool.offered && (
+          <span className="pill shrink-0" title={t("mcp.offeredName")}>
+            {t("mcp.offered", { name: tool.offered })}
+          </span>
+        )}
+      </span>
     </Row>
   );
 }
@@ -171,12 +179,15 @@ function Server({
   t,
   outcome,
   checking,
+  connected,
   onCheck,
 }: {
   server: McpServer;
   t: T;
   outcome: Check | undefined;
   checking: boolean;
+  /** Whether a run may ask for what this server publishes — that is, whether it has answered once. */
+  connected: boolean;
   onCheck: () => void;
 }) {
   const line = [server.command, ...server.args].filter(Boolean).join(" ");
@@ -188,6 +199,7 @@ function Server({
       <Row title={server.name} description={description}>
         <span className="flex shrink-0 items-center gap-[var(--space-2)]">
           <span className="pill shrink-0">{server.transport}</span>
+          {connected && <span className="pill shrink-0">{t("mcp.connected")}</span>}
           {server.runnable ? (
             <button type="button" className="field" disabled={checking} onClick={onCheck}>
               {checking ? t("mcp.asking") : t("mcp.check")}
@@ -218,6 +230,8 @@ export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => v
   // the first one's row. `asking` is the name whose press is still out.
   const [checks, setChecks] = useState<Record<string, Check>>({});
   const [asking, setAsking] = useState<string | null>(null);
+  // The calls a run may ask for, as the host's registry holds them.
+  const [connected, setConnected] = useState<McpPublished[]>([]);
   const t: T = (key, params) => translate(locale, `extensions.${key}`, params);
   // The packs come from the store the composer reads, so the page and the slash strip cannot show two
   // different vocabularies. `force` asks for the folder as it is now: a page that reports what is on
@@ -265,6 +279,24 @@ export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => v
     };
   }, []);
 
+  // What a run may ask for, read from the host's own registry rather than from this page's memory of
+  // the last press: a server that answered once keeps its calls until it is asked again, so the page
+  // has to be able to say which ones are reachable after a reload.
+  useEffect(() => {
+    let live = true;
+    void ipc
+      .mcpPublished()
+      .then((found) => {
+        if (live) setConnected(found);
+      })
+      .catch(() => {
+        if (live) setConnected([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   // The press the row offers. It starts the command, takes the handshake and the tool list, and stops
   // the process again — so it is stated as the question it answers, and its failure is the host's own
   // sentence about why, not a spinner that never clears.
@@ -274,6 +306,7 @@ export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => v
     try {
       const report = await ipc.mcpCheck(name);
       setChecks((current) => ({ ...current, [name]: { report } }));
+      setConnected(await ipc.mcpPublished());
     } catch (reason) {
       setChecks((current) => ({ ...current, [name]: { error: String(reason) } }));
     } finally {
@@ -504,6 +537,7 @@ export function Extensions({ locale, onBack }: { locale: Locale; onBack: () => v
                           t={t}
                           outcome={checks[server.name]}
                           checking={asking === server.name}
+                          connected={connected.some((call) => call.server === server.name)}
                           onCheck={() => void ask(server.name)}
                         />
                       ))

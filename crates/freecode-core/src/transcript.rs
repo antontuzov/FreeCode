@@ -64,6 +64,8 @@ pub enum StepKind {
     WebReading,
     /// "Browser" — a call that acted on the page in the window's preview panel.
     Browser,
+    /// "Server call" — a call a connected MCP server published, and this app did not write.
+    McpTool,
     /// A citation/source row.
     Source,
     /// A blocker rendered inline, e.g. the load-guard refusing stock llama.cpp.
@@ -97,6 +99,7 @@ impl StepKind {
             StepKind::WebSearch => "transcript.step.webSearch",
             StepKind::WebReading => "transcript.step.webReading",
             StepKind::Browser => "transcript.step.browser",
+            StepKind::McpTool => "transcript.step.mcpTool",
             StepKind::Source => "transcript.step.source",
             StepKind::Blocked => "transcript.step.blocked",
         }
@@ -140,6 +143,7 @@ pub fn all_i18n_keys() -> Vec<&'static str> {
         WebSearch,
         WebReading,
         Browser,
+        McpTool,
         Source,
         Blocked,
     ]

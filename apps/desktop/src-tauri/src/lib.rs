@@ -93,10 +93,17 @@ async fn mcp_inventory() -> Result<mcp::Inventory, String> {
 }
 
 /// Ask one declared server what it publishes. The press starts the command and stops it again, which
-/// is what the row says it does; a run is given nothing by this.
+/// is what the row says it does; what it published then enters the host's registry, so a run may ask
+/// for a call the user connected.
 #[tauri::command]
-async fn mcp_check(name: String) -> Result<mcp::Report, String> {
-    mcp::check(&name).await
+async fn mcp_check(app: AppHandle, name: String) -> Result<mcp::Report, String> {
+    mcp::check(&name, &app.state::<mcp::Registry>()).await
+}
+
+/// The calls a connected server published, and the names a run may ask for them by.
+#[tauri::command]
+fn mcp_published(app: AppHandle) -> Vec<mcp::Published> {
+    mcp::connected(&app)
 }
 
 /// The Storage page: the conversations this host has filed, measured from the files on disk.
@@ -334,6 +341,9 @@ pub fn run() {
         // The calls waiting for the window to answer their approval prompt. A tool thread parks on its
         // own channel; `approve::resolve_approval` is what sends. See `approve`.
         .manage(approve::ApprovalBridge::default())
+        // The calls the connected MCP servers published. A server's tools enter the host's registry
+        // only when the user asks what it publishes, so a run may ask for a call that was connected.
+        .manage(mcp::Registry::default())
         // One process owns the engine, the conversation and the saved key, so a second launch hands
         // over and exits; the window already open comes forward instead. This plugin has to be
         // registered before the others — it runs their setup only after claiming the instance.
@@ -367,6 +377,7 @@ pub fn run() {
             // The MCP servers this machine declares, and the answer to "what does this one publish?".
             mcp_inventory,
             mcp_check,
+            mcp_published,
             // What this app has put on the machine.
             storage_report,
             // Which machine that is, and which build is running on it.

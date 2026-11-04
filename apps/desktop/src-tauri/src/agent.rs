@@ -54,7 +54,7 @@ pub struct Ran {
 /// round opened, so a batch never claims a tool it did not run — and a round whose every call was for
 /// something this build cannot do opens no rows and so claims no header.
 pub fn close_batch(app: &AppHandle, calls: &[ToolCall]) {
-    let rows = rows_for(calls);
+    let rows = rows_for(app, calls);
     if rows == 0 {
         return;
     }
@@ -66,16 +66,27 @@ pub fn close_batch(app: &AppHandle, calls: &[ToolCall]) {
     );
 }
 
-/// How many of these calls open a row: exactly the ones [`run_one`] or the loop's delegation path
-/// will answer, which is the same test applied before emitting anything. A call for a tool with no
-/// runner is answered with a notice and never becomes a row, so counting it here would put a number
-/// in the header that the batch below it cannot show rows for. A plan is the exception for the same
-/// reason in the other direction: the window keeps `todo_write`'s row in the column rather than
-/// folding it under the header, so counting it would name a child the batch does not hold.
-fn rows_for(calls: &[ToolCall]) -> usize {
+/// How many of these calls open a row: exactly the ones [`run_one`], the loop's delegation path or
+/// the server route will answer, which is the same test applied before emitting anything. A call for
+/// a tool with no runner is answered with a notice and never becomes a row, so counting it here would
+/// put a number in the header that the batch below it cannot show rows for. A plan is the exception
+/// for the same reason in the other direction: the window keeps `todo_write`'s row in the column
+/// rather than folding it under the header, so counting it would name a child the batch does not hold.
+fn rows_for(app: &AppHandle, calls: &[ToolCall]) -> usize {
+    rows_where(calls, |name| {
+        is_runnable(name) || crate::mcp::published(app, name).is_some()
+    })
+}
+
+/// The count, over the calls that open a row.
+///
+/// Split from [`rows_for`] so the rule can be exercised without a live app handle behind it: the
+/// second argument says which calls this build would answer, which for the host is "one it has a
+/// runner for, or one a connected server published".
+fn rows_where(calls: &[ToolCall], answered: impl Fn(&str) -> bool) -> usize {
     calls
         .iter()
-        .filter(|call| is_runnable(&call.name) && call.name != "todo_write")
+        .filter(|call| answered(&call.name) && call.name != "todo_write")
         .count()
 }
 
@@ -252,6 +263,116 @@ pub(crate) fn run_one(
     Ran {
         call_id: call.id.clone(),
         result,
+    }
+}
+
+/// The first line of what a server answered, for the row under the call. The whole of it goes to
+/// the model, which is the only reader that can act on it; the row is one line.
+fn said(text: &str) -> String {
+    let line = text.lines().next().unwrap_or_default().trim();
+    if line.chars().count() <= 160 {
+        return line.to_string();
+    }
+    let mut clipped: String = line.chars().take(160).collect();
+    clipped.push('…');
+    clipped
+}
+
+/// What a server answered, cut to the budget every other call's result is held to.
+///
+/// A server is somebody else's program and its answer can be any size, so the cut is stated rather
+/// than silent: a model handed a truncated answer without being told is a model that believes it
+/// has the whole of it.
+fn capped(answer: &str) -> String {
+    if answer.len() <= freecode_tools::MAX_RESULT_BYTES {
+        return answer.to_string();
+    }
+    let kept: String = answer
+        .chars()
+        .take(freecode_tools::MAX_RESULT_BYTES)
+        .collect();
+    format!(
+        "{kept}\n…the answer was cut at {} bytes, so what came after it is not shown.",
+        freecode_tools::MAX_RESULT_BYTES
+    )
+}
+
+/// Run one call a connected server published.
+///
+/// The road is the same as any other call's: the row opens, the approval gate settles it, and only
+/// then does the server run. The server is started for this one call and stopped again, because a
+/// server this app did not write is not a process it can leave running behind a transcript.
+pub(crate) async fn run_published(
+    app: &AppHandle,
+    call: &ToolCall,
+    settings: &Settings,
+    policy: &SandboxPolicy,
+) -> Ran {
+    let arguments: Value = serde_json::from_str(&call.arguments).unwrap_or_else(|_| json!({}));
+    let Some(published) = crate::mcp::published(app, &call.name) else {
+        return Ran {
+            call_id: call.id.clone(),
+            result: format!(
+                "{} is not a call any connected server publishes.",
+                call.name
+            ),
+        };
+    };
+    let mut row = started_row(&published.id, &arguments);
+    // The chip names the call and the server it belongs to: the id the model called it by is a name
+    // this app invented, and the server's own is the one a reader can act on.
+    row.detail = format!("{} on {}", published.tool, published.server);
+    emit(app, AgentEvent::ToolStarted { step: row.clone() });
+
+    let refused = cleared_on_loop(app, &published.id, &arguments, &call.id, settings, policy)
+        .await
+        .err();
+    if let Some(reason) = refused {
+        row.finish(StepStatus::Blocked);
+        emit(
+            app,
+            AgentEvent::ToolFinished {
+                step: row,
+                outcome: ToolOutcome::blocked(&reason),
+            },
+        );
+        return Ran {
+            call_id: call.id.clone(),
+            result: format!("{} did not run: {reason}", published.tool),
+        };
+    }
+
+    match crate::mcp::call_tool(&published.server, &published.tool, &arguments).await {
+        Ok(answer) => {
+            let answer = capped(&answer);
+            let summary = freecode_tools::Summary::verbatim(said(&answer));
+            row.finish(StepStatus::Done);
+            emit(
+                app,
+                AgentEvent::ToolFinished {
+                    step: row,
+                    outcome: ToolOutcome::ok(summary),
+                },
+            );
+            Ran {
+                call_id: call.id.clone(),
+                result: answer,
+            }
+        }
+        Err(why) => {
+            row.finish(StepStatus::Blocked);
+            emit(
+                app,
+                AgentEvent::ToolFinished {
+                    step: row,
+                    outcome: ToolOutcome::blocked(&why),
+                },
+            );
+            Ran {
+                call_id: call.id.clone(),
+                result: format!("{} did not run: {why}", published.tool),
+            }
+        }
     }
 }
 
@@ -483,7 +604,7 @@ pub(crate) fn cleared(
     settings: &Settings,
     policy: &SandboxPolicy,
 ) -> Result<(), String> {
-    let Some(request) = gated(name, arguments, call_id, settings, policy)? else {
+    let Some(request) = gated(app, name, arguments, call_id, settings, policy)? else {
         return Ok(());
     };
     approved(&request, crate::approve::ask(app, &request))
@@ -499,7 +620,7 @@ pub(crate) async fn cleared_on_loop(
     settings: &Settings,
     policy: &SandboxPolicy,
 ) -> Result<(), String> {
-    let Some(request) = gated(name, arguments, call_id, settings, policy)? else {
+    let Some(request) = gated(app, name, arguments, call_id, settings, policy)? else {
         return Ok(());
     };
     approved(&request, crate::approve::ask_await(app, &request).await)
@@ -512,14 +633,32 @@ pub(crate) async fn cleared_on_loop(
 /// same switches and the same allow/deny lists as one the loop runs itself — and a prompt that means the
 /// same thing on both routes says the same thing in the window.
 pub(crate) fn gated(
+    app: &AppHandle,
     name: &str,
     arguments: &Value,
     call_id: &str,
     settings: &Settings,
     policy: &SandboxPolicy,
 ) -> Result<Option<ApprovalRequest>, String> {
+    // A call a connected server published is judged by the same gate as one this build wrote: the
+    // class it declares, the switches in force, and the user's own lists. The only difference is
+    // where the facts come from.
+    if let Some(published) = crate::mcp::published(app, name) {
+        return gate(&published, arguments, call_id, settings, policy);
+    }
     let tool = freecode_tools::find(name).ok_or_else(|| format!("no tool named {name}"))?;
-    match evaluate(&tool, arguments, &settings.approvals, policy, call_id) {
+    gate(&tool, arguments, call_id, settings, policy)
+}
+
+/// The dial's answer for one call, whoever wrote it.
+fn gate(
+    tool: &dyn freecode_tools::ToolFacts,
+    arguments: &Value,
+    call_id: &str,
+    settings: &Settings,
+    policy: &SandboxPolicy,
+) -> Result<Option<ApprovalRequest>, String> {
+    match evaluate(tool, arguments, &settings.approvals, policy, call_id) {
         Pending::Decided(decision) if decision.is_allowed() => Ok(None),
         Pending::Decided(ApprovalDecision::UserDenied)
         | Pending::Decided(ApprovalDecision::TimedOut) => {
@@ -527,7 +666,7 @@ pub(crate) fn gated(
         }
         Pending::Decided(_) => Err(format!(
             "{} is refused by the approval policy in Settings",
-            tool.title
+            tool.tool_title()
         )),
         Pending::Prompt(request) => Ok(Some(request)),
     }
@@ -749,6 +888,9 @@ pub(crate) fn started_row(name: &str, arguments: &Value) -> TranscriptStep {
         "web_search" => StepKind::WebSearch,
         "fetch_url" => StepKind::WebReading,
         _ if name.starts_with("browser_") => StepKind::Browser,
+        // A call a connected server publishes. Its own row, because a row that said "Ran tool" over
+        // a call this app did not write would hide the one thing the user has to see about it.
+        _ if name.starts_with("mcp__") => StepKind::McpTool,
         "spawn_subagent" => StepKind::Subagent,
         _ => StepKind::Tool,
     };
@@ -1069,15 +1211,42 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
+        let rows = |names: &[&str]| rows_where(&called(names), is_runnable);
         // A call for a name this build does not have gets a notice, not a row, so the header cannot
         // claim it.
-        assert_eq!(rows_for(&called(&["read_file", "grep_search"])), 2);
-        assert_eq!(rows_for(&called(&["read_file", "write_file"])), 2);
+        assert_eq!(rows(&["read_file", "grep_search"]), 2);
+        assert_eq!(rows(&["read_file", "write_file"]), 2);
         // Delegation is run by the loop rather than an executor, and still opens the row it counts.
-        assert_eq!(rows_for(&called(&["spawn_subagent"])), 1);
-        assert_eq!(rows_for(&called(&["spawn_subagent", "read_file"])), 2);
-        assert_eq!(rows_for(&called(&["read_file", "delete_path"])), 1);
-        assert_eq!(rows_for(&called(&["delete_everything"])), 0);
+        assert_eq!(rows(&["spawn_subagent"]), 1);
+        assert_eq!(rows(&["spawn_subagent", "read_file"]), 2);
+        assert_eq!(rows(&["read_file", "delete_path"]), 1);
+        assert_eq!(rows(&["delete_everything"]), 0);
+    }
+
+    #[test]
+    fn a_call_a_connected_server_published_opens_a_row() {
+        // The server route answers the call, so the batch may count it: a header that did not would
+        // claim fewer tools than the run actually made.
+        let called = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| ToolCall {
+                    id: name.to_string(),
+                    name: name.to_string(),
+                    arguments: "{}".to_string(),
+                })
+                .collect::<Vec<_>>()
+        };
+        let published = "mcp__weather__get_forecast";
+        let rows = |names: &[&str]| {
+            rows_where(&called(names), |name| {
+                is_runnable(name) || name == published
+            })
+        };
+        assert_eq!(rows(&[published]), 1);
+        assert_eq!(rows(&[published, "read_file"]), 2);
+        // The plan list keeps its own row in the column rather than folding it under the header.
+        assert_eq!(rows(&["todo_write"]), 0);
     }
 
     #[test]

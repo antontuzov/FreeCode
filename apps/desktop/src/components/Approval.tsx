@@ -58,7 +58,7 @@ function Card({ locale, prompt, now }: { locale: Locale; prompt: Prompt; now: nu
         </span>
       </div>
       <p className="approval-headline">{prompt.headline}</p>
-      {prompt.command && <pre className="approval-command">{prompt.command}</pre>}
+      {prompt.payload && <pre className="approval-command">{prompt.payload}</pre>}
       <div className="approval-foot">
         <span className={`approval-count${left <= 10 ? " approval-count--short" : ""}`}>
           {translate(locale, "approval.left", { seconds: left })}

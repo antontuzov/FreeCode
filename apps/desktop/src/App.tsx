@@ -233,6 +233,16 @@ export default function App() {
     })();
   }, [shellLine]);
 
+  // `?mcpcheck=<name>` connects a declared server and publishes the calls it offers, without opening
+  // the Extensions page: that page covers the conversation, and the rows a run that asks for one of
+  // those calls leaves land in the conversation. The native window takes no injected clicks, so this
+  // is the dev-only press of the Check control the page offers.
+  const mcpCheck = query("mcpcheck");
+  useEffect(() => {
+    if (!mcpCheck) return;
+    void ipc.mcpCheck(mcpCheck).catch((why) => console.error("mcp check:", why));
+  }, [mcpCheck]);
+
   // `?approve=<ms>` presses the card's Allow that many milliseconds after the first approval prompt
   // lands. The native window takes no injected clicks, so this is the dev-only press of the control —
   // and the only way a capture can show that a prompt the run waited on is answered and the write it

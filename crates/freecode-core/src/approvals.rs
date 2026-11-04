@@ -9,7 +9,7 @@
 //! a command.
 
 use freecode_config::agent::{shell_governed, ApprovalMode, Approvals, PermissionClass};
-use freecode_tools::{summary, SandboxPolicy, ToolDescriptor};
+use freecode_tools::{SandboxPolicy, ToolFacts};
 use serde::{Deserialize, Serialize};
 
 /// What the composer/inline prompt shows before a call runs.
@@ -23,9 +23,10 @@ pub struct ApprovalRequest {
     pub permission: PermissionClass,
     /// Milliseconds the UI waits before treating the request as `TimedOut`.
     pub timeout_ms: u64,
-    /// Set when the call is a shell command, so the prompt can show the exact argv.
+    /// What would run, shown under the question: a shell call's argv, or the arguments of a call
+    /// this build does not own.
     #[serde(default)]
-    pub command: Option<String>,
+    pub payload: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,69 +73,76 @@ pub enum Pending {
 
 pub fn request(
     call_id: &str,
-    tool: &ToolDescriptor,
+    tool: &dyn ToolFacts,
     arguments: &serde_json::Value,
     approvals: &Approvals,
 ) -> ApprovalRequest {
     ApprovalRequest {
         call_id: call_id.to_string(),
-        tool_id: tool.id.to_string(),
-        headline: summary(tool.id, arguments),
-        permission: tool.permission,
+        tool_id: tool.tool_id().to_string(),
+        headline: tool.tool_headline(arguments),
+        permission: tool.tool_class(),
         timeout_ms: approvals.shell_timeout_ms,
-        command: arguments
-            .get("command")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
+        payload: tool.tool_payload(arguments),
     }
 }
 
 /// Decide without a user, applying policy then the explicit lists. `Pending::Prompt` means ask.
+///
+/// The tool is a trait rather than the registry's own descriptor because a call a declared server
+/// publishes has its name and its schema arrive at run time, and it goes through this gate exactly
+/// as a built-in one does — the class it declares, the switches in force, and the user's own
+/// allow/deny lists are what decide it either way.
 pub fn evaluate(
-    tool: &ToolDescriptor,
+    tool: &dyn ToolFacts,
     arguments: &serde_json::Value,
     approvals: &Approvals,
     sandbox: &SandboxPolicy,
     call_id: &str,
 ) -> Pending {
     // 1. Plan-only mode never mutates, and it does not offer to.
-    if approvals.mode == ApprovalMode::PlanOnly && !tool.is_read_only() {
+    if approvals.mode == ApprovalMode::PlanOnly && !tool.tool_is_read_only() {
         return Pending::Decided(ApprovalDecision::BlockedByPolicy);
     }
 
     // 2. Network tools need an explicitly configured remote provider. `network_allowed` is set from
     // Privacy.allowRemoteProviders, so a blocked call here is what keeps the "Local" badge true.
-    if tool.requires_network && !sandbox.network_allowed {
+    if tool.tool_needs_network() && !sandbox.network_allowed {
         return Pending::Decided(ApprovalDecision::BlockedByPolicy);
     }
 
     // 2b. The command runs with the user's own permissions, so the path sandbox cannot speak for it —
     // and the runners that execute the project's tests, build and lint are the same code by another
     // name. Their switch is the consent, and while it is off the call is refused without asking.
-    if shell_governed(tool.id) && !sandbox.shell_allowed {
+    if shell_governed(tool.tool_id()) && !sandbox.shell_allowed {
         return Pending::Decided(ApprovalDecision::BlockedByPolicy);
     }
 
     // 2c. A subagent is a second model run, and its own switch is that run's consent. Off means the
     // call does not reach the loop at all — a prompt would ask for permission to turn a switch the
     // page has already set. On, and the dial's answer decides whether the run also stops to ask.
-    if tool.id == "spawn_subagent" && !approvals.subagents_enabled {
+    if tool.tool_id() == "spawn_subagent" && !approvals.subagents_enabled {
         return Pending::Decided(ApprovalDecision::BlockedByPolicy);
     }
 
     // 3. An explicitly denied shell command is blocked without prompting; an explicitly allowed one
-    //    runs without asking. These lists are the user's own words, so they outrank the mode.
-    if let Some(cmd) = arguments.get("command").and_then(|v| v.as_str()) {
-        if matches_any(&approvals.shell_deny, cmd) {
-            return Pending::Decided(ApprovalDecision::BlockedByPolicy);
-        }
-        if matches_any(&approvals.shell_allow, cmd) {
-            return Pending::Decided(ApprovalDecision::AutoAllowed);
+    //    runs without asking. These lists are the user's own words about commands, so they outrank
+    //    the mode — and they are about commands, which is why they are read for the calls that take
+    //    one. A server's call may well have an argument named "command"; it is not this user's
+    //    shell, and the list says nothing about it.
+    if shell_governed(tool.tool_id()) {
+        if let Some(cmd) = arguments.get("command").and_then(|v| v.as_str()) {
+            if matches_any(&approvals.shell_deny, cmd) {
+                return Pending::Decided(ApprovalDecision::BlockedByPolicy);
+            }
+            if matches_any(&approvals.shell_allow, cmd) {
+                return Pending::Decided(ApprovalDecision::AutoAllowed);
+            }
         }
     }
 
     // 4. The configured mode (including per-tool overrides).
-    match approvals.decide(tool.id, tool.permission) {
+    match approvals.decide(tool.tool_id(), tool.tool_class()) {
         Some(true) => Pending::Decided(ApprovalDecision::AutoAllowed),
         Some(false) => Pending::Decided(ApprovalDecision::BlockedByPolicy),
         None => Pending::Prompt(request(call_id, tool, arguments, approvals)),
@@ -199,7 +207,7 @@ mod tests {
         match evaluate(&tool, &args, &approvals, &shell, "call-1") {
             Pending::Prompt(req) => {
                 assert_eq!(req.headline, "Run `cargo test`");
-                assert_eq!(req.command.as_deref(), Some("cargo test"));
+                assert_eq!(req.payload.as_deref(), Some("cargo test"));
                 assert_eq!(req.timeout_ms, Approvals::default_timeout_ms());
                 assert_eq!(req.call_id, "call-1");
             }

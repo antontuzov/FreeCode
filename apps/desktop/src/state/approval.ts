@@ -17,9 +17,10 @@ export type Prompt = {
   toolId: string;
   headline: string;
   permission: PermissionClass;
-  /** The exact command, when this is a call that runs one. The headline says what the run is about to
-   * do; this is the line behind it, unedited, and it is the reason the card exists. */
-  command: string | null;
+  /** What the call would act on, unedited: the argv for a call that runs one, the arguments for a
+   * call a connected server published. The headline says what the run is about to do; this is the
+   * line behind it, and it is the reason the card exists. */
+  payload: string | null;
   /** The instant the host stops waiting, as an epoch. The card counts down to the host's own patience
    * rather than to a number it invented, so the time the user reads is the time that decides. */
   deadline: number;
@@ -48,7 +49,7 @@ export const useApproval = create<ApprovalStore>((set, get) => ({
         toolId: event.toolId,
         headline: event.headline,
         permission: event.permission,
-        command: event.command ?? null,
+        payload: event.payload ?? null,
         deadline: Date.now() + event.timeoutMs,
         pressed: null,
       };
